@@ -36,6 +36,7 @@ def _ocx_package_repo_impl(ctx):
         json_pkg + ["install"] + _platform_args(ctx.attr.platform) + [pkg],
         ocx_env.env,
         "installing " + pkg,
+        retries = 2,
     )
     report = decode_json(stdout, "ocx package install")
     identifier = report.values()[0]["identifier"]

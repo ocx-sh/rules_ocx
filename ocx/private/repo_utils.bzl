@@ -49,7 +49,12 @@ def make_ocx_env(ctx, isolated_home):
             if not base:
                 fail("rules_ocx: cannot resolve the default OCX_HOME — neither OCX_HOME nor HOME/USERPROFILE is set")
             home = base + ("\\.ocx" if ctx.os.name.lower().startswith("windows") else "/.ocx")
-    env = {"OCX_HOME": home}
+
+    # `ocx run` exports OCX_PROJECT (possibly relative) into child processes;
+    # a bazel invoked that way would leak it into every repo-rule ocx call,
+    # which runs from a different cwd. Project context only ever comes from
+    # explicit --project flags here, so neutralize it (empty = unset).
+    env = {"OCX_HOME": home, "OCX_PROJECT": ""}
     for key in OCX_PASSTHROUGH_ENV:
         value = ctx.getenv(key)
         if value != None:
@@ -72,7 +77,7 @@ def ocx_bin(ctx):
     exe = stable.dirname.get_child(stable.basename + ".exe")
     return exe if exe.exists else stable
 
-def run_ocx(ctx, binary, args, env, what, hints = {}):
+def run_ocx(ctx, binary, args, env, what, hints = {}, retries = 0):
     """Runs the ocx CLI, mapping failures to actionable messages.
 
     Args:
@@ -82,21 +87,27 @@ def run_ocx(ctx, binary, args, env, what, hints = {}):
         env: environment dict (from make_ocx_env().env).
         what: short human description used in error messages.
         hints: {exit_code: extra hint} overriding the sysexits defaults.
+        retries: extra attempts after a failure. Repo rules fetch in
+            parallel, and concurrent `ocx package install` calls of the same
+            package can race on store symlink creation (ocx TOCTOU); the
+            store is idempotent, so a retry converges.
 
     Returns:
         stdout string.
     """
-    result = ctx.execute([str(binary)] + args, environment = env, timeout = 600)
-    if result.return_code != 0:
-        hint = hints.get(result.return_code) or _SYSEXIT_HINTS.get(result.return_code, "")
-        fail("rules_ocx: {} failed (exit {}): ocx {}\n{}{}".format(
-            what,
-            result.return_code,
-            " ".join([str(a) for a in args]),
-            result.stderr.strip(),
-            "\nhint: " + hint if hint else "",
-        ))
-    return result.stdout
+    result = None
+    for _ in range(retries + 1):
+        result = ctx.execute([str(binary)] + args, environment = env, timeout = 600)
+        if result.return_code == 0:
+            return result.stdout
+    hint = hints.get(result.return_code) or _SYSEXIT_HINTS.get(result.return_code, "")
+    fail("rules_ocx: {} failed (exit {}): ocx {}\n{}{}".format(
+        what,
+        result.return_code,
+        " ".join([str(a) for a in args]),
+        result.stderr.strip(),
+        "\nhint: " + hint if hint else "",
+    ))
 
 def decode_json(stdout, what):
     """json.decode with an error message naming the failing command."""
