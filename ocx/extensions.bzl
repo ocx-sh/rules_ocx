@@ -39,6 +39,13 @@ _project = tag_class(
             mandatory = True,
             doc = "Name of the generated repository.",
         ),
+        "bins": attr.string_list(
+            doc = "Lazy provisioning: names of the executables to expose. When set, " +
+                  "nothing is pulled at fetch time — each name becomes a launcher " +
+                  "re-entering `ocx run`, materializing the toolchain on first " +
+                  "execution. Actions key on the lockfile, so fully remote-cached " +
+                  "builds download no tool content.",
+        ),
         "groups": attr.string_list(
             doc = "Additional ocx.toml groups to pull into the store.",
         ),
@@ -63,6 +70,13 @@ _package = tag_class(
         "name": attr.string(
             mandatory = True,
             doc = "Name of the generated repository (hub name when `platforms` is set).",
+        ),
+        "bins": attr.string_list(
+            doc = "Lazy provisioning: names of the executables to expose. When set, " +
+                  "nothing is installed at fetch time — each name becomes a launcher " +
+                  "re-entering `ocx package exec`, materializing the package on first " +
+                  "execution. Requires a digest-pinned identity (`pins` or " +
+                  "'@sha256:'); `//:content` is not available in lazy mode.",
         ),
         "index": attr.label(
             doc = "Committed ocx index snapshot directory (created with " +
@@ -132,6 +146,7 @@ def _ocx_impl(module_ctx):
                 name = tag.name,
                 ocx_toml = tag.ocx_toml,
                 ocx_lock = tag.ocx_lock,
+                bins = tag.bins,
                 groups = tag.groups,
                 isolated_home = tag.isolated_home,
             )
@@ -148,6 +163,7 @@ def _ocx_impl(module_ctx):
                     ocx_package_repo(
                         name = repo,
                         package = tag.package,
+                        bins = tag.bins,
                         index = tag.index,
                         pins = tag.pins,
                         platform = platform,
@@ -155,12 +171,14 @@ def _ocx_impl(module_ctx):
                     )
                 ocx_package_hub(
                     name = tag.name,
+                    bins = tag.bins,
                     platform_repos = platform_repos,
                 )
             else:
                 ocx_package_repo(
                     name = tag.name,
                     package = tag.package,
+                    bins = tag.bins,
                     index = tag.index,
                     pins = tag.pins,
                     isolated_home = tag.isolated_home,

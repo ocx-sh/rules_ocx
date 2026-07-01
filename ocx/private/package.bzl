@@ -13,10 +13,48 @@ load(
     "ocx_bin",
     "render_env_bzl",
     "render_launchers_build",
+    "render_lazy_launcher",
+    "rlocation_path",
     "run_ocx",
     "scan_bins",
     "write_launchers",
 )
+
+def _lazy_package(ctx, host, pkg):
+    """Renders text-only launchers deferring `ocx package install` to first use.
+
+    The fetch touches neither the network nor the ocx binary (POSIX): each
+    launcher embeds the digest-pinned reference and re-enters
+    `ocx package exec`, which auto-installs missing content. The digest in
+    the script text is the action-key identity — tool content never becomes
+    a Bazel input.
+    """
+    if ctx.attr.isolated_home:
+        fail("rules_ocx: bins (lazy provisioning) is incompatible with isolated_home — " +
+             "the store must be resolvable on whatever machine executes the launcher")
+    if ctx.attr.index:
+        fail("rules_ocx: bins (lazy provisioning) cannot use an index snapshot — the snapshot " +
+             "resolves at fetch time only; pin the digest via `pins` or an '@sha256:' reference")
+    if "@sha256:" not in pkg:
+        fail(("rules_ocx: lazy package '{}' must be digest-pinned — the digest is the only " +
+              "action-key identity when content is deferred; add the platform to `pins` or " +
+              "use an '@sha256:' reference").format(pkg))
+    ext = ".bat" if host.is_windows else ".sh"
+    for name in ctx.attr.bins:
+        if host.is_windows:
+            command = ['"{}"'.format(ocx_bin(ctx)), "package", "exec", '"{}"'.format(pkg)]
+        else:
+            command = ['"$(rlocation {})"'.format(rlocation_path(ctx.attr.ocx)), "package", "exec", "'{}'".format(pkg)]
+        command += ["--", name]
+        ctx.file("launchers/" + name + ext, render_lazy_launcher(command, host.is_windows), executable = True)
+    data = [str(ctx.attr.ocx)]
+    if not host.is_windows:
+        data.append("@bazel_tools//tools/bash/runfiles")
+    ctx.file("BUILD.bazel", render_launchers_build(
+        [struct(name = name, target = None) for name in ctx.attr.bins],
+        host.is_windows,
+        data = data,
+    ))
 
 def _platform_args(platform):
     return ["-p", platform] if platform else []
@@ -41,10 +79,13 @@ def pinned_ref(package, pins, platform):
 
 def _ocx_package_repo_impl(ctx):
     host = host_info(ctx.os.name, ctx.os.arch)
+    pkg = pinned_ref(ctx.attr.package, ctx.attr.pins, ctx.attr.platform or host.ocx_platform)
+    if ctx.attr.bins:
+        _lazy_package(ctx, host, pkg)
+        return
     binary = ocx_bin(ctx)
     ctx.path(ctx.attr.ocx)  # fetch ordering
     ocx_env = make_ocx_env(ctx, ctx.attr.isolated_home)
-    pkg = pinned_ref(ctx.attr.package, ctx.attr.pins, ctx.attr.platform or host.ocx_platform)
     root_flags = []
     hints = {}
     if ctx.attr.index:
@@ -130,8 +171,21 @@ package environment becomes a runnable target `//:<name>` (host-platform
 repos only). For reproducibility, commit an index snapshot and reference it
 via `index` (tags then resolve frozen from the snapshot), or pin
 per-platform manifest digests via `pins` — plain floating tags resolve at
-fetch time and log the resolved digest.""",
+fetch time and log the resolved digest.
+
+With `bins`, provisioning is lazy: nothing is installed at fetch time, and
+each named executable becomes a launcher re-entering `ocx package exec` —
+content materializes on first execution and never becomes a Bazel action
+input (`//:content` is not available in lazy mode).""",
     attrs = {
+        "bins": attr.string_list(
+            doc = "Lazy provisioning: names of the executables to expose (not " +
+                  "validated at fetch time). When set, nothing is installed during " +
+                  "the fetch — each name becomes a launcher re-entering " +
+                  "`ocx package exec`, keyed on the digest-pinned reference. " +
+                  "Requires a digest-pinned identity (`pins` or '@sha256:'); " +
+                  "incompatible with isolated_home and index.",
+        ),
         "index": attr.label(
             doc = "Committed ocx index snapshot directory (created with " +
                   "`ocx --index <dir> index update <package>`). When set, tag " +
@@ -181,28 +235,35 @@ def _ocx_package_hub_impl(ctx):
             ")",
             "",
         ]
-    lines += [
-        "alias(",
-        '    name = "content",',
-        "    actual = select({",
-    ]
-    for platform, repo in ctx.attr.platform_repos.items():
-        lines.append('        ":{}": "@{}//:content",'.format(conditions[platform], repo))
-    lines += [
-        "    }),",
-        ")",
-        "",
-    ]
+
+    # Lazy hubs alias launchers (no content exists); eager hubs alias content.
+    for target in ctx.attr.bins or ["content"]:
+        lines += [
+            "alias(",
+            '    name = "{}",'.format(target),
+            "    actual = select({",
+        ]
+        for platform, repo in ctx.attr.platform_repos.items():
+            lines.append('        ":{}": "@{}//:{}",'.format(conditions[platform], repo, target))
+        lines += [
+            "    }),",
+            ")",
+            "",
+        ]
     ctx.file("BUILD.bazel", "\n".join(lines))
 
 ocx_package_hub = repository_rule(
     implementation = _ocx_package_hub_impl,
     doc = """Multi-platform hub for an ocx.package() with `platforms`.
 
-`//:content` select()s the per-platform package repo matching the target
-platform — combine with a platform transition to fetch foreign-platform
-tools (e.g. for container images).""",
+`//:content` (or, with `bins`, each named launcher) select()s the
+per-platform package repo matching the target platform — combine with a
+platform transition to fetch foreign-platform tools (e.g. for container
+images).""",
     attrs = {
+        "bins": attr.string_list(
+            doc = "Lazy mode: launcher names to alias instead of //:content.",
+        ),
         "platform_repos": attr.string_dict(
             mandatory = True,
             doc = "ocx platform key -> apparent name of the per-platform package repo.",

@@ -23,10 +23,12 @@ sh_test(
         ":shell_report",
         "@tools//:shellcheck",
         "@tools//:shfmt",
+        "@tools_lazy//:shellcheck",
     ],
     env = {
         "REPORT": "$(location :shell_report)",
         "SHELLCHECK_BIN": "$(location @tools//:shellcheck)",
+        "SHELLCHECK_LAZY_BIN": "$(location @tools_lazy//:shellcheck)",
         "SHFMT_BIN": "$(location @tools//:shfmt)",
     },
 )

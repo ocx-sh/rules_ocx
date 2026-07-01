@@ -40,4 +40,18 @@ ocx.package(
         "windows/amd64": "sha256:8434027cf0a6c340a10e533ecdfd8137f085e476437352b98237294adf821c7d",
     },
 )
-use_repo(ocx, "jq", "jq_frozen", "jq_pinned")
+
+# Lazy: nothing is installed at fetch time — the launcher re-enters
+# `ocx package exec`, materializing the digest-pinned package on first
+# execution. Fully remote-cached builds download no tool content at all.
+ocx.package(
+    name = "jq_lazy",
+    bins = ["jq"],
+    package = "ocx.sh/jq:latest",
+    pins = {
+        "darwin/arm64": "sha256:5be7552a463835dead65ca4c858ebc10703a0d9cff7308967f04d08fa8e2da1a",
+        "linux/amd64": "sha256:11814b34158ab143969a8efffe59a320dd07c0b176a65366427514b326e2a347",
+        "windows/amd64": "sha256:8434027cf0a6c340a10e533ecdfd8137f085e476437352b98237294adf821c7d",
+    },
+)
+use_repo(ocx, "jq", "jq_frozen", "jq_lazy", "jq_pinned")

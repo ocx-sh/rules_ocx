@@ -44,14 +44,15 @@ of `https://setup.ocx.sh/dist.json`. Corporate mirrors: set
 <pre>
 load("@rules_ocx//ocx:defs.bzl", "ocx_package_hub")
 
-ocx_package_hub(<a href="#ocx_package_hub-name">name</a>, <a href="#ocx_package_hub-platform_repos">platform_repos</a>, <a href="#ocx_package_hub-repo_mapping">repo_mapping</a>)
+ocx_package_hub(<a href="#ocx_package_hub-name">name</a>, <a href="#ocx_package_hub-bins">bins</a>, <a href="#ocx_package_hub-platform_repos">platform_repos</a>, <a href="#ocx_package_hub-repo_mapping">repo_mapping</a>)
 </pre>
 
 Multi-platform hub for an ocx.package() with `platforms`.
 
-`//:content` select()s the per-platform package repo matching the target
-platform — combine with a platform transition to fetch foreign-platform
-tools (e.g. for container images).
+`//:content` (or, with `bins`, each named launcher) select()s the
+per-platform package repo matching the target platform — combine with a
+platform transition to fetch foreign-platform tools (e.g. for container
+images).
 
 **ATTRIBUTES**
 
@@ -59,6 +60,7 @@ tools (e.g. for container images).
 | Name  | Description | Type | Mandatory | Default |
 | :------------- | :------------- | :------------- | :------------- | :------------- |
 | <a id="ocx_package_hub-name"></a>name |  A unique name for this repository.   | <a href="https://bazel.build/concepts/labels#target-names">Name</a> | required |  |
+| <a id="ocx_package_hub-bins"></a>bins |  Lazy mode: launcher names to alias instead of //:content.   | List of strings | optional |  `[]`  |
 | <a id="ocx_package_hub-platform_repos"></a>platform_repos |  ocx platform key -> apparent name of the per-platform package repo.   | <a href="https://bazel.build/rules/lib/dict">Dictionary: String -> String</a> | required |  |
 | <a id="ocx_package_hub-repo_mapping"></a>repo_mapping |  In `WORKSPACE` context only: a dictionary from local repository name to global repository name. This allows controls over workspace dependency resolution for dependencies of this repository.<br><br>For example, an entry `"@foo": "@bar"` declares that, for any time this repository depends on `@foo` (such as a dependency on `@foo//some:target`, it should actually resolve that dependency within globally-declared `@bar` (`@bar//some:target`).<br><br>This attribute is _not_ supported in `MODULE.bazel` context (when invoking a repository rule inside a module extension's implementation function).   | <a href="https://bazel.build/rules/lib/dict">Dictionary: String -> String</a> | optional |  |
 
@@ -70,7 +72,7 @@ tools (e.g. for container images).
 <pre>
 load("@rules_ocx//ocx:defs.bzl", "ocx_package_repo")
 
-ocx_package_repo(<a href="#ocx_package_repo-name">name</a>, <a href="#ocx_package_repo-index">index</a>, <a href="#ocx_package_repo-isolated_home">isolated_home</a>, <a href="#ocx_package_repo-ocx">ocx</a>, <a href="#ocx_package_repo-package">package</a>, <a href="#ocx_package_repo-pins">pins</a>, <a href="#ocx_package_repo-platform">platform</a>, <a href="#ocx_package_repo-repo_mapping">repo_mapping</a>)
+ocx_package_repo(<a href="#ocx_package_repo-name">name</a>, <a href="#ocx_package_repo-bins">bins</a>, <a href="#ocx_package_repo-index">index</a>, <a href="#ocx_package_repo-isolated_home">isolated_home</a>, <a href="#ocx_package_repo-ocx">ocx</a>, <a href="#ocx_package_repo-package">package</a>, <a href="#ocx_package_repo-pins">pins</a>, <a href="#ocx_package_repo-platform">platform</a>, <a href="#ocx_package_repo-repo_mapping">repo_mapping</a>)
 </pre>
 
 Provisions a single OCX package from an OCI registry.
@@ -82,12 +84,18 @@ via `index` (tags then resolve frozen from the snapshot), or pin
 per-platform manifest digests via `pins` — plain floating tags resolve at
 fetch time and log the resolved digest.
 
+With `bins`, provisioning is lazy: nothing is installed at fetch time, and
+each named executable becomes a launcher re-entering `ocx package exec` —
+content materializes on first execution and never becomes a Bazel action
+input (`//:content` is not available in lazy mode).
+
 **ATTRIBUTES**
 
 
 | Name  | Description | Type | Mandatory | Default |
 | :------------- | :------------- | :------------- | :------------- | :------------- |
 | <a id="ocx_package_repo-name"></a>name |  A unique name for this repository.   | <a href="https://bazel.build/concepts/labels#target-names">Name</a> | required |  |
+| <a id="ocx_package_repo-bins"></a>bins |  Lazy provisioning: names of the executables to expose (not validated at fetch time). When set, nothing is installed during the fetch — each name becomes a launcher re-entering `ocx package exec`, keyed on the digest-pinned reference. Requires a digest-pinned identity (`pins` or '@sha256:'); incompatible with isolated_home and index.   | List of strings | optional |  `[]`  |
 | <a id="ocx_package_repo-index"></a>index |  Committed ocx index snapshot directory (created with `ocx --index <dir> index update <package>`). When set, tag resolution is frozen to the snapshot (`--index --frozen`): floating tags become reproducible until the snapshot is refreshed.   | <a href="https://bazel.build/concepts/labels">Label</a> | optional |  `None`  |
 | <a id="ocx_package_repo-isolated_home"></a>isolated_home |  Keep the ocx store inside this repository instead of the shared user OCX_HOME.   | Boolean | optional |  `False`  |
 | <a id="ocx_package_repo-ocx"></a>ocx |  The pinned ocx CLI binary.   | <a href="https://bazel.build/concepts/labels">Label</a> | optional |  `"@ocx_tool//:ocx"`  |
@@ -104,7 +112,7 @@ fetch time and log the resolved digest.
 <pre>
 load("@rules_ocx//ocx:defs.bzl", "ocx_project_repo")
 
-ocx_project_repo(<a href="#ocx_project_repo-name">name</a>, <a href="#ocx_project_repo-groups">groups</a>, <a href="#ocx_project_repo-isolated_home">isolated_home</a>, <a href="#ocx_project_repo-ocx">ocx</a>, <a href="#ocx_project_repo-ocx_lock">ocx_lock</a>, <a href="#ocx_project_repo-ocx_toml">ocx_toml</a>, <a href="#ocx_project_repo-repo_mapping">repo_mapping</a>)
+ocx_project_repo(<a href="#ocx_project_repo-name">name</a>, <a href="#ocx_project_repo-bins">bins</a>, <a href="#ocx_project_repo-groups">groups</a>, <a href="#ocx_project_repo-isolated_home">isolated_home</a>, <a href="#ocx_project_repo-ocx">ocx</a>, <a href="#ocx_project_repo-ocx_lock">ocx_lock</a>, <a href="#ocx_project_repo-ocx_toml">ocx_toml</a>, <a href="#ocx_project_repo-repo_mapping">repo_mapping</a>)
 </pre>
 
 Provisions the toolchain declared in a workspace ocx.toml/ocx.lock.
@@ -113,6 +121,11 @@ Fails when the lockfile is stale or missing (fix with `ocx lock`). Every
 executable reachable through the composed environment's `path` entries
 becomes a runnable target `//:<name>`; the raw environment is loadable from
 `//:env.bzl` (`OCX_ENV`, `OCX_HOME`).
+
+With `bins`, provisioning is lazy: nothing is pulled at fetch time, and each
+named executable becomes a launcher that re-enters `ocx run` — content
+materializes on first execution and never becomes a Bazel action input, so
+fully remote-cached builds download no tool content at all.
 
 Note: ocx composes the default group's environment; `groups` currently only
 widens which groups are pulled into the store.
@@ -123,6 +136,7 @@ widens which groups are pulled into the store.
 | Name  | Description | Type | Mandatory | Default |
 | :------------- | :------------- | :------------- | :------------- | :------------- |
 | <a id="ocx_project_repo-name"></a>name |  A unique name for this repository.   | <a href="https://bazel.build/concepts/labels#target-names">Name</a> | required |  |
+| <a id="ocx_project_repo-bins"></a>bins |  Lazy provisioning: names of the executables to expose (not validated at fetch time). When set, nothing is pulled during the fetch — each name becomes a launcher re-entering `ocx run`, and actions key on the lockfile (a runfile) instead of tool content. Incompatible with isolated_home.   | List of strings | optional |  `[]`  |
 | <a id="ocx_project_repo-groups"></a>groups |  Additional ocx.toml groups to pull (comma-joined into `ocx pull -g`).   | List of strings | optional |  `[]`  |
 | <a id="ocx_project_repo-isolated_home"></a>isolated_home |  Keep the ocx store inside this repository instead of the shared user OCX_HOME.   | Boolean | optional |  `False`  |
 | <a id="ocx_project_repo-ocx"></a>ocx |  The pinned ocx CLI binary.   | <a href="https://bazel.build/concepts/labels">Label</a> | optional |  `"@ocx_tool//:ocx"`  |

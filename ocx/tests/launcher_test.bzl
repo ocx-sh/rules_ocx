@@ -4,7 +4,7 @@
 """Unit tests for the launcher/env renderers in ocx/private/repo_utils.bzl."""
 
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
-load("//ocx/private:repo_utils.bzl", "render_env_bzl", "render_launcher")
+load("//ocx/private:repo_utils.bzl", "render_env_bzl", "render_launcher", "render_lazy_launcher")
 
 _ENTRIES = [
     {"key": "PATH", "value": "/store/aa/content/bin", "type": "path"},
@@ -36,6 +36,34 @@ def _bat_launcher_test_impl(ctx):
     asserts.true(env, '"C:\\store\\tool.exe" %*' in script)
     return unittest.end(env)
 
+def _sh_lazy_launcher_test_impl(ctx):
+    env = unittest.begin(ctx)
+    script = render_lazy_launcher(
+        ['"$(rlocation repo+ocx_tool/ocx)"', "package", "exec", "'ocx.sh/jq@sha256:abc'", "--", "jq"],
+        False,
+    )
+    asserts.true(env, script.startswith("#!/usr/bin/env bash"))
+
+    # Machine-independent: runfiles resolution, no absolute paths, no baked store.
+    asserts.true(env, "runfiles.bash initialization" in script)
+    asserts.false(env, "OCX_HOME" in script)
+    asserts.true(env, 'export OCX_PROJECT=""' in script)
+    asserts.true(env, script.endswith(
+        "exec \"$(rlocation repo+ocx_tool/ocx)\" package exec 'ocx.sh/jq@sha256:abc' -- jq \"$@\"\n",
+    ))
+    return unittest.end(env)
+
+def _bat_lazy_launcher_test_impl(ctx):
+    env = unittest.begin(ctx)
+    script = render_lazy_launcher(
+        ['"C:\\repo\\ocx.exe"', "--project", '"C:\\repo\\ocx.toml"', "run", "--", "shellcheck"],
+        True,
+    )
+    asserts.true(env, script.startswith("@echo off"))
+    asserts.true(env, 'set "OCX_PROJECT="' in script)
+    asserts.true(env, '"C:\\repo\\ocx.exe" --project "C:\\repo\\ocx.toml" run -- shellcheck %*' in script)
+    return unittest.end(env)
+
 def _env_bzl_test_impl(ctx):
     env = unittest.begin(ctx)
     content = render_env_bzl(_ENTRIES, "/home/u/.ocx")
@@ -48,6 +76,8 @@ def _env_bzl_test_impl(ctx):
 
 sh_launcher_test = unittest.make(_sh_launcher_test_impl)
 bat_launcher_test = unittest.make(_bat_launcher_test_impl)
+sh_lazy_launcher_test = unittest.make(_sh_lazy_launcher_test_impl)
+bat_lazy_launcher_test = unittest.make(_bat_lazy_launcher_test_impl)
 env_bzl_test = unittest.make(_env_bzl_test_impl)
 
 def launcher_test_suite(name):
@@ -60,5 +90,7 @@ def launcher_test_suite(name):
         name,
         sh_launcher_test,
         bat_launcher_test,
+        sh_lazy_launcher_test,
+        bat_lazy_launcher_test,
         env_bzl_test,
     )

@@ -16,4 +16,17 @@ ocx.project(
     ocx_lock = "//:ocx.lock",
     ocx_toml = "//:ocx.toml",
 )
-use_repo(ocx, "tools")
+
+# Lazy variant: nothing is pulled at fetch time — each bin is a launcher
+# re-entering `ocx run`, materializing the toolchain on first execution.
+# Fully remote-cached builds download no tool content at all.
+ocx.project(
+    name = "tools_lazy",
+    bins = [
+        "shellcheck",
+        "shfmt",
+    ],
+    ocx_lock = "//:ocx.lock",
+    ocx_toml = "//:ocx.toml",
+)
+use_repo(ocx, "tools", "tools_lazy")

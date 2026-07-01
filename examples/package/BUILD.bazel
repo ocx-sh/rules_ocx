@@ -19,11 +19,13 @@ sh_test(
         ":pretty",
         "@jq",
         "@jq_frozen//:jq",
+        "@jq_lazy//:jq",
         "@jq_pinned//:jq",
     ],
     env = {
         "JQ_BIN": "$(location @jq//:jq)",
         "JQ_FROZEN_BIN": "$(location @jq_frozen//:jq)",
+        "JQ_LAZY_BIN": "$(location @jq_lazy//:jq)",
         "JQ_PINNED_BIN": "$(location @jq_pinned//:jq)",
         "PRETTY_JSON": "$(location :pretty)",
     },
