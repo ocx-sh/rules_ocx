@@ -1,0 +1,93 @@
+[metadata]
+lock_version = 2
+declaration_hash_version = 1
+declaration_hash = "sha256:ee962833bc08f621904bdac97716365acd5117f605833cd7ef0d39ee5aaaaf69"
+generated_by = "ocx 0.3.10"
+generated_at = "2026-07-01T20:32:08Z"
+
+[[tool]]
+name = "actionlint"
+group = "default"
+repository = "ocx.sh/actionlint"
+
+[tool.platforms]
+"darwin/amd64" = "sha256:c952b88182f6d639ac1eedd35e02f2bc1689f6ae3978e1c835bf04c6cf49c688"
+"darwin/arm64" = "sha256:feb637bca2ce756e908562f16c7605dfd738b87a43f6019682e99dcdebf0463b"
+"linux/amd64" = "sha256:8ebaf0864c38cae45046c51cf2f14a997cb6f3d66844fecb103baee1c3a17a1c"
+"linux/arm64" = "sha256:6add82a9e954125b2a576dcb0b4a1bd2955af221aac648d31140cf60fa795362"
+"windows/amd64" = "sha256:6ddc876e3ade25d4b4ce7cd164a059f64b05c81e4877856f1dceec54ddd6a42a"
+"windows/arm64" = "sha256:08fe960c2d609b0f24792efe30d172e1deeefcea7d736006d6414b8640c86220"
+
+[[tool]]
+name = "bazelisk"
+group = "default"
+repository = "ocx.sh/bazelisk"
+
+[tool.platforms]
+"darwin/amd64" = "sha256:8114bfc576afcf89e743bb9ca067267b55b3dc78710f9738970845041bf92c1c"
+"darwin/arm64" = "sha256:8594b240981951813d19c26ecfec2144fa014554c7597ea72ffd01731f042b1d"
+"linux/amd64" = "sha256:892374bcdbb3441d9d83b6d79d7b7e53583830d4e0fc50edbccc2c20ee866f3c"
+"linux/arm64" = "sha256:a5ca791f8d8583774b1a2febf884b44f7b94828b4a546626642454ae33a24aa0"
+"windows/amd64" = "sha256:ea4368cf4278395031670de011c212ce43dde9723e0b0b25472b0a1d45ca73c7"
+
+[[tool]]
+name = "git-cliff"
+group = "default"
+repository = "ocx.sh/git-cliff"
+
+[tool.platforms]
+"darwin/amd64" = "sha256:12437bb39c0d538f48d3522d4b9451b17264b4964df8d83d8536a73d4cb3a81a"
+"darwin/arm64" = "sha256:dcfbc84e80d792ff7cd160700dd994ab93c389ebf42c2229dfb844aa18abc6d4"
+"linux/amd64" = "sha256:d5838c085044c0b99948efac90107be00d09dfb511bd665b835dd21f56355462"
+"linux/arm64" = "sha256:a24eed27df4426e835fb101e09a4960600f48ae54aa678e1b997df47ac99752e"
+"windows/amd64" = "sha256:65ecb7b66bf4e4fc6b0a191e040863cfdf6461cd5468a6eb52e5736afe2a0826"
+"windows/arm64" = "sha256:5fdb382fdfa0423eeff363aa994804ef2d36d4ce2019e39ce098b5e37dc24d10"
+
+[[tool]]
+name = "go-task"
+group = "default"
+repository = "ocx.sh/go-task"
+
+[tool.platforms]
+"darwin/amd64" = "sha256:096c9fd1c8856a41515f5dcc3760e0ff680610aae0861b750cf217315fbe02a9"
+"darwin/arm64" = "sha256:0e0ed9cbeef63f7344e933d1e0c09af46c99abd0824bcfed877b5bd2f6091337"
+"linux/amd64" = "sha256:d3df40ad238fd278bb1529a1230ce186aedd3eb8c0e5d1c495aa9587c188adcf"
+"linux/arm64" = "sha256:78d6b8687428f5f5e2782c11295db4c813d5aab9f0cae0abc86710a2851e51f5"
+"windows/amd64" = "sha256:b3c73b637e0d1e8aaacbefb7696cd65e36016edb571b4f0e3eb919b783079ae1"
+"windows/arm64" = "sha256:d00de6d5a1ae0c8c2f3e639ef72cc5e7ee78c15dc34ee91cf77d8d84f409a365"
+
+[[tool]]
+name = "hawkeye"
+group = "default"
+repository = "ocx.sh/hawkeye"
+
+[tool.platforms]
+"darwin/amd64" = "sha256:9ed482e84bd6d20aa89bedbdf983935348ed05cba764748e1ceb437c9286ee56"
+"darwin/arm64" = "sha256:c09abc86b973e889c80ab0b8c438a92dd4bcdfcca6c4221f00f299044741e899"
+"linux/amd64" = "sha256:52b200e2489efe46aed4157ffce625659b3af62c8e9368091b76babd0b22bc6d"
+"linux/arm64" = "sha256:ae92b8cda7a10ef44fcf7ba3441ce0d6c0b6791762fe915e7125e5349a258e82"
+"windows/amd64" = "sha256:0345eb4c31254c5548256a06339f1590882eaeeff4333649941935b87c91d168"
+
+[[tool]]
+name = "lychee"
+group = "default"
+repository = "ocx.sh/lychee"
+
+[tool.platforms]
+"darwin/amd64" = "sha256:8cd300c21d5c0322b394d26affc803de00bdc200a7eac209ebf68511f8a9a19f"
+"darwin/arm64" = "sha256:052284560f0eac5639e7013ac166f9bd017d1bb695c37a9b50fbd4c6b7be0437"
+"linux/amd64" = "sha256:a4da72f61e03653d067ea731d8ffcb1651cb88199003518062d6b80223433051"
+"linux/arm64" = "sha256:80bb89d13669add2363656ecaeb07161b1593caf4d2a19d520df5c9d797fee88"
+"windows/amd64" = "sha256:2f806153cd281572a5e2c44d419e8f8d45a5c9b8c58dfea24f2e0de2643e7ad6"
+
+[[tool]]
+name = "shellcheck"
+group = "default"
+repository = "ocx.sh/shellcheck"
+
+[tool.platforms]
+"darwin/amd64" = "sha256:fd2b99d63532350eea08ec7c466a7e308154ecbd26eaccd4d99c11948a886c21"
+"darwin/arm64" = "sha256:811205c7d4c595ef4c2d4758eede85120007e5f5c47499788e750de32031e1dd"
+"linux/amd64" = "sha256:437a3632279766f50ed9481025f53cfb898b14564a8aa4d176be7da89661539f"
+"linux/arm64" = "sha256:8f2010f42751893ce5947b50555f8d06186abdf24da0acd3135bd8ec61090484"
+"windows/amd64" = "sha256:91ca4c25cb0d7238379460061dd73fa75cab0d6658ac43a3f99def024afdd8d2"

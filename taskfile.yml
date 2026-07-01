@@ -1,0 +1,68 @@
+# https://taskfile.dev — dev toolchain provisioned via ocx (see ocx.toml)
+version: "3"
+
+vars:
+  BAZEL: ocx run -- bazelisk
+  EXAMPLES: examples/project examples/package examples/cross_platform
+
+tasks:
+  default:
+    deps: [verify]
+
+  verify:
+    desc: Full gate — lint, unit tests, docs freshness, example workspaces
+    cmds:
+      - task: lint
+      - task: test
+      - task: test:examples
+
+  lint:
+    desc: buildifier + actionlint + license headers + links
+    cmds:
+      - "{{.BAZEL}} run //:buildifier.check"
+      - ocx run -- actionlint
+      - ocx run -- hawkeye check
+      - ocx run -- lychee --no-progress README.md CONTRIBUTING.md SECURITY.md
+
+  format:
+    desc: Apply buildifier formatting
+    cmds:
+      - "{{.BAZEL}} run //:buildifier.fix"
+      - ocx run -- hawkeye format
+
+  test:
+    desc: Unit tests + docs freshness (no network)
+    cmds:
+      - "{{.BAZEL}} test //..."
+
+  test:examples:
+    desc: Example workspaces — integration tests against live ocx.sh
+    cmds:
+      - for: { var: EXAMPLES }
+        cmd: cd {{.ITEM}} && ocx --project ../../ocx.toml run -- bazelisk test //...
+
+  docs:update:
+    desc: Regenerate stardoc API docs
+    cmds:
+      - "{{.BAZEL}} run //docs:update"
+
+  dist:update:
+    desc: Refresh dist/dist.json from setup.ocx.sh
+    cmds:
+      - curl -fsSL https://setup.ocx.sh/dist.json -o dist/dist.json
+      - task: dist:check
+
+  dist:check:
+    desc: Snapshot sanity — pinned DEFAULT_OCX_VERSION present for all 8 targets
+    cmds:
+      - |
+        python3 - <<'EOF'
+        import json, re
+        pin = re.search(r'DEFAULT_OCX_VERSION = "([^"]+)"',
+                        open("ocx/private/versions.bzl").read()).group(1)
+        rows = [r for r in json.load(open("dist/dist.json"))["releases"]
+                if r["version"] == pin]
+        assert len(rows) == 8, f"expected 8 targets for {pin}, got {len(rows)}"
+        assert all(len(r["sha256"]) == 64 for r in rows)
+        print(f"dist.json OK: {pin} x {len(rows)} targets")
+        EOF

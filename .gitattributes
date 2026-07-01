@@ -1,0 +1,4 @@
+ocx.lock merge=union
+MODULE.bazel.lock merge=union linguist-generated=true
+dist/dist.json linguist-generated=true
+docs/*.md linguist-generated=true

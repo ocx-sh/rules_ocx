@@ -1,0 +1,8 @@
+[tools]
+actionlint = "ocx.sh/actionlint:latest"
+bazelisk = "ocx.sh/bazelisk:latest"
+git-cliff = "ocx.sh/git-cliff:latest"
+go-task = "ocx.sh/go-task:latest"
+hawkeye = "ocx.sh/hawkeye:latest"
+lychee = "ocx.sh/lychee:latest"
+shellcheck = "ocx.sh/shellcheck:latest"

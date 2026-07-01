@@ -1,0 +1,7 @@
+bazel-*
+.bazelrc.user
+.ocx_home/
+.lycheecache
+.task/
+__pycache__/
+examples/*/MODULE.bazel.lock

@@ -1,0 +1,25 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    "schedule:weekly"
+  ],
+  "semanticCommits": "enabled",
+  "packageRules": [
+    {
+      "description": "GitHub Actions — group, SHA-pin, ci(deps) prefix",
+      "matchManagers": ["github-actions"],
+      "groupName": "actions",
+      "semanticCommitType": "ci",
+      "semanticCommitScope": "deps",
+      "pinDigests": true
+    },
+    {
+      "description": "Bazel module deps — group, chore(deps) prefix",
+      "matchManagers": ["bazel-module"],
+      "groupName": "bazel-deps",
+      "semanticCommitType": "chore",
+      "semanticCommitScope": "deps"
+    }
+  ]
+}
