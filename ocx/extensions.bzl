@@ -71,7 +71,15 @@ _package = tag_class(
         "package": attr.string(
             mandatory = True,
             doc = "Fully-qualified identifier: 'registry/repo[:tag][@sha256:…]'. " +
-                  "Pin the digest for reproducibility.",
+                  "A digest here pins one platform manifest — use `pins` to stay " +
+                  "reproducible across platforms.",
+        ),
+        "pins": attr.string_dict(
+            doc = "Per-platform manifest pins: ocx platform key -> 'sha256:…' digest " +
+                  "of that platform's manifest (as reported by " +
+                  "`ocx package install -p <platform>`). The matching platform " +
+                  "installs 'registry/repo@<digest>'; unpinned platforms fall back " +
+                  "to `package`.",
         ),
         "platforms": attr.string_list(
             doc = "ocx platform keys ('linux/amd64', …) to provision in addition to " +
@@ -133,6 +141,7 @@ def _ocx_impl(module_ctx):
                     ocx_package_repo(
                         name = repo,
                         package = tag.package,
+                        pins = tag.pins,
                         platform = platform,
                         isolated_home = tag.isolated_home,
                     )
@@ -144,6 +153,7 @@ def _ocx_impl(module_ctx):
                 ocx_package_repo(
                     name = tag.name,
                     package = tag.package,
+                    pins = tag.pins,
                     isolated_home = tag.isolated_home,
                 )
 

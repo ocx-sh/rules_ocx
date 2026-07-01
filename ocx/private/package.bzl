@@ -21,12 +21,30 @@ load(
 def _platform_args(platform):
     return ["-p", platform] if platform else []
 
+def pinned_ref(package, pins, platform):
+    """Applies the per-platform manifest pin for `platform`, if any.
+
+    Args:
+        package: the fallback reference 'registry/repo[:tag][@sha256:…]'.
+        pins: {ocx platform key: 'sha256:…' manifest digest}.
+        platform: the ocx platform key this repository provisions.
+
+    Returns:
+        the reference to install.
+    """
+    pin = pins.get(platform, "")
+    if not pin:
+        return package
+    if not pin.startswith("sha256:"):
+        fail("rules_ocx: pins[\"{}\"] must be a 'sha256:…' manifest digest, got '{}'".format(platform, pin))
+    return package.split("@")[0] + "@" + pin
+
 def _ocx_package_repo_impl(ctx):
     host = host_info(ctx.os.name, ctx.os.arch)
     binary = ocx_bin(ctx)
     ctx.path(ctx.attr.ocx)  # fetch ordering
     ocx_env = make_ocx_env(ctx, ctx.attr.isolated_home)
-    pkg = ctx.attr.package
+    pkg = pinned_ref(ctx.attr.package, ctx.attr.pins, ctx.attr.platform or host.ocx_platform)
     json_pkg = ["--format", "json", "package"]
     runnable = ctx.attr.platform in ("", host.ocx_platform)
 
@@ -42,7 +60,12 @@ def _ocx_package_repo_impl(ctx):
     identifier = report.values()[0]["identifier"]
     if "@sha256:" not in pkg:
         # buildifier: disable=print
-        print("rules_ocx: '{}' resolved to '{}' — pin it in ocx.package(package = ...) for reproducibility".format(pkg, identifier))
+        print(("rules_ocx: '{}' ({}) resolved to '{}' — copy the digest into " +
+               "ocx.package(pins = ...) for reproducibility").format(
+            pkg,
+            ctx.attr.platform or "host",
+            identifier,
+        ))
 
     stdout = run_ocx(
         ctx,
@@ -91,8 +114,9 @@ ocx_package_repo = repository_rule(
 
 `//:content` is the package tree; every executable reachable through the
 package environment becomes a runnable target `//:<name>` (host-platform
-repos only). Pin with `registry/repo@sha256:…` for reproducibility —
-floating tags resolve at fetch time and log the resolved digest.""",
+repos only). Pin per-platform manifest digests via `pins` for
+reproducibility — floating tags resolve at fetch time and log the resolved
+digest.""",
     attrs = {
         "isolated_home": attr.bool(
             default = False,
@@ -106,6 +130,10 @@ floating tags resolve at fetch time and log the resolved digest.""",
         "package": attr.string(
             mandatory = True,
             doc = "Fully-qualified identifier: 'registry/repo[:tag][@sha256:…]'.",
+        ),
+        "pins": attr.string_dict(
+            doc = "ocx platform key -> 'sha256:…' manifest digest overriding the " +
+                  "digest of `package` for that platform.",
         ),
         "platform": attr.string(
             doc = "ocx platform key ('linux/amd64', …) to provision for; empty = host.",
