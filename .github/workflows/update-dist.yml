@@ -1,0 +1,46 @@
+name: Update dist snapshot
+
+on:
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+  repository_dispatch:
+    types: [ocx-released]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: update-dist
+  cancel-in-progress: false
+
+jobs:
+  update:
+    name: Refresh dist/dist.json
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Refresh snapshot
+        run: |
+          curl -fsSL https://setup.ocx.sh/dist.json -o dist/dist.json
+          python3 - <<'EOF'
+          import json, re
+          pin = re.search(r'DEFAULT_OCX_VERSION = "([^"]+)"',
+                          open("ocx/private/versions.bzl").read()).group(1)
+          rows = [r for r in json.load(open("dist/dist.json"))["releases"]
+                  if r["version"] == pin]
+          assert len(rows) == 8, f"expected 8 targets for {pin}, got {len(rows)}"
+          print(f"dist.json OK: {pin} x {len(rows)} targets")
+          EOF
+      - name: Open PR if changed
+        uses: peter-evans/create-pull-request@v7
+        with:
+          branch: chore/update-dist
+          commit-message: "chore(dist): refresh dist.json snapshot"
+          title: "chore(dist): refresh dist.json snapshot"
+          body: >
+            Automated refresh of the vendored setup.ocx.sh release manifest.
+            Bump `DEFAULT_OCX_VERSION` in `ocx/private/versions.bzl` separately
+            and deliberately (see `.claude/rules/dist-snapshot.md`).
