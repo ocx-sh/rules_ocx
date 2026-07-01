@@ -17,7 +17,7 @@ jobs:
         with:
           fetch-depth: 0
       - name: Setup OCX
-        uses: ocx-sh/ocx/.github/actions/setup-ocx@main
+        uses: ocx-sh/setup-ocx@v1
         with:
           version: "0.3.10"
       - name: Verify tag matches MODULE.bazel version

@@ -21,7 +21,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
       - name: Setup OCX
-        uses: ocx-sh/ocx/.github/actions/setup-ocx@main
+        uses: ocx-sh/setup-ocx@v1
         with:
           version: "0.3.10"
       - name: Lint (buildifier, actionlint, license headers, links)
@@ -38,7 +38,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
       - name: Setup OCX
-        uses: ocx-sh/ocx/.github/actions/setup-ocx@main
+        uses: ocx-sh/setup-ocx@v1
         with:
           version: "0.3.10"
       - name: Unit tests, smoke tests, docs freshness
@@ -56,7 +56,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
       - name: Setup OCX
-        uses: ocx-sh/ocx/.github/actions/setup-ocx@main
+        uses: ocx-sh/setup-ocx@v1
         with:
           version: "0.3.10"
       - name: Test example (live ocx.sh registry — dogfooding)
@@ -70,7 +70,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
       - name: Setup OCX
-        uses: ocx-sh/ocx/.github/actions/setup-ocx@main
+        uses: ocx-sh/setup-ocx@v1
         with:
           version: "0.3.10"
       - name: Warm fetch
