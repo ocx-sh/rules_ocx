@@ -1,0 +1,68 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The OCX Authors
+
+# Stardoc API docs. Committed markdown is kept fresh by diff_tests;
+# regenerate with `bazel run //docs:update`.
+
+load("@bazel_skylib//rules:diff_test.bzl", "diff_test")
+load("@bazel_skylib//rules:write_file.bzl", "write_file")
+load("@rules_shell//shell:sh_binary.bzl", "sh_binary")
+load("@stardoc//stardoc:stardoc.bzl", "stardoc")
+
+_DOCS = {
+    "defs": "//ocx:defs.bzl",
+    "extensions": "//ocx:extensions.bzl",
+}
+
+[
+    stardoc(
+        name = "gen_" + name,
+        out = name + ".gen.md",
+        input = input,
+        deps = [
+            "//ocx:defs",
+            "//ocx:extensions",
+        ],
+    )
+    for name, input in _DOCS.items()
+]
+
+[
+    diff_test(
+        name = name + "_docs_test",
+        failure_message = "docs are stale — run: bazel run //docs:update",
+        file1 = name + ".gen.md",
+        file2 = name + ".md",
+    )
+    for name in _DOCS
+]
+
+# write_file does not expand $(rootpath); the generated file paths come in
+# as (path, name) argument pairs instead.
+write_file(
+    name = "update_script",
+    out = "update.sh",
+    content = [
+        "#!/usr/bin/env bash",
+        "set -euo pipefail",
+        'while [ "$#" -ge 2 ]; do',
+        '    cp -fv "$1" "$BUILD_WORKSPACE_DIRECTORY/docs/$2.md"',
+        '    chmod 644 "$BUILD_WORKSPACE_DIRECTORY/docs/$2.md"',
+        "    shift 2",
+        "done",
+    ],
+)
+
+sh_binary(
+    name = "update",
+    srcs = ["update.sh"],
+    args = [
+        item
+        for name in _DOCS
+        for item in [
+            "$(rootpath :gen_%s)" % name,
+            name,
+        ]
+    ],
+    data = ["gen_" + name for name in _DOCS],
+)

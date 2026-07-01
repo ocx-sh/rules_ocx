@@ -1,0 +1,129 @@
+<!-- Generated with Stardoc: http://skydoc.bazel.build -->
+
+Public API of rules_ocx.
+
+Most consumers only need the `ocx` module extension
+(`@rules_ocx//ocx:extensions.bzl`). The repository rules are re-exported
+here for power users composing their own extensions on top of the same
+CLI-backed provisioning.
+
+<a id="ocx_download"></a>
+
+## ocx_download
+
+<pre>
+load("@rules_ocx//ocx:defs.bzl", "ocx_download")
+
+ocx_download(<a href="#ocx_download-name">name</a>, <a href="#ocx_download-dist_manifest">dist_manifest</a>, <a href="#ocx_download-repo_mapping">repo_mapping</a>, <a href="#ocx_download-triple">triple</a>, <a href="#ocx_download-version">version</a>)
+</pre>
+
+Downloads a pinned ocx CLI release for the host platform.
+
+The release row (URL + sha256) comes from the vendored `dist.json` snapshot
+of `https://setup.ocx.sh/dist.json`. Corporate mirrors: set
+`OCX_INSTALL_DIST_URL` to fetch a mirrored manifest instead, and/or
+`OCX_INSTALL_MIRROR_URL` to rewrite the artifact download to
+`<mirror>/<tag>/<filename>`. The manifest sha256 is enforced either way.
+
+**ATTRIBUTES**
+
+
+| Name  | Description | Type | Mandatory | Default |
+| :------------- | :------------- | :------------- | :------------- | :------------- |
+| <a id="ocx_download-name"></a>name |  A unique name for this repository.   | <a href="https://bazel.build/concepts/labels#target-names">Name</a> | required |  |
+| <a id="ocx_download-dist_manifest"></a>dist_manifest |  Release manifest snapshot (dist.json schema 1).   | <a href="https://bazel.build/concepts/labels">Label</a> | optional |  `"@rules_ocx//dist:dist.json"`  |
+| <a id="ocx_download-repo_mapping"></a>repo_mapping |  In `WORKSPACE` context only: a dictionary from local repository name to global repository name. This allows controls over workspace dependency resolution for dependencies of this repository.<br><br>For example, an entry `"@foo": "@bar"` declares that, for any time this repository depends on `@foo` (such as a dependency on `@foo//some:target`, it should actually resolve that dependency within globally-declared `@bar` (`@bar//some:target`).<br><br>This attribute is _not_ supported in `MODULE.bazel` context (when invoking a repository rule inside a module extension's implementation function).   | <a href="https://bazel.build/rules/lib/dict">Dictionary: String -> String</a> | optional |  |
+| <a id="ocx_download-triple"></a>triple |  Escape hatch: exact release target triple, e.g. 'x86_64-unknown-linux-gnu' to prefer the glibc build. Defaults to host detection (Linux maps to musl).   | String | optional |  `""`  |
+| <a id="ocx_download-version"></a>version |  Exact ocx version to download, e.g. '0.3.10'.   | String | required |  |
+
+
+<a id="ocx_package_hub"></a>
+
+## ocx_package_hub
+
+<pre>
+load("@rules_ocx//ocx:defs.bzl", "ocx_package_hub")
+
+ocx_package_hub(<a href="#ocx_package_hub-name">name</a>, <a href="#ocx_package_hub-platform_repos">platform_repos</a>, <a href="#ocx_package_hub-repo_mapping">repo_mapping</a>)
+</pre>
+
+Multi-platform hub for an ocx.package() with `platforms`.
+
+`//:content` select()s the per-platform package repo matching the target
+platform — combine with a platform transition to fetch foreign-platform
+tools (e.g. for container images).
+
+**ATTRIBUTES**
+
+
+| Name  | Description | Type | Mandatory | Default |
+| :------------- | :------------- | :------------- | :------------- | :------------- |
+| <a id="ocx_package_hub-name"></a>name |  A unique name for this repository.   | <a href="https://bazel.build/concepts/labels#target-names">Name</a> | required |  |
+| <a id="ocx_package_hub-platform_repos"></a>platform_repos |  ocx platform key -> apparent name of the per-platform package repo.   | <a href="https://bazel.build/rules/lib/dict">Dictionary: String -> String</a> | required |  |
+| <a id="ocx_package_hub-repo_mapping"></a>repo_mapping |  In `WORKSPACE` context only: a dictionary from local repository name to global repository name. This allows controls over workspace dependency resolution for dependencies of this repository.<br><br>For example, an entry `"@foo": "@bar"` declares that, for any time this repository depends on `@foo` (such as a dependency on `@foo//some:target`, it should actually resolve that dependency within globally-declared `@bar` (`@bar//some:target`).<br><br>This attribute is _not_ supported in `MODULE.bazel` context (when invoking a repository rule inside a module extension's implementation function).   | <a href="https://bazel.build/rules/lib/dict">Dictionary: String -> String</a> | optional |  |
+
+
+<a id="ocx_package_repo"></a>
+
+## ocx_package_repo
+
+<pre>
+load("@rules_ocx//ocx:defs.bzl", "ocx_package_repo")
+
+ocx_package_repo(<a href="#ocx_package_repo-name">name</a>, <a href="#ocx_package_repo-isolated_home">isolated_home</a>, <a href="#ocx_package_repo-ocx">ocx</a>, <a href="#ocx_package_repo-package">package</a>, <a href="#ocx_package_repo-platform">platform</a>, <a href="#ocx_package_repo-repo_mapping">repo_mapping</a>)
+</pre>
+
+Provisions a single OCX package from an OCI registry.
+
+`//:content` is the package tree; every executable reachable through the
+package environment becomes a runnable target `//:<name>` (host-platform
+repos only). Pin with `registry/repo@sha256:…` for reproducibility —
+floating tags resolve at fetch time and log the resolved digest.
+
+**ATTRIBUTES**
+
+
+| Name  | Description | Type | Mandatory | Default |
+| :------------- | :------------- | :------------- | :------------- | :------------- |
+| <a id="ocx_package_repo-name"></a>name |  A unique name for this repository.   | <a href="https://bazel.build/concepts/labels#target-names">Name</a> | required |  |
+| <a id="ocx_package_repo-isolated_home"></a>isolated_home |  Keep the ocx store inside this repository instead of the shared user OCX_HOME.   | Boolean | optional |  `False`  |
+| <a id="ocx_package_repo-ocx"></a>ocx |  The pinned ocx CLI binary.   | <a href="https://bazel.build/concepts/labels">Label</a> | optional |  `"@ocx_tool//:ocx"`  |
+| <a id="ocx_package_repo-package"></a>package |  Fully-qualified identifier: 'registry/repo[:tag][@sha256:…]'.   | String | required |  |
+| <a id="ocx_package_repo-platform"></a>platform |  ocx platform key ('linux/amd64', …) to provision for; empty = host.   | String | optional |  `""`  |
+| <a id="ocx_package_repo-repo_mapping"></a>repo_mapping |  In `WORKSPACE` context only: a dictionary from local repository name to global repository name. This allows controls over workspace dependency resolution for dependencies of this repository.<br><br>For example, an entry `"@foo": "@bar"` declares that, for any time this repository depends on `@foo` (such as a dependency on `@foo//some:target`, it should actually resolve that dependency within globally-declared `@bar` (`@bar//some:target`).<br><br>This attribute is _not_ supported in `MODULE.bazel` context (when invoking a repository rule inside a module extension's implementation function).   | <a href="https://bazel.build/rules/lib/dict">Dictionary: String -> String</a> | optional |  |
+
+
+<a id="ocx_project_repo"></a>
+
+## ocx_project_repo
+
+<pre>
+load("@rules_ocx//ocx:defs.bzl", "ocx_project_repo")
+
+ocx_project_repo(<a href="#ocx_project_repo-name">name</a>, <a href="#ocx_project_repo-groups">groups</a>, <a href="#ocx_project_repo-isolated_home">isolated_home</a>, <a href="#ocx_project_repo-ocx">ocx</a>, <a href="#ocx_project_repo-ocx_lock">ocx_lock</a>, <a href="#ocx_project_repo-ocx_toml">ocx_toml</a>, <a href="#ocx_project_repo-repo_mapping">repo_mapping</a>)
+</pre>
+
+Provisions the toolchain declared in a workspace ocx.toml/ocx.lock.
+
+Fails when the lockfile is stale or missing (fix with `ocx lock`). Every
+executable reachable through the composed environment's `path` entries
+becomes a runnable target `//:<name>`; the raw environment is loadable from
+`//:env.bzl` (`OCX_ENV`, `OCX_HOME`).
+
+Note: ocx composes the default group's environment; `groups` currently only
+widens which groups are pulled into the store.
+
+**ATTRIBUTES**
+
+
+| Name  | Description | Type | Mandatory | Default |
+| :------------- | :------------- | :------------- | :------------- | :------------- |
+| <a id="ocx_project_repo-name"></a>name |  A unique name for this repository.   | <a href="https://bazel.build/concepts/labels#target-names">Name</a> | required |  |
+| <a id="ocx_project_repo-groups"></a>groups |  Additional ocx.toml groups to pull (comma-joined into `ocx pull -g`).   | List of strings | optional |  `[]`  |
+| <a id="ocx_project_repo-isolated_home"></a>isolated_home |  Keep the ocx store inside this repository instead of the shared user OCX_HOME.   | Boolean | optional |  `False`  |
+| <a id="ocx_project_repo-ocx"></a>ocx |  The pinned ocx CLI binary.   | <a href="https://bazel.build/concepts/labels">Label</a> | optional |  `"@ocx_tool//:ocx"`  |
+| <a id="ocx_project_repo-ocx_lock"></a>ocx_lock |  The ocx.lock next to ocx_toml; watched so lock changes refetch.   | <a href="https://bazel.build/concepts/labels">Label</a> | required |  |
+| <a id="ocx_project_repo-ocx_toml"></a>ocx_toml |  The project ocx.toml declaring the toolchain.   | <a href="https://bazel.build/concepts/labels">Label</a> | required |  |
+| <a id="ocx_project_repo-repo_mapping"></a>repo_mapping |  In `WORKSPACE` context only: a dictionary from local repository name to global repository name. This allows controls over workspace dependency resolution for dependencies of this repository.<br><br>For example, an entry `"@foo": "@bar"` declares that, for any time this repository depends on `@foo` (such as a dependency on `@foo//some:target`, it should actually resolve that dependency within globally-declared `@bar` (`@bar//some:target`).<br><br>This attribute is _not_ supported in `MODULE.bazel` context (when invoking a repository rule inside a module extension's implementation function).   | <a href="https://bazel.build/rules/lib/dict">Dictionary: String -> String</a> | optional |  |
+
+
