@@ -1,0 +1,24 @@
+"""Example: per-platform package repos + a hub select()ed by target platform."""
+
+module(name = "rules_ocx_example_cross_platform")
+
+bazel_dep(name = "platforms", version = "1.0.0")
+bazel_dep(name = "rules_ocx", version = "0.0.0")
+bazel_dep(name = "rules_shell", version = "0.6.1")
+
+local_path_override(
+    module_name = "rules_ocx",
+    path = "../..",
+)
+
+ocx = use_extension("@rules_ocx//ocx:extensions.bzl", "ocx")
+ocx.package(
+    name = "jq",
+    package = "ocx.sh/jq:latest",
+    platforms = [
+        "linux/amd64",
+        "linux/arm64",
+        "windows/amd64",
+    ],
+)
+use_repo(ocx, "jq")

@@ -1,0 +1,28 @@
+# PR #12 consumption UX: provisioned tools as `tools =` of a genrule and as
+# `data =` of an sh_test via $(location).
+
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
+
+genrule(
+    name = "pretty",
+    srcs = ["data.json"],
+    outs = ["pretty.json"],
+    cmd = "$(location @jq//:jq) . $< > $@",
+    tools = ["@jq"],
+)
+
+sh_test(
+    name = "jq_test",
+    size = "small",
+    srcs = ["jq_test.sh"],
+    data = [
+        ":pretty",
+        "@jq",
+        "@jq_pinned//:jq",
+    ],
+    env = {
+        "JQ_BIN": "$(location @jq//:jq)",
+        "JQ_PINNED_BIN": "$(location @jq_pinned//:jq)",
+        "PRETTY_JSON": "$(location :pretty)",
+    },
+)

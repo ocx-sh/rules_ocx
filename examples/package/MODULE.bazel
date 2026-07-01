@@ -1,0 +1,26 @@
+"""Example: ad-hoc OCX packages via ocx.package()."""
+
+module(name = "rules_ocx_example_package")
+
+bazel_dep(name = "rules_ocx", version = "0.0.0")
+bazel_dep(name = "rules_shell", version = "0.6.1")
+
+local_path_override(
+    module_name = "rules_ocx",
+    path = "../..",
+)
+
+ocx = use_extension("@rules_ocx//ocx:extensions.bzl", "ocx")
+
+# Floating tag: resolves at fetch time; the fetch log prints the digest to pin.
+ocx.package(
+    name = "jq",
+    package = "ocx.sh/jq:latest",
+)
+
+# Digest-pinned: fully reproducible.
+ocx.package(
+    name = "jq_pinned",
+    package = "ocx.sh/jq@sha256:11814b34158ab143969a8efffe59a320dd07c0b176a65366427514b326e2a347",
+)
+use_repo(ocx, "jq", "jq_pinned")

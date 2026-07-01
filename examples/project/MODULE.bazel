@@ -1,0 +1,19 @@
+"""Example (flagship): workspace toolchain from ocx.toml + ocx.lock."""
+
+module(name = "rules_ocx_example_project")
+
+bazel_dep(name = "rules_ocx", version = "0.0.0")
+bazel_dep(name = "rules_shell", version = "0.6.1")
+
+local_path_override(
+    module_name = "rules_ocx",
+    path = "../..",
+)
+
+ocx = use_extension("@rules_ocx//ocx:extensions.bzl", "ocx")
+ocx.project(
+    name = "tools",
+    ocx_lock = "//:ocx.lock",
+    ocx_toml = "//:ocx.toml",
+)
+use_repo(ocx, "tools")

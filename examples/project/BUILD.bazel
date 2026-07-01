@@ -1,0 +1,32 @@
+# Every tool from ocx.toml is a runnable target in @tools. The PR #12 usage
+# pattern: shell tooling composed in a genrule report plus an sh_test.
+
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
+
+genrule(
+    name = "shell_report",
+    srcs = ["smelly.sh"],
+    outs = ["shell_report.txt"],
+    cmd = "echo shfmt: > $@ && (($(location @tools//:shfmt) -d $< 2>> $@) || true) && " +
+          "echo shellcheck: >> $@ && (($(location @tools//:shellcheck) $< >> $@) || true)",
+    tools = [
+        "@tools//:shellcheck",
+        "@tools//:shfmt",
+    ],
+)
+
+sh_test(
+    name = "tools_test",
+    size = "small",
+    srcs = ["tools_test.sh"],
+    data = [
+        ":shell_report",
+        "@tools//:shellcheck",
+        "@tools//:shfmt",
+    ],
+    env = {
+        "REPORT": "$(location :shell_report)",
+        "SHELLCHECK_BIN": "$(location @tools//:shellcheck)",
+        "SHFMT_BIN": "$(location @tools//:shfmt)",
+    },
+)
