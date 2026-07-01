@@ -70,16 +70,17 @@ tools (e.g. for container images).
 <pre>
 load("@rules_ocx//ocx:defs.bzl", "ocx_package_repo")
 
-ocx_package_repo(<a href="#ocx_package_repo-name">name</a>, <a href="#ocx_package_repo-isolated_home">isolated_home</a>, <a href="#ocx_package_repo-ocx">ocx</a>, <a href="#ocx_package_repo-package">package</a>, <a href="#ocx_package_repo-pins">pins</a>, <a href="#ocx_package_repo-platform">platform</a>, <a href="#ocx_package_repo-repo_mapping">repo_mapping</a>)
+ocx_package_repo(<a href="#ocx_package_repo-name">name</a>, <a href="#ocx_package_repo-index">index</a>, <a href="#ocx_package_repo-isolated_home">isolated_home</a>, <a href="#ocx_package_repo-ocx">ocx</a>, <a href="#ocx_package_repo-package">package</a>, <a href="#ocx_package_repo-pins">pins</a>, <a href="#ocx_package_repo-platform">platform</a>, <a href="#ocx_package_repo-repo_mapping">repo_mapping</a>)
 </pre>
 
 Provisions a single OCX package from an OCI registry.
 
 `//:content` is the package tree; every executable reachable through the
 package environment becomes a runnable target `//:<name>` (host-platform
-repos only). Pin per-platform manifest digests via `pins` for
-reproducibility — floating tags resolve at fetch time and log the resolved
-digest.
+repos only). For reproducibility, commit an index snapshot and reference it
+via `index` (tags then resolve frozen from the snapshot), or pin
+per-platform manifest digests via `pins` — plain floating tags resolve at
+fetch time and log the resolved digest.
 
 **ATTRIBUTES**
 
@@ -87,6 +88,7 @@ digest.
 | Name  | Description | Type | Mandatory | Default |
 | :------------- | :------------- | :------------- | :------------- | :------------- |
 | <a id="ocx_package_repo-name"></a>name |  A unique name for this repository.   | <a href="https://bazel.build/concepts/labels#target-names">Name</a> | required |  |
+| <a id="ocx_package_repo-index"></a>index |  Committed ocx index snapshot directory (created with `ocx --index <dir> index update <package>`). When set, tag resolution is frozen to the snapshot (`--index --frozen`): floating tags become reproducible until the snapshot is refreshed.   | <a href="https://bazel.build/concepts/labels">Label</a> | optional |  `None`  |
 | <a id="ocx_package_repo-isolated_home"></a>isolated_home |  Keep the ocx store inside this repository instead of the shared user OCX_HOME.   | Boolean | optional |  `False`  |
 | <a id="ocx_package_repo-ocx"></a>ocx |  The pinned ocx CLI binary.   | <a href="https://bazel.build/concepts/labels">Label</a> | optional |  `"@ocx_tool//:ocx"`  |
 | <a id="ocx_package_repo-package"></a>package |  Fully-qualified identifier: 'registry/repo[:tag][@sha256:…]'.   | String | required |  |

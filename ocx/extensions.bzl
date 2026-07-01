@@ -64,6 +64,13 @@ _package = tag_class(
             mandatory = True,
             doc = "Name of the generated repository (hub name when `platforms` is set).",
         ),
+        "index": attr.label(
+            doc = "Committed ocx index snapshot directory (created with " +
+                  "`ocx --index <dir> index update <package>`, refreshed the same " +
+                  "way). When set, tag resolution is frozen to the snapshot — " +
+                  "floating tags like ':latest' become reproducible until the " +
+                  "snapshot is refreshed.",
+        ),
         "isolated_home": attr.bool(
             default = False,
             doc = "Use a repository-local ocx store instead of the shared user OCX_HOME.",
@@ -71,8 +78,8 @@ _package = tag_class(
         "package": attr.string(
             mandatory = True,
             doc = "Fully-qualified identifier: 'registry/repo[:tag][@sha256:…]'. " +
-                  "A digest here pins one platform manifest — use `pins` to stay " +
-                  "reproducible across platforms.",
+                  "Freeze tag resolution with `index`, or pin per-platform " +
+                  "manifest digests with `pins`.",
         ),
         "pins": attr.string_dict(
             doc = "Per-platform manifest pins: ocx platform key -> 'sha256:…' digest " +
@@ -141,6 +148,7 @@ def _ocx_impl(module_ctx):
                     ocx_package_repo(
                         name = repo,
                         package = tag.package,
+                        index = tag.index,
                         pins = tag.pins,
                         platform = platform,
                         isolated_home = tag.isolated_home,
@@ -153,6 +161,7 @@ def _ocx_impl(module_ctx):
                 ocx_package_repo(
                     name = tag.name,
                     package = tag.package,
+                    index = tag.index,
                     pins = tag.pins,
                     isolated_home = tag.isolated_home,
                 )

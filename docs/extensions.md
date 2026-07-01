@@ -15,7 +15,7 @@ MODULE.bazel.lock.
 <pre>
 ocx = use_extension("@rules_ocx//ocx:extensions.bzl", "ocx")
 ocx.download(<a href="#ocx.download-dist_manifest">dist_manifest</a>, <a href="#ocx.download-triple">triple</a>, <a href="#ocx.download-version">version</a>)
-ocx.package(<a href="#ocx.package-name">name</a>, <a href="#ocx.package-isolated_home">isolated_home</a>, <a href="#ocx.package-package">package</a>, <a href="#ocx.package-pins">pins</a>, <a href="#ocx.package-platforms">platforms</a>)
+ocx.package(<a href="#ocx.package-name">name</a>, <a href="#ocx.package-index">index</a>, <a href="#ocx.package-isolated_home">isolated_home</a>, <a href="#ocx.package-package">package</a>, <a href="#ocx.package-pins">pins</a>, <a href="#ocx.package-platforms">platforms</a>)
 ocx.project(<a href="#ocx.project-name">name</a>, <a href="#ocx.project-groups">groups</a>, <a href="#ocx.project-isolated_home">isolated_home</a>, <a href="#ocx.project-ocx_lock">ocx_lock</a>, <a href="#ocx.project-ocx_toml">ocx_toml</a>)
 </pre>
 
@@ -53,8 +53,9 @@ Provisions a single OCX package from an OCI registry.
 | Name  | Description | Type | Mandatory | Default |
 | :------------- | :------------- | :------------- | :------------- | :------------- |
 | <a id="ocx.package-name"></a>name |  Name of the generated repository (hub name when `platforms` is set).   | <a href="https://bazel.build/concepts/labels#target-names">Name</a> | required |  |
+| <a id="ocx.package-index"></a>index |  Committed ocx index snapshot directory (created with `ocx --index <dir> index update <package>`, refreshed the same way). When set, tag resolution is frozen to the snapshot — floating tags like ':latest' become reproducible until the snapshot is refreshed.   | <a href="https://bazel.build/concepts/labels">Label</a> | optional |  `None`  |
 | <a id="ocx.package-isolated_home"></a>isolated_home |  Use a repository-local ocx store instead of the shared user OCX_HOME.   | Boolean | optional |  `False`  |
-| <a id="ocx.package-package"></a>package |  Fully-qualified identifier: 'registry/repo[:tag][@sha256:…]'. A digest here pins one platform manifest — use `pins` to stay reproducible across platforms.   | String | required |  |
+| <a id="ocx.package-package"></a>package |  Fully-qualified identifier: 'registry/repo[:tag][@sha256:…]'. Freeze tag resolution with `index`, or pin per-platform manifest digests with `pins`.   | String | required |  |
 | <a id="ocx.package-pins"></a>pins |  Per-platform manifest pins: ocx platform key -> 'sha256:…' digest of that platform's manifest (as reported by `ocx package install -p <platform>`). The matching platform installs 'registry/repo@<digest>'; unpinned platforms fall back to `package`.   | <a href="https://bazel.build/rules/lib/dict">Dictionary: String -> String</a> | optional |  `{}`  |
 | <a id="ocx.package-platforms"></a>platforms |  ocx platform keys ('linux/amd64', …) to provision in addition to the host: creates '<name>_<os>_<arch>' repos plus a '<name>' hub whose //:content select()s by target platform. Empty = host only.   | List of strings | optional |  `[]`  |
 

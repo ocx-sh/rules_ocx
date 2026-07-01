@@ -45,7 +45,19 @@ def _ocx_package_repo_impl(ctx):
     ctx.path(ctx.attr.ocx)  # fetch ordering
     ocx_env = make_ocx_env(ctx, ctx.attr.isolated_home)
     pkg = pinned_ref(ctx.attr.package, ctx.attr.pins, ctx.attr.platform or host.ocx_platform)
-    json_pkg = ["--format", "json", "package"]
+    root_flags = []
+    hints = {}
+    if ctx.attr.index:
+        index = ctx.path(ctx.attr.index)
+        ctx.watch_tree(index)
+        root_flags = ["--index", str(index), "--frozen"]
+        hints[81] = ("'{}' is not in the committed index snapshot — refresh it: " +
+                     "`ocx --index {} index update {}` and commit the result").format(
+            pkg,
+            index,
+            ctx.attr.package.split("@")[0].split(":")[0],
+        )
+    json_pkg = root_flags + ["--format", "json", "package"]
     runnable = ctx.attr.platform in ("", host.ocx_platform)
 
     stdout = run_ocx(
@@ -54,11 +66,12 @@ def _ocx_package_repo_impl(ctx):
         json_pkg + ["install"] + _platform_args(ctx.attr.platform) + [pkg],
         ocx_env.env,
         "installing " + pkg,
+        hints = hints,
         retries = 2,
     )
     report = decode_json(stdout, "ocx package install")
     identifier = report.values()[0]["identifier"]
-    if "@sha256:" not in pkg:
+    if "@sha256:" not in pkg and not ctx.attr.index:
         # buildifier: disable=print
         print(("rules_ocx: '{}' ({}) resolved to '{}' — copy the digest into " +
                "ocx.package(pins = ...) for reproducibility").format(
@@ -114,10 +127,17 @@ ocx_package_repo = repository_rule(
 
 `//:content` is the package tree; every executable reachable through the
 package environment becomes a runnable target `//:<name>` (host-platform
-repos only). Pin per-platform manifest digests via `pins` for
-reproducibility — floating tags resolve at fetch time and log the resolved
-digest.""",
+repos only). For reproducibility, commit an index snapshot and reference it
+via `index` (tags then resolve frozen from the snapshot), or pin
+per-platform manifest digests via `pins` — plain floating tags resolve at
+fetch time and log the resolved digest.""",
     attrs = {
+        "index": attr.label(
+            doc = "Committed ocx index snapshot directory (created with " +
+                  "`ocx --index <dir> index update <package>`). When set, tag " +
+                  "resolution is frozen to the snapshot (`--index --frozen`): " +
+                  "floating tags become reproducible until the snapshot is refreshed.",
+        ),
         "isolated_home": attr.bool(
             default = False,
             doc = "Keep the ocx store inside this repository instead of the shared user OCX_HOME.",

@@ -12,8 +12,13 @@ local_path_override(
 )
 
 ocx = use_extension("@rules_ocx//ocx:extensions.bzl", "ocx")
+
+# ':latest' resolves frozen from the committed index snapshot in index/ —
+# every platform repo sees the same resolution. Refresh with
+# `ocx --index index index update ocx.sh/jq` and commit.
 ocx.package(
     name = "jq",
+    index = "//:index",
     package = "ocx.sh/jq:latest",
     platforms = [
         "linux/amd64",

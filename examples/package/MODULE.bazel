@@ -18,6 +18,15 @@ ocx.package(
     package = "ocx.sh/jq:latest",
 )
 
+# Frozen index: ':latest' resolves from the committed snapshot in index/
+# (created with `ocx --index index index update ocx.sh/jq`) — OCX's native
+# tag locking. Deterministic until the snapshot is refreshed and committed.
+ocx.package(
+    name = "jq_frozen",
+    index = "//:index",
+    package = "ocx.sh/jq:latest",
+)
+
 # Digest-pinned: fully reproducible. OCX pins *per-platform* manifest
 # digests (indices move when a platform is added and may be GC'd);
 # `ocx package install -p <platform> ocx.sh/jq:latest` reports each digest.
@@ -31,4 +40,4 @@ ocx.package(
         "windows/amd64": "sha256:8434027cf0a6c340a10e533ecdfd8137f085e476437352b98237294adf821c7d",
     },
 )
-use_repo(ocx, "jq", "jq_pinned")
+use_repo(ocx, "jq", "jq_frozen", "jq_pinned")
