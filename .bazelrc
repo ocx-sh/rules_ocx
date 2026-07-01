@@ -1,0 +1,10 @@
+# rules_ocx developer defaults. Keep minimal — consumers set their own flags.
+common --enable_platform_specific_config
+
+build --incompatible_disallow_empty_glob
+test --test_output=errors
+
+# Repo rules talk to the shared OCX_HOME and the ocx.sh registry; keep their
+# env visible to fetches (getenv() declarations in the rules do the tracking).
+
+try-import %workspace%/.bazelrc.user

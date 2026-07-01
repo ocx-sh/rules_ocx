@@ -1,0 +1,37 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The OCX Authors
+
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
+load(":launcher_test.bzl", "launcher_test_suite")
+load(":manifest_test.bzl", "manifest_test_suite")
+load(":platforms_test.bzl", "platforms_test_suite")
+
+platforms_test_suite(name = "platforms_tests")
+
+manifest_test_suite(name = "manifest_tests")
+
+launcher_test_suite(name = "launcher_tests")
+
+# Dogfooding smoke tests: the bootstrapped ocx binary and the project-tier
+# repo generated from this repo's own ocx.toml.
+sh_test(
+    name = "ocx_tool_test",
+    size = "small",
+    srcs = ["ocx_tool_test.sh"],
+    data = ["@ocx_tool//:ocx"],
+    env = {"OCX_BIN": "$(location @ocx_tool//:ocx)"},
+)
+
+sh_test(
+    name = "dev_tools_test",
+    size = "small",
+    srcs = ["dev_tools_test.sh"],
+    data = [
+        "@dev_tools//:actionlint",
+        "@dev_tools//:shellcheck",
+    ],
+    env = {
+        "ACTIONLINT_BIN": "$(location @dev_tools//:actionlint)",
+        "SHELLCHECK_BIN": "$(location @dev_tools//:shellcheck)",
+    },
+)
