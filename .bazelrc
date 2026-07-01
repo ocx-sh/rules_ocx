@@ -1,6 +1,10 @@
 # rules_ocx developer defaults. Keep minimal — consumers set their own flags.
 common --enable_platform_specific_config
 
+# Windows: sh_test data needs a real runfiles tree, not just a manifest.
+startup --windows_enable_symlinks
+common:windows --enable_runfiles
+
 build --incompatible_disallow_empty_glob
 test --test_output=errors
 

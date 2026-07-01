@@ -1,3 +1,6 @@
+# Windows runners check out with autocrlf; CRLF shebangs break sh_test.
+*.sh text eol=lf
+
 ocx.lock merge=union
 MODULE.bazel.lock merge=union linguist-generated=true
 dist/dist.json linguist-generated=true

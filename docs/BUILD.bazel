@@ -14,11 +14,19 @@ _DOCS = {
     "extensions": "//ocx:extensions.bzl",
 }
 
+# stardoc's protobuf dependency does not compile under MSVC; docs freshness
+# is platform-independent, so skip the whole docs graph on Windows.
+_NOT_WINDOWS = select({
+    "@platforms//os:windows": ["@platforms//:incompatible"],
+    "//conditions:default": [],
+})
+
 [
     stardoc(
         name = "gen_" + name,
         out = name + ".gen.md",
         input = input,
+        target_compatible_with = _NOT_WINDOWS,
         deps = [
             "//ocx:defs",
             "//ocx:extensions",
@@ -33,6 +41,7 @@ _DOCS = {
         failure_message = "docs are stale — run: bazel run //docs:update",
         file1 = name + ".gen.md",
         file2 = name + ".md",
+        target_compatible_with = _NOT_WINDOWS,
     )
     for name in _DOCS
 ]
@@ -65,4 +74,5 @@ sh_binary(
         ]
     ],
     data = ["gen_" + name for name in _DOCS],
+    target_compatible_with = _NOT_WINDOWS,
 )

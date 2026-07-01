@@ -1,0 +1,7 @@
+common --enable_platform_specific_config
+
+# Windows: sh_test data needs a real runfiles tree, not just a manifest.
+startup --windows_enable_symlinks
+common:windows --enable_runfiles
+
+test --test_output=errors
