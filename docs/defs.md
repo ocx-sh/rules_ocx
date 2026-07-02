@@ -112,7 +112,7 @@ input (`//:content` is not available in lazy mode).
 <pre>
 load("@rules_ocx//ocx:defs.bzl", "ocx_project_repo")
 
-ocx_project_repo(<a href="#ocx_project_repo-name">name</a>, <a href="#ocx_project_repo-bins">bins</a>, <a href="#ocx_project_repo-groups">groups</a>, <a href="#ocx_project_repo-isolated_home">isolated_home</a>, <a href="#ocx_project_repo-ocx">ocx</a>, <a href="#ocx_project_repo-ocx_lock">ocx_lock</a>, <a href="#ocx_project_repo-ocx_toml">ocx_toml</a>, <a href="#ocx_project_repo-repo_mapping">repo_mapping</a>)
+ocx_project_repo(<a href="#ocx_project_repo-name">name</a>, <a href="#ocx_project_repo-bins">bins</a>, <a href="#ocx_project_repo-groups">groups</a>, <a href="#ocx_project_repo-isolated_home">isolated_home</a>, <a href="#ocx_project_repo-ocx">ocx</a>, <a href="#ocx_project_repo-ocx_lock">ocx_lock</a>, <a href="#ocx_project_repo-ocx_toml">ocx_toml</a>, <a href="#ocx_project_repo-platform">platform</a>, <a href="#ocx_project_repo-repo_mapping">repo_mapping</a>)
 </pre>
 
 Provisions the toolchain declared in a workspace ocx.toml/ocx.lock.
@@ -132,6 +132,12 @@ defaults apply: every group is pulled, but only the default `[tools]` table
 is composed into launchers — name groups explicitly (or use the reserved
 `all`) to expose their executables.
 
+`platform` composes a foreign platform's environment from the same
+ocx.lock: that platform's leaves are pulled into the store and `env.bzl`
+holds their absolute store paths (sysroots, target libraries, container
+image content). Foreign repos expose no runnable launchers — the binaries
+do not run on this host.
+
 **ATTRIBUTES**
 
 
@@ -144,6 +150,7 @@ is composed into launchers — name groups explicitly (or use the reserved
 | <a id="ocx_project_repo-ocx"></a>ocx |  The pinned ocx CLI binary.   | <a href="https://bazel.build/concepts/labels">Label</a> | optional |  `"@ocx_tool//:ocx"`  |
 | <a id="ocx_project_repo-ocx_lock"></a>ocx_lock |  The ocx.lock next to ocx_toml; watched so lock changes refetch.   | <a href="https://bazel.build/concepts/labels">Label</a> | required |  |
 | <a id="ocx_project_repo-ocx_toml"></a>ocx_toml |  The project ocx.toml declaring the toolchain.   | <a href="https://bazel.build/concepts/labels">Label</a> | required |  |
+| <a id="ocx_project_repo-platform"></a>platform |  ocx platform key ('linux/arm64', …) to compose for; empty = host. A foreign platform pulls that platform's leaves from the same ocx.lock and exposes env.bzl only (no runnable launchers). Incompatible with bins — lazy launchers already resolve the executing host at run time.   | String | optional |  `""`  |
 | <a id="ocx_project_repo-repo_mapping"></a>repo_mapping |  In `WORKSPACE` context only: a dictionary from local repository name to global repository name. This allows controls over workspace dependency resolution for dependencies of this repository.<br><br>For example, an entry `"@foo": "@bar"` declares that, for any time this repository depends on `@foo` (such as a dependency on `@foo//some:target`, it should actually resolve that dependency within globally-declared `@bar` (`@bar//some:target`).<br><br>This attribute is _not_ supported in `MODULE.bazel` context (when invoking a repository rule inside a module extension's implementation function).   | <a href="https://bazel.build/rules/lib/dict">Dictionary: String -> String</a> | optional |  |
 
 

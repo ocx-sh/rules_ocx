@@ -2,6 +2,7 @@
 
 module(name = "rules_ocx_example_project")
 
+bazel_dep(name = "platforms", version = "1.0.0")
 bazel_dep(name = "rules_ocx", version = "0.0.0")
 bazel_dep(name = "rules_shell", version = "0.6.1")
 
@@ -29,4 +30,14 @@ ocx.project(
     ocx_lock = "//:ocx.lock",
     ocx_toml = "//:ocx.toml",
 )
-use_repo(ocx, "tools", "tools_lazy")
+
+# Cross-platform variant: composes the linux/arm64 environment from the same
+# ocx.lock — env.bzl holds the absolute store paths of the arm64 leaves. No
+# runnable launchers (the binaries do not run on this host).
+ocx.project(
+    name = "tools_arm64",
+    ocx_lock = "//:ocx.lock",
+    ocx_toml = "//:ocx.toml",
+    platform = "linux/arm64",
+)
+use_repo(ocx, "tools", "tools_arm64", "tools_lazy")

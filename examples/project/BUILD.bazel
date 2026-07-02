@@ -2,6 +2,7 @@
 # pattern: shell tooling composed in a genrule report plus an sh_test.
 
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
+load("@tools_arm64//:env.bzl", ARM64_ENV = "OCX_ENV")
 
 genrule(
     name = "shell_report",
@@ -31,4 +32,17 @@ sh_test(
         "SHELLCHECK_LAZY_BIN": "$(location @tools_lazy//:shellcheck)",
         "SHFMT_BIN": "$(location @tools//:shfmt)",
     },
+)
+
+# @tools_arm64 composed with platform = "linux/arm64": its env paths point at
+# the arm64 leaves in the store, pulled from the same ocx.lock on any host.
+sh_test(
+    name = "cross_env_test",
+    size = "small",
+    srcs = ["cross_env_test.sh"],
+    env = {
+        "ARM64_PATH_DIRS": " ".join([e["value"] for e in ARM64_ENV if e["type"] == "path"]),
+    },
+    # The `file -b` ABI assertion needs a Linux runner.
+    target_compatible_with = ["@platforms//os:linux"],
 )

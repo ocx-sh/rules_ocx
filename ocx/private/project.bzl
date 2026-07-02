@@ -80,15 +80,32 @@ def _ocx_project_repo_impl(ctx):
     )
 
     if ctx.attr.bins:
+        if ctx.attr.platform:
+            fail("rules_ocx: platform is incompatible with bins (lazy provisioning) — " +
+                 "lazy launchers re-enter `ocx run`, which resolves the executing " +
+                 "host's platform at run time")
         _lazy_project(ctx, host, binary)
         return
 
-    pull = project + ["pull"]
+    target = ["--platform", ctx.attr.platform] if ctx.attr.platform else []
+    no_leaf = {
+        78: "a tool in scope ships no '{}' leaf in ocx.lock — narrow `groups` or drop the platform".format(
+            ctx.attr.platform or host.ocx_platform,
+        ),
+    }
+    pull = project + ["pull"] + target
     if ctx.attr.groups:
         pull += ["-g", ",".join(ctx.attr.groups)]
-    run_ocx(ctx, binary, pull, ocx_env.env, "pulling packages for " + str(ctx.attr.ocx_toml))
+    run_ocx(
+        ctx,
+        binary,
+        pull,
+        ocx_env.env,
+        "pulling packages for " + str(ctx.attr.ocx_toml),
+        hints = no_leaf,
+    )
 
-    env_cmd = ["--format", "json"] + project + ["env"]
+    env_cmd = ["--format", "json"] + project + ["env"] + target
     if ctx.attr.groups:
         env_cmd += ["-g", ",".join(ctx.attr.groups)]
     stdout = run_ocx(
@@ -97,10 +114,12 @@ def _ocx_project_repo_impl(ctx):
         env_cmd,
         ocx_env.env,
         "composing the environment of " + str(ctx.attr.ocx_toml),
+        hints = no_leaf,
     )
     entries = decode_json(stdout, "ocx env")["entries"]
 
-    bins = scan_bins(ctx, entries, host.is_windows)
+    runnable = ctx.attr.platform in ("", host.ocx_platform)
+    bins = scan_bins(ctx, entries, host.is_windows) if runnable else []
     write_launchers(ctx, bins, entries, ocx_env.home, str(binary), host.is_windows)
     ctx.file("env.bzl", render_env_bzl(entries, ocx_env.home))
     ctx.file("BUILD.bazel", render_launchers_build(
@@ -126,7 +145,13 @@ fully remote-cached builds download no tool content at all.
 `groups` scopes both the pull and the composed environment. Omitted, ocx's
 defaults apply: every group is pulled, but only the default `[tools]` table
 is composed into launchers — name groups explicitly (or use the reserved
-`all`) to expose their executables.""",
+`all`) to expose their executables.
+
+`platform` composes a foreign platform's environment from the same
+ocx.lock: that platform's leaves are pulled into the store and `env.bzl`
+holds their absolute store paths (sysroots, target libraries, container
+image content). Foreign repos expose no runnable launchers — the binaries
+do not run on this host.""",
     attrs = {
         "bins": attr.string_list(
             doc = "Lazy provisioning: names of the executables to expose (not " +
@@ -159,6 +184,13 @@ is composed into launchers — name groups explicitly (or use the reserved
             mandatory = True,
             allow_single_file = True,
             doc = "The project ocx.toml declaring the toolchain.",
+        ),
+        "platform": attr.string(
+            doc = "ocx platform key ('linux/arm64', …) to compose for; empty = host. " +
+                  "A foreign platform pulls that platform's leaves from the same " +
+                  "ocx.lock and exposes env.bzl only (no runnable launchers). " +
+                  "Incompatible with bins — lazy launchers already resolve the " +
+                  "executing host at run time.",
         ),
     },
 )

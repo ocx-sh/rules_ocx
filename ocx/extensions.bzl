@@ -63,6 +63,12 @@ _project = tag_class(
             mandatory = True,
             doc = "The project ocx.toml.",
         ),
+        "platform": attr.string(
+            doc = "ocx platform key ('linux/arm64', …) to compose for; empty = host. " +
+                  "A foreign platform pulls that platform's leaves from the same " +
+                  "ocx.lock and exposes env.bzl only (no runnable launchers). " +
+                  "Incompatible with bins.",
+        ),
     },
 )
 
@@ -150,6 +156,7 @@ def _ocx_impl(module_ctx):
                 ocx_lock = tag.ocx_lock,
                 bins = tag.bins,
                 groups = tag.groups,
+                platform = tag.platform,
                 isolated_home = tag.isolated_home,
             )
 
