@@ -1,0 +1,11 @@
+# BCR smoke test: building this filegroup renders the lazy launcher wrapper
+# script without executing it, so presubmit never pulls tool content from an
+# OCI registry. Proves the extension bootstraps the ocx CLI and provisions a
+# tool end to end for a downstream consumer.
+# ponytail: build-only. Executing jq would pull from the ocx.sh registry across
+# the whole BCR platform matrix (flaky); add an sh_test that runs the launcher
+# if BCR CI proves reliable against the live registry.
+filegroup(
+    name = "jq_launcher",
+    srcs = ["@jq_lazy//:jq"],
+)

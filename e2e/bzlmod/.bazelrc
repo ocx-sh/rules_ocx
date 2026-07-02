@@ -1,0 +1,6 @@
+# Consumer defaults, mirrored from the repo root so the launcher resolves the
+# host platform and works under Windows runfiles.
+common --enable_platform_specific_config
+
+startup --windows_enable_symlinks
+common:windows --enable_runfiles

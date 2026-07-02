@@ -1,12 +1,12 @@
 {
-  "homepage": "https://github.com/ocx-sh/bazel-ocx",
+  "homepage": "https://github.com/ocx-sh/rules_ocx",
   "maintainers": [
     {
       "name": "Michael Herwig",
       "github": "michael-herwig"
     }
   ],
-  "repository": ["github:ocx-sh/bazel-ocx"],
+  "repository": ["github:ocx-sh/rules_ocx"],
   "versions": [],
   "yanked_versions": {}
 }

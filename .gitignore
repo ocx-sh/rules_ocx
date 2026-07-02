@@ -5,3 +5,4 @@ bazel-*
 .task/
 __pycache__/
 examples/*/MODULE.bazel.lock
+e2e/*/MODULE.bazel.lock
