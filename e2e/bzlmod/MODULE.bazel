@@ -1,0 +1,33 @@
+"""BCR presubmit test module — consumes rules_ocx as a downstream Bazel module.
+
+Build-only smoke test. Uses the lazy `ocx.package` launcher so the presubmit
+downloads only the sha256-pinned `ocx` CLI and renders the launcher script — it
+never pulls tool content from an OCI registry, keeping the BCR platform matrix
+reliable. `../..` resolves to the module under test: BCR checks out the whole
+release archive and runs this module in place at e2e/bzlmod.
+"""
+
+module(name = "rules_ocx_e2e_bzlmod")
+
+bazel_dep(name = "rules_ocx", version = "0.0.0")
+local_path_override(
+    module_name = "rules_ocx",
+    path = "../..",
+)
+
+ocx = use_extension("@rules_ocx//ocx:extensions.bzl", "ocx")
+
+# Lazy + digest-pinned: nothing is installed at fetch time. The launcher
+# re-enters `ocx package exec`, materializing the package on first execution.
+# Build-only presubmit never executes it, so BCR CI touches no OCI registry.
+ocx.package(
+    name = "jq_lazy",
+    bins = ["jq"],
+    package = "ocx.sh/jq:latest",
+    pins = {
+        "darwin/arm64": "sha256:5be7552a463835dead65ca4c858ebc10703a0d9cff7308967f04d08fa8e2da1a",
+        "linux/amd64": "sha256:11814b34158ab143969a8efffe59a320dd07c0b176a65366427514b326e2a347",
+        "windows/amd64": "sha256:8434027cf0a6c340a10e533ecdfd8137f085e476437352b98237294adf821c7d",
+    },
+)
+use_repo(ocx, "jq_lazy")
