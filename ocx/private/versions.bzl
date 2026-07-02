@@ -8,4 +8,4 @@ versions; rules_ocx therefore pins an exact version and is tested against
 exactly that version. Bump deliberately, together with dist/dist.json.
 """
 
-DEFAULT_OCX_VERSION = "0.3.10"
+DEFAULT_OCX_VERSION = "0.3.11"

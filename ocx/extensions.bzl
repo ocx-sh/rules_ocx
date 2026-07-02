@@ -47,7 +47,9 @@ _project = tag_class(
                   "builds download no tool content.",
         ),
         "groups": attr.string_list(
-            doc = "Additional ocx.toml groups to pull into the store.",
+            doc = "ocx.toml groups to provision (scopes both the pull and the " +
+                  "composed environment). Reserved names: 'default' = the " +
+                  "top-level [tools] table, 'all' = default + every group.",
         ),
         "isolated_home": attr.bool(
             default = False,

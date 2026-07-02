@@ -72,7 +72,7 @@ Provisions the toolchain of a workspace ocx.toml + ocx.lock. Root module only.
 | :------------- | :------------- | :------------- | :------------- | :------------- |
 | <a id="ocx.project-name"></a>name |  Name of the generated repository.   | <a href="https://bazel.build/concepts/labels#target-names">Name</a> | required |  |
 | <a id="ocx.project-bins"></a>bins |  Lazy provisioning: names of the executables to expose. When set, nothing is pulled at fetch time — each name becomes a launcher re-entering `ocx run`, materializing the toolchain on first execution. Actions key on the lockfile, so fully remote-cached builds download no tool content.   | List of strings | optional |  `[]`  |
-| <a id="ocx.project-groups"></a>groups |  Additional ocx.toml groups to pull into the store.   | List of strings | optional |  `[]`  |
+| <a id="ocx.project-groups"></a>groups |  ocx.toml groups to provision (scopes both the pull and the composed environment). Reserved names: 'default' = the top-level [tools] table, 'all' = default + every group.   | List of strings | optional |  `[]`  |
 | <a id="ocx.project-isolated_home"></a>isolated_home |  Use a repository-local ocx store instead of the shared user OCX_HOME.   | Boolean | optional |  `False`  |
 | <a id="ocx.project-ocx_lock"></a>ocx_lock |  The committed ocx.lock (watched; edits refetch).   | <a href="https://bazel.build/concepts/labels">Label</a> | required |  |
 | <a id="ocx.project-ocx_toml"></a>ocx_toml |  The project ocx.toml.   | <a href="https://bazel.build/concepts/labels">Label</a> | required |  |

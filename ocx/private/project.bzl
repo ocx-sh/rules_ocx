@@ -88,10 +88,13 @@ def _ocx_project_repo_impl(ctx):
         pull += ["-g", ",".join(ctx.attr.groups)]
     run_ocx(ctx, binary, pull, ocx_env.env, "pulling packages for " + str(ctx.attr.ocx_toml))
 
+    env_cmd = ["--format", "json"] + project + ["env"]
+    if ctx.attr.groups:
+        env_cmd += ["-g", ",".join(ctx.attr.groups)]
     stdout = run_ocx(
         ctx,
         binary,
-        ["--format", "json"] + project + ["env"],
+        env_cmd,
         ocx_env.env,
         "composing the environment of " + str(ctx.attr.ocx_toml),
     )
@@ -120,8 +123,10 @@ named executable becomes a launcher that re-enters `ocx run` — content
 materializes on first execution and never becomes a Bazel action input, so
 fully remote-cached builds download no tool content at all.
 
-Note: ocx composes the default group's environment; `groups` currently only
-widens which groups are pulled into the store.""",
+`groups` scopes both the pull and the composed environment. Omitted, ocx's
+defaults apply: every group is pulled, but only the default `[tools]` table
+is composed into launchers — name groups explicitly (or use the reserved
+`all`) to expose their executables.""",
     attrs = {
         "bins": attr.string_list(
             doc = "Lazy provisioning: names of the executables to expose (not " +
@@ -131,7 +136,10 @@ widens which groups are pulled into the store.""",
                   "Incompatible with isolated_home.",
         ),
         "groups": attr.string_list(
-            doc = "Additional ocx.toml groups to pull (comma-joined into `ocx pull -g`).",
+            doc = "ocx.toml groups to provision (comma-joined into `-g` for " +
+                  "`ocx pull`, `ocx env`, and lazy `ocx run`). Reserved names: " +
+                  "'default' = the top-level [tools] table, 'all' = default + " +
+                  "every declared group.",
         ),
         "isolated_home": attr.bool(
             default = False,

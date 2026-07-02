@@ -127,8 +127,10 @@ named executable becomes a launcher that re-enters `ocx run` — content
 materializes on first execution and never becomes a Bazel action input, so
 fully remote-cached builds download no tool content at all.
 
-Note: ocx composes the default group's environment; `groups` currently only
-widens which groups are pulled into the store.
+`groups` scopes both the pull and the composed environment. Omitted, ocx's
+defaults apply: every group is pulled, but only the default `[tools]` table
+is composed into launchers — name groups explicitly (or use the reserved
+`all`) to expose their executables.
 
 **ATTRIBUTES**
 
@@ -137,7 +139,7 @@ widens which groups are pulled into the store.
 | :------------- | :------------- | :------------- | :------------- | :------------- |
 | <a id="ocx_project_repo-name"></a>name |  A unique name for this repository.   | <a href="https://bazel.build/concepts/labels#target-names">Name</a> | required |  |
 | <a id="ocx_project_repo-bins"></a>bins |  Lazy provisioning: names of the executables to expose (not validated at fetch time). When set, nothing is pulled during the fetch — each name becomes a launcher re-entering `ocx run`, and actions key on the lockfile (a runfile) instead of tool content. Incompatible with isolated_home.   | List of strings | optional |  `[]`  |
-| <a id="ocx_project_repo-groups"></a>groups |  Additional ocx.toml groups to pull (comma-joined into `ocx pull -g`).   | List of strings | optional |  `[]`  |
+| <a id="ocx_project_repo-groups"></a>groups |  ocx.toml groups to provision (comma-joined into `-g` for `ocx pull`, `ocx env`, and lazy `ocx run`). Reserved names: 'default' = the top-level [tools] table, 'all' = default + every declared group.   | List of strings | optional |  `[]`  |
 | <a id="ocx_project_repo-isolated_home"></a>isolated_home |  Keep the ocx store inside this repository instead of the shared user OCX_HOME.   | Boolean | optional |  `False`  |
 | <a id="ocx_project_repo-ocx"></a>ocx |  The pinned ocx CLI binary.   | <a href="https://bazel.build/concepts/labels">Label</a> | optional |  `"@ocx_tool//:ocx"`  |
 | <a id="ocx_project_repo-ocx_lock"></a>ocx_lock |  The ocx.lock next to ocx_toml; watched so lock changes refetch.   | <a href="https://bazel.build/concepts/labels">Label</a> | required |  |
