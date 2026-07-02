@@ -1,0 +1,36 @@
+name: Publish to BCR
+
+# Submits a released version to the Bazel Central Registry via the
+# bazel-contrib/publish-to-bcr reusable workflow, using the templates in
+# `.bcr/`. Runs automatically after release.yml (workflow_call) and can be
+# retried by hand (workflow_dispatch) if a submission needs to be re-opened.
+on:
+  workflow_call:
+    inputs:
+      tag_name:
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: "Release tag to publish, e.g. v0.1.0"
+        required: true
+        type: string
+
+jobs:
+  publish:
+    uses: bazel-contrib/publish-to-bcr/.github/workflows/publish.yaml@v1.4.1
+    with:
+      tag_name: ${{ inputs.tag_name }}
+      # Fork of bazelbuild/bazel-central-registry that the PR branch is pushed
+      # to. Create this fork under the org and confirm the name matches.
+      registry_fork: ocx-sh/bazel-central-registry
+      # Enable later once release artifacts are attested (needs id-token +
+      # attestations permissions below).
+      attest: false
+    permissions:
+      contents: write
+    secrets:
+      # Classic PAT (repo + workflow scopes) stored as a repo/org Actions
+      # secret. Pushes the branch to registry_fork and opens the BCR PR.
+      publish_token: ${{ secrets.BCR_PUBLISH_TOKEN }}
