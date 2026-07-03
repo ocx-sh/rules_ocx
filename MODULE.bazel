@@ -7,7 +7,7 @@ from repository rules — it never re-implements OCX internals in Starlark.
 
 module(
     name = "rules_ocx",
-    version = "0.1.0",
+    version = "0.1.1",
 )
 
 bazel_dep(name = "bazel_skylib", version = "1.9.0")
