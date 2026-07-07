@@ -8,7 +8,7 @@ Downloads the release archive listed in the vendored dist.json snapshot
 setup.ocx.sh installer. Binary-only placement — never runs `ocx self setup`.
 """
 
-load(":manifest.bzl", "artifact_url", "select_release")
+load(":manifest.bzl", "archive_type", "artifact_url", "select_release")
 load(":platforms.bzl", "host_info")
 
 _BUILD = """\
@@ -35,8 +35,7 @@ def _ocx_download_impl(ctx):
 
     row = select_release(manifest, ctx.attr.version, triple)
     url = artifact_url(row, ctx.getenv("OCX_INSTALL_MIRROR_URL"))
-    archive_type = "zip" if row["filename"].endswith(".zip") else "tar.xz"
-    ctx.download_and_extract(url, output = "extracted", sha256 = row["sha256"], type = archive_type)
+    ctx.download_and_extract(url, output = "extracted", sha256 = row["sha256"], type = archive_type(row["filename"]))
 
     bin_name = "ocx" + host.exe_ext
     nested = ctx.path("extracted/ocx-{}/{}".format(triple, bin_name))

@@ -4,7 +4,7 @@
 """Unit tests for ocx/private/manifest.bzl."""
 
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
-load("//ocx/private:manifest.bzl", "artifact_url", "select_release")
+load("//ocx/private:manifest.bzl", "archive_type", "artifact_url", "select_release")
 
 _MANIFEST = {
     "schema": 1,
@@ -52,8 +52,16 @@ def _artifact_url_test_impl(ctx):
     asserts.equals(env, expected, artifact_url(row, "https://mirror.corp/ocx/"))
     return unittest.end(env)
 
+def _archive_type_test_impl(ctx):
+    env = unittest.begin(ctx)
+    asserts.equals(env, "zip", archive_type("ocx-x86_64-pc-windows-msvc.zip"))
+    asserts.equals(env, "tar.gz", archive_type("ocx-x86_64-unknown-linux-musl.tar.gz"))
+    asserts.equals(env, "tar.xz", archive_type("ocx-x86_64-unknown-linux-musl.tar.xz"))
+    return unittest.end(env)
+
 select_release_test = unittest.make(_select_release_test_impl)
 artifact_url_test = unittest.make(_artifact_url_test_impl)
+archive_type_test = unittest.make(_archive_type_test_impl)
 
 def manifest_test_suite(name):
     """Instantiates the manifest.bzl test suite.
@@ -65,4 +73,5 @@ def manifest_test_suite(name):
         name,
         select_release_test,
         artifact_url_test,
+        archive_type_test,
     )
