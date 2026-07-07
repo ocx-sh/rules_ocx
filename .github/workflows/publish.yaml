@@ -28,6 +28,9 @@ jobs:
       # Enable later once release artifacts are attested (needs id-token +
       # attestations permissions below).
       attest: false
+      # Open the BCR PR ready for review — upstream defaults to draft, which
+      # would require a manual "ready" click per release.
+      draft: false
     permissions:
       contents: write
     secrets:
