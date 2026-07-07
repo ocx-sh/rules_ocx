@@ -37,9 +37,9 @@ jobs:
       - name: Open PR if changed
         uses: peter-evans/create-pull-request@v7
         with:
-          # GITHUB_TOKEN-created PRs never trigger CI workflows; the PAT
-          # (already present for BCR publishing) makes checks run on the PR.
-          token: ${{ secrets.BCR_PUBLISH_TOKEN }}
+          # GITHUB_TOKEN-created PRs never trigger CI workflows; a PAT makes
+          # checks run on the PR.
+          token: ${{ secrets.DIST_UPDATE_TOKEN }}
           branch: chore/update-dist
           commit-message: "chore(dist): refresh dist.json snapshot"
           title: "chore(dist): refresh dist.json snapshot"
