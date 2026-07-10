@@ -72,7 +72,8 @@ images).
 <pre>
 load("@rules_ocx//ocx:defs.bzl", "ocx_package_repo")
 
-ocx_package_repo(<a href="#ocx_package_repo-name">name</a>, <a href="#ocx_package_repo-bins">bins</a>, <a href="#ocx_package_repo-index">index</a>, <a href="#ocx_package_repo-isolated_home">isolated_home</a>, <a href="#ocx_package_repo-ocx">ocx</a>, <a href="#ocx_package_repo-package">package</a>, <a href="#ocx_package_repo-pins">pins</a>, <a href="#ocx_package_repo-platform">platform</a>, <a href="#ocx_package_repo-repo_mapping">repo_mapping</a>)
+ocx_package_repo(<a href="#ocx_package_repo-name">name</a>, <a href="#ocx_package_repo-bins">bins</a>, <a href="#ocx_package_repo-index">index</a>, <a href="#ocx_package_repo-isolated_home">isolated_home</a>, <a href="#ocx_package_repo-ocx">ocx</a>, <a href="#ocx_package_repo-package">package</a>, <a href="#ocx_package_repo-pins">pins</a>, <a href="#ocx_package_repo-platform">platform</a>, <a href="#ocx_package_repo-platform_query">platform_query</a>,
+                 <a href="#ocx_package_repo-repo_mapping">repo_mapping</a>)
 </pre>
 
 Provisions a single OCX package from an OCI registry.
@@ -102,6 +103,7 @@ input (`//:content` is not available in lazy mode).
 | <a id="ocx_package_repo-package"></a>package |  Fully-qualified identifier: 'registry/repo[:tag][@sha256:…]'.   | String | required |  |
 | <a id="ocx_package_repo-pins"></a>pins |  ocx platform key -> 'sha256:…' manifest digest overriding the digest of `package` for that platform.   | <a href="https://bazel.build/rules/lib/dict">Dictionary: String -> String</a> | optional |  `{}`  |
 | <a id="ocx_package_repo-platform"></a>platform |  ocx platform key ('linux/amd64', …) to provision for; empty = host.   | String | optional |  `""`  |
+| <a id="ocx_package_repo-platform_query"></a>platform_query |  Ordered platform preference list forwarded to `ocx ... -p a,b,c` for a single resolution (first match wins). Empty = derive from `platform` (the direct repo-rule default). The set of runnable targets and the manifest pin still key on `platform`.   | List of strings | optional |  `[]`  |
 | <a id="ocx_package_repo-repo_mapping"></a>repo_mapping |  In `WORKSPACE` context only: a dictionary from local repository name to global repository name. This allows controls over workspace dependency resolution for dependencies of this repository.<br><br>For example, an entry `"@foo": "@bar"` declares that, for any time this repository depends on `@foo` (such as a dependency on `@foo//some:target`, it should actually resolve that dependency within globally-declared `@bar` (`@bar//some:target`).<br><br>This attribute is _not_ supported in `MODULE.bazel` context (when invoking a repository rule inside a module extension's implementation function).   | <a href="https://bazel.build/rules/lib/dict">Dictionary: String -> String</a> | optional |  |
 
 

@@ -20,6 +20,15 @@ ocx.package(
     name = "jq",
     index = "//:index",
     package = "ocx.sh/jq:latest",
+    # The arm64 target accepts amd64 as a fallback tier (e.g. under qemu).
+    # The snapshot carries an arm64 leaf, so tier 1 matches and the resolved
+    # content stays arm64 — the abi_test below still asserts arm64 ABI.
+    platform_fallbacks = {
+        "linux/arm64": [
+            "linux/arm64",
+            "linux/amd64",
+        ],
+    },
     platforms = [
         "linux/amd64",
         "linux/arm64",

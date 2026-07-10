@@ -56,8 +56,11 @@ def _lazy_package(ctx, host, pkg):
         data = data,
     ))
 
-def _platform_args(platform):
-    return ["-p", platform] if platform else []
+def _platform_args(query):
+    # An ordered preference list -> a single '-p a,b,c' (first match wins).
+    # Filter empties so the host case ([""]) yields no -p flag.
+    query = [p for p in query if p]
+    return ["-p", ",".join(query)] if query else []
 
 def pinned_ref(package, pins, platform):
     """Applies the per-platform manifest pin for `platform`, if any.
@@ -76,6 +79,36 @@ def pinned_ref(package, pins, platform):
     if not pin.startswith("sha256:"):
         fail("rules_ocx: pins[\"{}\"] must be a 'sha256:…' manifest digest, got '{}'".format(platform, pin))
     return package.split("@")[0] + "@" + pin
+
+def resolve_platform_queries(name, platforms, fallbacks):
+    """Maps each provisioned platform to its ordered `-p` preference list.
+
+    Validates every `platform_fallbacks` entry — the key must be a provisioned
+    platform and its list must start with the key (the target is the
+    first-choice tier) — so a bad entry fails fast at extension eval. Targets
+    without an entry resolve to `[target]` (single platform, unchanged).
+
+    Args:
+        name: the ocx.package tag name (for error messages).
+        platforms: the provisioned target platform keys.
+        fallbacks: {target platform key: ordered preference list}.
+
+    Returns:
+        {target platform key: ordered preference list (>=1 element)}.
+    """
+    for key, query in fallbacks.items():
+        if key not in platforms:
+            fail(("rules_ocx: ocx.package '{}': platform_fallbacks key '{}' is not " +
+                  "one of platforms {}").format(name, key, platforms))
+        if not query or query[0] != key:
+            fail(("rules_ocx: ocx.package '{}': platform_fallbacks['{}'] must start " +
+                  "with '{}' (the target is the first-choice tier), got {}").format(
+                name,
+                key,
+                key,
+                query,
+            ))
+    return {p: fallbacks.get(p, [p]) for p in platforms}
 
 def _ocx_package_repo_impl(ctx):
     host = host_info(ctx.os.name, ctx.os.arch)
@@ -104,7 +137,7 @@ def _ocx_package_repo_impl(ctx):
     stdout = run_ocx(
         ctx,
         binary,
-        json_pkg + ["install"] + _platform_args(ctx.attr.platform) + [pkg],
+        json_pkg + ["install"] + _platform_args(ctx.attr.platform_query or [ctx.attr.platform]) + [pkg],
         ocx_env.env,
         "installing " + pkg,
         hints = hints,
@@ -124,7 +157,7 @@ def _ocx_package_repo_impl(ctx):
     stdout = run_ocx(
         ctx,
         binary,
-        json_pkg + ["which"] + _platform_args(ctx.attr.platform) + [pkg],
+        json_pkg + ["which"] + _platform_args(ctx.attr.platform_query or [ctx.attr.platform]) + [pkg],
         ocx_env.env,
         "locating " + pkg,
     )
@@ -133,7 +166,7 @@ def _ocx_package_repo_impl(ctx):
     stdout = run_ocx(
         ctx,
         binary,
-        json_pkg + ["env"] + _platform_args(ctx.attr.platform) + [pkg],
+        json_pkg + ["env"] + _platform_args(ctx.attr.platform_query or [ctx.attr.platform]) + [pkg],
         ocx_env.env,
         "composing the environment of " + pkg,
     )
@@ -211,6 +244,12 @@ input (`//:content` is not available in lazy mode).""",
         ),
         "platform": attr.string(
             doc = "ocx platform key ('linux/amd64', …) to provision for; empty = host.",
+        ),
+        "platform_query": attr.string_list(
+            doc = "Ordered platform preference list forwarded to `ocx ... -p a,b,c` " +
+                  "for a single resolution (first match wins). Empty = derive from " +
+                  "`platform` (the direct repo-rule default). The set of runnable " +
+                  "targets and the manifest pin still key on `platform`.",
         ),
     },
 )
