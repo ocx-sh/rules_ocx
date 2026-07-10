@@ -11,7 +11,7 @@ MODULE.bazel.lock.
 """
 
 load("//ocx/private:download.bzl", "ocx_download")
-load("//ocx/private:package.bzl", "ocx_package_hub", "ocx_package_repo")
+load("//ocx/private:package.bzl", "ocx_package_hub", "ocx_package_repo", "resolve_platform_queries")
 load("//ocx/private:platforms.bzl", "repo_suffix")
 load("//ocx/private:project.bzl", "ocx_project_repo")
 load("//ocx/private:versions.bzl", "DEFAULT_OCX_VERSION")
@@ -110,6 +110,17 @@ _package = tag_class(
                   "installs 'registry/repo@<digest>'; unpinned platforms fall back " +
                   "to `package`.",
         ),
+        "platform_fallbacks": attr.string_list_dict(
+            doc = "Optional per-target platform preference list: target ocx platform " +
+                  "key -> ordered list of platforms passed to that target's single " +
+                  "'ocx ... -p a,b,c' resolution (first tier with a match wins). Lets " +
+                  "one target accept a concrete cross-arch/variant fallback, e.g. " +
+                  "{'linux/arm64': ['linux/arm64', 'linux/amd64']} to run amd64 under " +
+                  "qemu/rosetta. Each key must appear in `platforms` and be the first " +
+                  "entry of its own list. Keys absent here resolve to '[key]' " +
+                  "(unchanged). A pinned target (`pins`) ignores its fallback chain — " +
+                  "the digest fixes the manifest.",
+        ),
         "platforms": attr.string_list(
             doc = "ocx platform keys ('linux/amd64', …) to provision in addition to " +
                   "the host: creates '<name>_<os>_<arch>' repos plus a '<name>' hub " +
@@ -164,6 +175,11 @@ def _ocx_impl(module_ctx):
             if tag.name in seen:
                 fail("rules_ocx: duplicate repository name '{}'".format(tag.name))
             seen[tag.name] = True
+
+            # Validates platform_fallbacks (keys ⊆ platforms, anchored on their
+            # own target) even in the host-only branch below, where a non-empty
+            # dict is a mistake.
+            queries = resolve_platform_queries(tag.name, tag.platforms, tag.platform_fallbacks)
             if tag.platforms:
                 platform_repos = {}
                 for platform in tag.platforms:
@@ -176,6 +192,7 @@ def _ocx_impl(module_ctx):
                         index = tag.index,
                         pins = tag.pins,
                         platform = platform,
+                        platform_query = queries[platform],
                         isolated_home = tag.isolated_home,
                     )
                 ocx_package_hub(

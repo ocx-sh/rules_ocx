@@ -4,7 +4,7 @@
 """Unit tests for ocx/private/package.bzl."""
 
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
-load("//ocx/private:package.bzl", "pinned_ref")
+load("//ocx/private:package.bzl", "pinned_ref", "resolve_platform_queries")
 
 _PINS = {
     "darwin/arm64": "sha256:" + "b" * 64,
@@ -41,6 +41,34 @@ def _pinned_ref_test_impl(ctx):
 
 pinned_ref_test = unittest.make(_pinned_ref_test_impl)
 
+def _platform_queries_test_impl(ctx):
+    env = unittest.begin(ctx)
+
+    # A fallback entry becomes that target's preference list; other targets
+    # resolve to '[target]' (single platform, unchanged).
+    asserts.equals(
+        env,
+        {
+            "linux/arm64": ["linux/arm64", "linux/amd64"],
+            "linux/amd64": ["linux/amd64"],
+        },
+        resolve_platform_queries(
+            "jq",
+            ["linux/arm64", "linux/amd64"],
+            {"linux/arm64": ["linux/arm64", "linux/amd64"]},
+        ),
+    )
+
+    # No fallbacks -> every target is its own single-element query.
+    asserts.equals(
+        env,
+        {"linux/amd64": ["linux/amd64"], "windows/amd64": ["windows/amd64"]},
+        resolve_platform_queries("jq", ["linux/amd64", "windows/amd64"], {}),
+    )
+    return unittest.end(env)
+
+platform_queries_test = unittest.make(_platform_queries_test_impl)
+
 def package_test_suite(name):
     """Instantiates the package.bzl test suite.
 
@@ -50,4 +78,5 @@ def package_test_suite(name):
     unittest.suite(
         name,
         pinned_ref_test,
+        platform_queries_test,
     )
