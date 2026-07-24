@@ -11,8 +11,7 @@ MODULE.bazel.lock.
 """
 
 load("//ocx/private:download.bzl", "ocx_download")
-load("//ocx/private:package.bzl", "ocx_package_hub", "ocx_package_repo")
-load("//ocx/private:platforms.bzl", "repo_suffix")
+load("//ocx/private:package.bzl", "ocx_package_hub", "ocx_package_repo", "resolve_platforms")
 load("//ocx/private:project.bzl", "ocx_project_repo")
 load("//ocx/private:versions.bzl", "DEFAULT_OCX_VERSION")
 
@@ -110,9 +109,18 @@ _package = tag_class(
                   "installs 'registry/repo@<digest>'; unpinned platforms fall back " +
                   "to `package`.",
         ),
+        "platform_aliases": attr.string_dict(
+            doc = "Optional declared-platform -> real-platform remap. Each key must appear " +
+                  "in `platforms`; its value is the canonical ocx platform actually sent to " +
+                  "`-p` and used to derive the hub's Bazel constraints. Everything Bazel-facing " +
+                  "— repo suffix, `pins` lookup, config_setting, use_repo name — still keys on " +
+                  "the declared platform; undeclared platforms are sent as-is. Example: " +
+                  "{'linux/arm64': 'linux/arm64+libc.musl'} provisions a musl arm64 build under " +
+                  "the plain 'linux/arm64' target.",
+        ),
         "platforms": attr.string_list(
             doc = "ocx platform keys ('linux/amd64', …) to provision in addition to " +
-                  "the host: creates '<name>_<os>_<arch>' repos plus a '<name>' hub " +
+                  "the host: creates '<name>_<slug>' repos plus a '<name>' hub " +
                   "whose //:content select()s by target platform. Empty = host only.",
         ),
     },
@@ -164,24 +172,34 @@ def _ocx_impl(module_ctx):
             if tag.name in seen:
                 fail("rules_ocx: duplicate repository name '{}'".format(tag.name))
             seen[tag.name] = True
+
+            # Validates platform_aliases (keys ⊆ platforms) even in the host-only
+            # branch below, where a non-empty dict is a mistake.
+            resolved = resolve_platforms(tag.name, tag.platforms, tag.platform_aliases)
+            if resolved.error:
+                fail(resolved.error)
             if tag.platforms:
                 platform_repos = {}
-                for platform in tag.platforms:
-                    repo = "{}_{}".format(tag.name, repo_suffix(platform))
-                    platform_repos[platform] = repo
+                platform_reals = {}
+                for s, info in resolved.platforms.items():
+                    repo = "{}_{}".format(tag.name, s)
+                    platform_repos[s] = repo
+                    platform_reals[s] = info.real
                     ocx_package_repo(
                         name = repo,
                         package = tag.package,
                         bins = tag.bins,
                         index = tag.index,
                         pins = tag.pins,
-                        platform = platform,
+                        platform = info.declared,
+                        resolved_platform = info.real,
                         isolated_home = tag.isolated_home,
                     )
                 ocx_package_hub(
                     name = tag.name,
                     bins = tag.bins,
                     platform_repos = platform_repos,
+                    platform_reals = platform_reals,
                 )
             else:
                 ocx_package_repo(

@@ -11,7 +11,7 @@ CLI-backed provisioning.
 
 load("//ocx/private:download.bzl", _ocx_download = "ocx_download")
 load("//ocx/private:package.bzl", _ocx_package_hub = "ocx_package_hub", _ocx_package_repo = "ocx_package_repo")
-load("//ocx/private:platforms.bzl", _OCX_PLATFORMS = "OCX_PLATFORMS")
+load("//ocx/private:platforms.bzl", _ocx_platform_constraints = "ocx_platform_constraints")
 load("//ocx/private:project.bzl", _ocx_project_repo = "ocx_project_repo")
 
 ocx_download = _ocx_download
@@ -19,5 +19,5 @@ ocx_project_repo = _ocx_project_repo
 ocx_package_repo = _ocx_package_repo
 ocx_package_hub = _ocx_package_hub
 
-# ocx platform key ("os/arch") -> Bazel constraint labels.
-OCX_PLATFORMS = _OCX_PLATFORMS
+# ocx platform key ("os/arch[/variant][+feature,...]") -> Bazel constraint labels.
+ocx_platform_constraints = _ocx_platform_constraints

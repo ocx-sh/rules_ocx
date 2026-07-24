@@ -7,6 +7,35 @@ Most consumers only need the `ocx` module extension
 here for power users composing their own extensions on top of the same
 CLI-backed provisioning.
 
+<a id="ocx_platform_constraints"></a>
+
+## ocx_platform_constraints
+
+<pre>
+load("@rules_ocx//ocx:defs.bzl", "ocx_platform_constraints")
+
+ocx_platform_constraints(<a href="#ocx_platform_constraints-platform">platform</a>)
+</pre>
+
+Bazel constraint labels for the os/arch prefix of an ocx platform key.
+
+'linux/arm64+libc.musl' -> ['@platforms//os:linux', '@platforms//cpu:aarch64'].
+For toolchain authors composing exec_compatible_with; also the hub's source
+of config_setting constraint_values. Fails on an unmappable os/arch.
+
+
+**PARAMETERS**
+
+
+| Name  | Description | Default Value |
+| :------------- | :------------- | :------------- |
+| <a id="ocx_platform_constraints-platform"></a>platform |  an ocx platform key ('os/arch[/variant][+feature,...]').   |  none |
+
+**RETURNS**
+
+[os_constraint_label, cpu_constraint_label].
+
+
 <a id="ocx_download"></a>
 
 ## ocx_download
@@ -44,7 +73,7 @@ of `https://setup.ocx.sh/dist.json`. Corporate mirrors: set
 <pre>
 load("@rules_ocx//ocx:defs.bzl", "ocx_package_hub")
 
-ocx_package_hub(<a href="#ocx_package_hub-name">name</a>, <a href="#ocx_package_hub-bins">bins</a>, <a href="#ocx_package_hub-platform_repos">platform_repos</a>, <a href="#ocx_package_hub-repo_mapping">repo_mapping</a>)
+ocx_package_hub(<a href="#ocx_package_hub-name">name</a>, <a href="#ocx_package_hub-bins">bins</a>, <a href="#ocx_package_hub-platform_reals">platform_reals</a>, <a href="#ocx_package_hub-platform_repos">platform_repos</a>, <a href="#ocx_package_hub-repo_mapping">repo_mapping</a>)
 </pre>
 
 Multi-platform hub for an ocx.package() with `platforms`.
@@ -61,7 +90,8 @@ images).
 | :------------- | :------------- | :------------- | :------------- | :------------- |
 | <a id="ocx_package_hub-name"></a>name |  A unique name for this repository.   | <a href="https://bazel.build/concepts/labels#target-names">Name</a> | required |  |
 | <a id="ocx_package_hub-bins"></a>bins |  Lazy mode: launcher names to alias instead of //:content.   | List of strings | optional |  `[]`  |
-| <a id="ocx_package_hub-platform_repos"></a>platform_repos |  ocx platform key -> apparent name of the per-platform package repo.   | <a href="https://bazel.build/rules/lib/dict">Dictionary: String -> String</a> | required |  |
+| <a id="ocx_package_hub-platform_reals"></a>platform_reals |  repo slug -> real ocx platform, the source of each config_setting's Bazel constraint_values.   | <a href="https://bazel.build/rules/lib/dict">Dictionary: String -> String</a> | required |  |
+| <a id="ocx_package_hub-platform_repos"></a>platform_repos |  repo slug -> apparent name of the per-platform package repo.   | <a href="https://bazel.build/rules/lib/dict">Dictionary: String -> String</a> | required |  |
 | <a id="ocx_package_hub-repo_mapping"></a>repo_mapping |  In `WORKSPACE` context only: a dictionary from local repository name to global repository name. This allows controls over workspace dependency resolution for dependencies of this repository.<br><br>For example, an entry `"@foo": "@bar"` declares that, for any time this repository depends on `@foo` (such as a dependency on `@foo//some:target`, it should actually resolve that dependency within globally-declared `@bar` (`@bar//some:target`).<br><br>This attribute is _not_ supported in `MODULE.bazel` context (when invoking a repository rule inside a module extension's implementation function).   | <a href="https://bazel.build/rules/lib/dict">Dictionary: String -> String</a> | optional |  |
 
 
@@ -72,7 +102,8 @@ images).
 <pre>
 load("@rules_ocx//ocx:defs.bzl", "ocx_package_repo")
 
-ocx_package_repo(<a href="#ocx_package_repo-name">name</a>, <a href="#ocx_package_repo-bins">bins</a>, <a href="#ocx_package_repo-index">index</a>, <a href="#ocx_package_repo-isolated_home">isolated_home</a>, <a href="#ocx_package_repo-ocx">ocx</a>, <a href="#ocx_package_repo-package">package</a>, <a href="#ocx_package_repo-pins">pins</a>, <a href="#ocx_package_repo-platform">platform</a>, <a href="#ocx_package_repo-repo_mapping">repo_mapping</a>)
+ocx_package_repo(<a href="#ocx_package_repo-name">name</a>, <a href="#ocx_package_repo-bins">bins</a>, <a href="#ocx_package_repo-index">index</a>, <a href="#ocx_package_repo-isolated_home">isolated_home</a>, <a href="#ocx_package_repo-ocx">ocx</a>, <a href="#ocx_package_repo-package">package</a>, <a href="#ocx_package_repo-pins">pins</a>, <a href="#ocx_package_repo-platform">platform</a>, <a href="#ocx_package_repo-repo_mapping">repo_mapping</a>,
+                 <a href="#ocx_package_repo-resolved_platform">resolved_platform</a>)
 </pre>
 
 Provisions a single OCX package from an OCI registry.
@@ -103,6 +134,7 @@ input (`//:content` is not available in lazy mode).
 | <a id="ocx_package_repo-pins"></a>pins |  ocx platform key -> 'sha256:…' manifest digest overriding the digest of `package` for that platform.   | <a href="https://bazel.build/rules/lib/dict">Dictionary: String -> String</a> | optional |  `{}`  |
 | <a id="ocx_package_repo-platform"></a>platform |  ocx platform key ('linux/amd64', …) to provision for; empty = host.   | String | optional |  `""`  |
 | <a id="ocx_package_repo-repo_mapping"></a>repo_mapping |  In `WORKSPACE` context only: a dictionary from local repository name to global repository name. This allows controls over workspace dependency resolution for dependencies of this repository.<br><br>For example, an entry `"@foo": "@bar"` declares that, for any time this repository depends on `@foo` (such as a dependency on `@foo//some:target`, it should actually resolve that dependency within globally-declared `@bar` (`@bar//some:target`).<br><br>This attribute is _not_ supported in `MODULE.bazel` context (when invoking a repository rule inside a module extension's implementation function).   | <a href="https://bazel.build/rules/lib/dict">Dictionary: String -> String</a> | optional |  |
+| <a id="ocx_package_repo-resolved_platform"></a>resolved_platform |  Real ocx platform sent to `-p` — lets a declared `platform` be aliased to a different real one (variant/feature build). Empty = derive from `platform`. Runnable-target gating compares its os/arch prefix to the host; `pins` still key on `platform`.   | String | optional |  `""`  |
 
 
 <a id="ocx_project_repo"></a>

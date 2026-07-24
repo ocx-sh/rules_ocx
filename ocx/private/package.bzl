@@ -5,7 +5,7 @@
 CLI (`package install` → `package which` → `package env`), plus the
 multi-platform hub that select()s between per-platform repos."""
 
-load(":platforms.bzl", "OCX_PLATFORMS", "host_info")
+load(":platforms.bzl", "host_info", "ocx_platform_constraints", "os_arch", "slug")
 load(
     ":repo_utils.bzl",
     "decode_json",
@@ -56,9 +56,6 @@ def _lazy_package(ctx, host, pkg):
         data = data,
     ))
 
-def _platform_args(platform):
-    return ["-p", platform] if platform else []
-
 def pinned_ref(package, pins, platform):
     """Applies the per-platform manifest pin for `platform`, if any.
 
@@ -76,6 +73,40 @@ def pinned_ref(package, pins, platform):
     if not pin.startswith("sha256:"):
         fail("rules_ocx: pins[\"{}\"] must be a 'sha256:…' manifest digest, got '{}'".format(platform, pin))
     return package.split("@")[0] + "@" + pin
+
+def resolve_platforms(name, platforms, aliases):
+    """Validates aliases and maps each declared platform to its slug + real platform.
+
+    Every `aliases` key must be a declared platform; its value is the real ocx
+    platform sent to `-p`. Two declared platforms reducing to the same slug is an
+    error (they would collide on repo/config_setting names).
+
+    Args:
+        name: the ocx.package tag name (for error messages).
+        platforms: the declared target platform keys.
+        aliases: {declared platform key: real ocx platform sent to `-p`}.
+
+    Returns:
+        struct(error = "" | message, platforms = {slug: struct(declared, real)}).
+    """
+    for key in aliases:
+        if key not in platforms:
+            return struct(
+                error = ("rules_ocx: ocx.package '{}': platform_aliases key '{}' is " +
+                         "not one of platforms {}").format(name, key, platforms),
+                platforms = {},
+            )
+    out = {}
+    for p in platforms:
+        s = slug(p)
+        if s in out:
+            return struct(
+                error = ("rules_ocx: ocx.package '{}': platforms '{}' and '{}' both " +
+                         "reduce to slug '{}' — rename one").format(name, out[s].declared, p, s),
+                platforms = {},
+            )
+        out[s] = struct(declared = p, real = aliases.get(p, p))
+    return struct(error = "", platforms = out)
 
 def _ocx_package_repo_impl(ctx):
     host = host_info(ctx.os.name, ctx.os.arch)
@@ -99,12 +130,19 @@ def _ocx_package_repo_impl(ctx):
             ctx.attr.package.split("@")[0].split(":")[0],
         )
     json_pkg = root_flags + ["--format", "json", "package"]
-    runnable = ctx.attr.platform in ("", host.ocx_platform)
+    real = ctx.attr.resolved_platform or ctx.attr.platform
+    platform_arg = ["-p", real] if real else []
+
+    # ponytail: os/arch-only compare — a musl repo (real 'linux/amd64+libc.musl')
+    # reads "runnable" on a glibc linux/amd64 host. Acceptable: the CLI resolves the
+    # right leaf at run time; upgrade to feature-aware host matching only if a launcher
+    # actually mis-selects.
+    runnable = real == "" or os_arch(real) == host.ocx_platform
 
     stdout = run_ocx(
         ctx,
         binary,
-        json_pkg + ["install"] + _platform_args(ctx.attr.platform) + [pkg],
+        json_pkg + ["install"] + platform_arg + [pkg],
         ocx_env.env,
         "installing " + pkg,
         hints = hints,
@@ -124,7 +162,7 @@ def _ocx_package_repo_impl(ctx):
     stdout = run_ocx(
         ctx,
         binary,
-        json_pkg + ["which"] + _platform_args(ctx.attr.platform) + [pkg],
+        json_pkg + ["which"] + platform_arg + [pkg],
         ocx_env.env,
         "locating " + pkg,
     )
@@ -133,7 +171,7 @@ def _ocx_package_repo_impl(ctx):
     stdout = run_ocx(
         ctx,
         binary,
-        json_pkg + ["env"] + _platform_args(ctx.attr.platform) + [pkg],
+        json_pkg + ["env"] + platform_arg + [pkg],
         ocx_env.env,
         "composing the environment of " + pkg,
     )
@@ -212,25 +250,35 @@ input (`//:content` is not available in lazy mode).""",
         "platform": attr.string(
             doc = "ocx platform key ('linux/amd64', …) to provision for; empty = host.",
         ),
+        "resolved_platform": attr.string(
+            doc = "Real ocx platform sent to `-p` — lets a declared `platform` be aliased " +
+                  "to a different real one (variant/feature build). Empty = derive from " +
+                  "`platform`. Runnable-target gating compares its os/arch prefix to the " +
+                  "host; `pins` still key on `platform`.",
+        ),
     },
 )
 
 def _ocx_package_hub_impl(ctx):
     lines = ['package(default_visibility = ["//visibility:public"])', ""]
-    conditions = {}
-    for platform, repo in ctx.attr.platform_repos.items():
-        if platform not in OCX_PLATFORMS:
-            fail("rules_ocx: unknown ocx platform '{}' (known: {})".format(
-                platform,
-                ", ".join(OCX_PLATFORMS.keys()),
+    seen = {}  # ",".join(constraints) -> real platform, for the duplicate guard
+    for s, real in ctx.attr.platform_reals.items():
+        constraints = ocx_platform_constraints(real)  # fails on unknown os/arch
+        key = ",".join(constraints)
+        if key in seen:
+            fail(("rules_ocx: hub '{}': platforms '{}' and '{}' both derive constraints " +
+                  "{} — a select() cannot tell them apart").format(
+                ctx.attr.name,
+                seen[key],
+                real,
+                constraints,
             ))
-        setting = platform.replace("/", "_")
-        conditions[platform] = setting
+        seen[key] = real
         lines += [
             "config_setting(",
-            '    name = "{}",'.format(setting),
+            '    name = "{}",'.format(s),
             "    constraint_values = [",
-        ] + ['        "{}",'.format(c) for c in OCX_PLATFORMS[platform]] + [
+        ] + ['        "{}",'.format(c) for c in constraints] + [
             "    ],",
             ")",
             "",
@@ -243,8 +291,8 @@ def _ocx_package_hub_impl(ctx):
             '    name = "{}",'.format(target),
             "    actual = select({",
         ]
-        for platform, repo in ctx.attr.platform_repos.items():
-            lines.append('        ":{}": "@{}//:{}",'.format(conditions[platform], repo, target))
+        for s, repo in ctx.attr.platform_repos.items():
+            lines.append('        ":{}": "@{}//:{}",'.format(s, repo, target))
         lines += [
             "    }),",
             ")",
@@ -264,9 +312,14 @@ images).""",
         "bins": attr.string_list(
             doc = "Lazy mode: launcher names to alias instead of //:content.",
         ),
+        "platform_reals": attr.string_dict(
+            mandatory = True,
+            doc = "repo slug -> real ocx platform, the source of each config_setting's " +
+                  "Bazel constraint_values.",
+        ),
         "platform_repos": attr.string_dict(
             mandatory = True,
-            doc = "ocx platform key -> apparent name of the per-platform package repo.",
+            doc = "repo slug -> apparent name of the per-platform package repo.",
         ),
     },
 )

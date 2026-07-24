@@ -15,7 +15,7 @@ MODULE.bazel.lock.
 <pre>
 ocx = use_extension("@rules_ocx//ocx:extensions.bzl", "ocx")
 ocx.download(<a href="#ocx.download-dist_manifest">dist_manifest</a>, <a href="#ocx.download-triple">triple</a>, <a href="#ocx.download-version">version</a>)
-ocx.package(<a href="#ocx.package-name">name</a>, <a href="#ocx.package-bins">bins</a>, <a href="#ocx.package-index">index</a>, <a href="#ocx.package-isolated_home">isolated_home</a>, <a href="#ocx.package-package">package</a>, <a href="#ocx.package-pins">pins</a>, <a href="#ocx.package-platforms">platforms</a>)
+ocx.package(<a href="#ocx.package-name">name</a>, <a href="#ocx.package-bins">bins</a>, <a href="#ocx.package-index">index</a>, <a href="#ocx.package-isolated_home">isolated_home</a>, <a href="#ocx.package-package">package</a>, <a href="#ocx.package-pins">pins</a>, <a href="#ocx.package-platform_aliases">platform_aliases</a>, <a href="#ocx.package-platforms">platforms</a>)
 ocx.project(<a href="#ocx.project-name">name</a>, <a href="#ocx.project-bins">bins</a>, <a href="#ocx.project-groups">groups</a>, <a href="#ocx.project-isolated_home">isolated_home</a>, <a href="#ocx.project-ocx_lock">ocx_lock</a>, <a href="#ocx.project-ocx_toml">ocx_toml</a>, <a href="#ocx.project-platform">platform</a>)
 </pre>
 
@@ -58,7 +58,8 @@ Provisions a single OCX package from an OCI registry.
 | <a id="ocx.package-isolated_home"></a>isolated_home |  Use a repository-local ocx store instead of the shared user OCX_HOME.   | Boolean | optional |  `False`  |
 | <a id="ocx.package-package"></a>package |  Fully-qualified identifier: 'registry/repo[:tag][@sha256:…]'. Freeze tag resolution with `index`, or pin per-platform manifest digests with `pins`.   | String | required |  |
 | <a id="ocx.package-pins"></a>pins |  Per-platform manifest pins: ocx platform key -> 'sha256:…' digest of that platform's manifest (as reported by `ocx package install -p <platform>`). The matching platform installs 'registry/repo@<digest>'; unpinned platforms fall back to `package`.   | <a href="https://bazel.build/rules/lib/dict">Dictionary: String -> String</a> | optional |  `{}`  |
-| <a id="ocx.package-platforms"></a>platforms |  ocx platform keys ('linux/amd64', …) to provision in addition to the host: creates '<name>_<os>_<arch>' repos plus a '<name>' hub whose //:content select()s by target platform. Empty = host only.   | List of strings | optional |  `[]`  |
+| <a id="ocx.package-platform_aliases"></a>platform_aliases |  Optional declared-platform -> real-platform remap. Each key must appear in `platforms`; its value is the canonical ocx platform actually sent to `-p` and used to derive the hub's Bazel constraints. Everything Bazel-facing — repo suffix, `pins` lookup, config_setting, use_repo name — still keys on the declared platform; undeclared platforms are sent as-is. Example: {'linux/arm64': 'linux/arm64+libc.musl'} provisions a musl arm64 build under the plain 'linux/arm64' target.   | <a href="https://bazel.build/rules/lib/dict">Dictionary: String -> String</a> | optional |  `{}`  |
+| <a id="ocx.package-platforms"></a>platforms |  ocx platform keys ('linux/amd64', …) to provision in addition to the host: creates '<name>_<slug>' repos plus a '<name>' hub whose //:content select()s by target platform. Empty = host only.   | List of strings | optional |  `[]`  |
 
 <a id="ocx.project"></a>
 

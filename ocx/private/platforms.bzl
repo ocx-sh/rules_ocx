@@ -7,15 +7,17 @@ Pure functions on (os name, arch) strings so they are unit-testable; the
 repository rules pass `repository_ctx.os.name` / `.arch` in.
 """
 
-# ocx platform key ("os/arch", as used in ocx.lock and `-p`) -> Bazel constraints.
-OCX_PLATFORMS = {
-    "darwin/amd64": ["@platforms//os:macos", "@platforms//cpu:x86_64"],
-    "darwin/arm64": ["@platforms//os:macos", "@platforms//cpu:aarch64"],
-    "linux/amd64": ["@platforms//os:linux", "@platforms//cpu:x86_64"],
-    "linux/arm64": ["@platforms//os:linux", "@platforms//cpu:aarch64"],
-    "windows/amd64": ["@platforms//os:windows", "@platforms//cpu:x86_64"],
-    "windows/arm64": ["@platforms//os:windows", "@platforms//cpu:aarch64"],
+# os/arch prefix of an ocx platform key -> Bazel constraint labels.
+_OS = {
+    "linux": "@platforms//os:linux",
+    "darwin": "@platforms//os:osx",
+    "windows": "@platforms//os:windows",
 }
+_CPU = {
+    "amd64": "@platforms//cpu:x86_64",
+    "arm64": "@platforms//cpu:aarch64",
+}
+_SLUG_OK = "abcdefghijklmnopqrstuvwxyz0123456789"
 
 _CPUS = {
     "aarch64": "aarch64",
@@ -24,16 +26,47 @@ _CPUS = {
     "x86_64": "x86_64",
 }
 
-def repo_suffix(ocx_platform):
-    """Converts an ocx platform key to a repository-name suffix.
+def slug(platform):
+    """Bazel-name-safe slug of an ocx platform key.
+
+    Lowercases, maps every non-[a-z0-9] run to a single '_', strips leading/
+    trailing '_'. 'linux/arm64+libc.musl' -> 'linux_arm64_libc_musl'.
+    """
+    keep = "".join([c if c in _SLUG_OK else "_" for c in platform.lower().elems()])
+    return "_".join([p for p in keep.split("_") if p])
+
+def os_arch(platform):
+    """The 'os/arch' prefix of a platform key (drops '/variant' and '+features')."""
+    return "/".join(platform.split("+")[0].split("/")[:2])
+
+def ocx_platform_constraints(platform):
+    """Bazel constraint labels for the os/arch prefix of an ocx platform key.
+
+    'linux/arm64+libc.musl' -> ['@platforms//os:linux', '@platforms//cpu:aarch64'].
+    For toolchain authors composing exec_compatible_with; also the hub's source
+    of config_setting constraint_values. Fails on an unmappable os/arch.
 
     Args:
-        ocx_platform: an ocx "os/arch" key, e.g. "linux/amd64".
+        platform: an ocx platform key ('os/arch[/variant][+feature,...]').
 
     Returns:
-        A string safe for use in repository names, e.g. "linux_amd64".
+        [os_constraint_label, cpu_constraint_label].
     """
-    return ocx_platform.replace("/", "_")
+    parts = os_arch(platform).split("/")
+    if len(parts) != 2 or not parts[0] or not parts[1]:
+        fail("rules_ocx: platform '{}' is not 'os/arch[...]' — cannot derive constraints".format(platform))
+    os_c = _OS.get(parts[0])
+    cpu_c = _CPU.get(parts[1])
+    if not os_c or not cpu_c:
+        fail(("rules_ocx: cannot map platform '{}' to Bazel constraints " +
+              "(unknown os '{}' or arch '{}'; known os {}, arch {})").format(
+            platform,
+            parts[0],
+            parts[1],
+            _OS.keys(),
+            _CPU.keys(),
+        ))
+    return [os_c, cpu_c]
 
 def host_info(os_name, arch):
     """Maps a host OS name and arch to ocx release and platform identifiers.
