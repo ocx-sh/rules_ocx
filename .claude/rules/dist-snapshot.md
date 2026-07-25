@@ -6,6 +6,8 @@
 
 - Refresh: `task dist:update` (curl + sanity check). CI `update-dist.yml`
   opens a PR on a schedule.
+- Bumping to a new ocx release (snapshot + pin + CI pins + verification):
+  use the `update-dist` skill.
 - **Always bump together with `DEFAULT_OCX_VERSION`**
   (`ocx/private/versions.bzl`): the pinned version must exist in the
   snapshot for all 8 targets — `task dist:check` verifies.

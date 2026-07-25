@@ -31,7 +31,7 @@ def select_release(manifest, version, target):
 def archive_type(filename):
     """Maps a release filename to the explicit download_and_extract type.
 
-    ocx releases ship .zip (windows), .tar.gz (>= 0.5), and .tar.xz (older).
+    ocx releases ship .zip (windows), .tar.gz (>= 0.4.3), and .tar.xz (older).
 
     Args:
         filename: release row filename, e.g. "ocx-x86_64-unknown-linux-musl.tar.gz".

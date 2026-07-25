@@ -34,7 +34,7 @@ in-tree draft ocx-sh/ocx#12.
 4. Sysexits from ocx (64 usage / 65 stale / 78 missing) map to actionable
    fail() messages that name the exact command to run.
 
-## Two-tier ocx CLI contract (verified against 0.3.10)
+## Two-tier ocx CLI contract (verified against 0.4.3)
 
 - `ocx --format json env` → `{"entries":[{"key","value","type":"path"|"constant"}]}` (ordered).
 - `ocx --format json package install <pkg>` → `{"<raw>":{identifier

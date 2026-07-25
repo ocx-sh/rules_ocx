@@ -17,12 +17,15 @@ tasks:
       - task: test:examples
 
   lint:
-    desc: buildifier + actionlint + license headers + links
+    desc: buildifier + actionlint + license headers + links + dist snapshot
     cmds:
       - "{{.BAZEL}} run //:buildifier.check"
       - ocx run -- actionlint
       - ocx run -- hawkeye check
       - ocx run -- lychee --no-progress README.md CONTRIBUTING.md SECURITY.md
+      # Guards the pin/snapshot lockstep invariant on every PR — the scheduled
+      # update-dist.yml only checks it when it refreshes the snapshot itself.
+      - task: dist:check
 
   format:
     desc: Apply buildifier formatting
@@ -58,11 +61,20 @@ tasks:
       - |
         python3 - <<'EOF'
         import json, re
+        # Keep in sync with archive_type() in ocx/private/manifest.bzl, which
+        # falls back to tar.xz — an unmapped extension breaks extraction silently.
+        KNOWN = (".zip", ".tar.gz", ".tar.xz")
         pin = re.search(r'DEFAULT_OCX_VERSION = "([^"]+)"',
                         open("ocx/private/versions.bzl").read()).group(1)
         rows = [r for r in json.load(open("dist/dist.json"))["releases"]
                 if r["version"] == pin]
         assert len(rows) == 8, f"expected 8 targets for {pin}, got {len(rows)}"
         assert all(len(r["sha256"]) == 64 for r in rows)
-        print(f"dist.json OK: {pin} x {len(rows)} targets")
+        unmapped = [r["filename"] for r in rows
+                    if not r["filename"].endswith(KNOWN)]
+        assert not unmapped, (
+            f"{pin}: archive_type() does not map {unmapped} — teach it the new "
+            f"format before pinning this version")
+        exts = sorted({"".join(r["filename"].partition(".")[1:]) for r in rows})
+        print(f"dist.json OK: {pin} x {len(rows)} targets, archives {exts}")
         EOF
