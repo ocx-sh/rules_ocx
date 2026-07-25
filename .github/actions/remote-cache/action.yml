@@ -1,0 +1,42 @@
+name: Remote cache
+description: >-
+  Point Bazel at the shared bazel-cache.ocx.sh remote cache by appending to
+  .bazelrc.user, which the committed .bazelrc try-imports.
+
+inputs:
+  auth:
+    description: >-
+      Base64 "user:password" authorising cache writes. Empty (the default)
+      configures a read-only cache, which is what pull requests and forks get.
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Configure remote cache
+      shell: bash
+      env:
+        BAZEL_CACHE_AUTH: ${{ inputs.auth }}
+      run: |
+        set -euo pipefail
+        # .bazelrc.user is gitignored, so the cache configuration never reaches
+        # the release archive and therefore never reaches BCR's presubmit.
+        {
+          echo ""
+          echo "build --remote_cache=https://bazel-cache.ocx.sh"
+          echo "build --remote_timeout=60"
+          if [ -n "$BAZEL_CACHE_AUTH" ]; then
+            # The quotes matter: Bazel's rc parser splits on whitespace, so an
+            # unquoted "Basic <token>" is read as a second argument.
+            echo "build --remote_header=authorization=\"Basic $BAZEL_CACHE_AUTH\""
+          else
+            echo "build --remote_upload_local_results=false"
+          fi
+        } >> .bazelrc.user
+
+        if [ -n "$BAZEL_CACHE_AUTH" ]; then
+          echo "Remote cache: read-write (https://bazel-cache.ocx.sh)"
+        else
+          echo "Remote cache: read-only (https://bazel-cache.ocx.sh)"
+        fi
