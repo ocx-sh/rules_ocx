@@ -151,6 +151,7 @@ def _ocx_package_repo_impl(ctx):
         json_pkg + ["install"] + platform_arg + [pkg],
         ocx_env.env,
         "installing " + pkg,
+        host.is_windows,
         hints = hints,
         retries = 2,
     )
@@ -171,6 +172,7 @@ def _ocx_package_repo_impl(ctx):
         json_pkg + ["which"] + platform_arg + [pkg],
         ocx_env.env,
         "locating " + pkg,
+        host.is_windows,
     )
     root = decode_json(stdout, "ocx package which").values()[0]
 
@@ -180,6 +182,7 @@ def _ocx_package_repo_impl(ctx):
         json_pkg + ["env"] + platform_arg + [pkg],
         ocx_env.env,
         "composing the environment of " + pkg,
+        host.is_windows,
     )
     entries = decode_json(stdout, "ocx package env")["entries"]
 
@@ -190,9 +193,15 @@ def _ocx_package_repo_impl(ctx):
         ctx.symlink(root + "/entrypoints", "entrypoints")
 
     # Foreign platforms expose no launchers, so they skip the closure call too.
-    bins = []
+    discovered = struct(bins = [], scanned = [])
     if runnable:
-        bins = discover_bins(
+        # `inspect --closure` spends its 65 on a closure conflict; the generic
+        # hint names a lockfile this tier does not have.
+        closure_hints = dict(hints)
+        closure_hints[65] = ("the closure of '{}' conflicts — two packages in it declare the " +
+                             "same entrypoint, or one repository resolved to two digests; run " +
+                             "'ocx package inspect --closure {}' to see the pair").format(pkg, pkg)
+        discovered = discover_bins(
             ctx,
             run_ocx(
                 ctx,
@@ -200,15 +209,17 @@ def _ocx_package_repo_impl(ctx):
                 json_pkg + ["inspect", "--closure"] + platform_arg + [pkg],
                 ocx_env.env,
                 "reading the declared surface of " + pkg,
-                hints = hints,
+                host.is_windows,
+                hints = closure_hints,
             ),
+            "ocx package inspect --closure",
             entries,
             host.is_windows,
         )
-    write_launchers(ctx, bins, entries, ocx_env.home, str(binary), host.is_windows)
-    ctx.file("env.bzl", render_env_bzl(entries, ocx_env.home))
+    write_launchers(ctx, discovered.bins, entries, ocx_env.home, str(binary), host.is_windows)
+    ctx.file("env.bzl", render_env_bzl(entries, ocx_env.home, discovered.scanned))
     ctx.file("BUILD.bazel", render_launchers_build(
-        bins,
+        discovered.bins,
         host.is_windows,
         extra = "\n".join([
             'exports_files(["env.bzl"])',
@@ -229,7 +240,8 @@ ocx_package_repo = repository_rule(
 its public surface (`ocx package inspect --closure`) becomes a runnable
 target `//:<name>` (host-platform repos only). A package shipping no
 complete `binaries` metadata falls back to scanning the composed PATH, which
-also exposes its private executables. For reproducibility, commit an index
+also exposes its private executables — `//:env.bzl`'s `OCX_SCANNED_PACKAGES`
+names the packages that forced it. For reproducibility, commit an index
 snapshot and reference it
 via `index` (tags then resolve frozen from the snapshot), or pin
 per-platform manifest digests via `pins` — plain floating tags resolve at
@@ -253,7 +265,9 @@ input (`//:content` is not available in lazy mode).""",
             doc = "An ocx site config.toml (mirrors, registries, [patches]) layered over the " +
                   "host's discovered config — not the project ocx.toml. Sets OCX_CONFIG for " +
                   "every invocation, overriding an ambient one, and the file is watched. " +
-                  "Combine with no_config for a hermetic configuration.",
+                  "Combine with no_config for a hermetic configuration. With `bins` it is " +
+                  "copied into the repository and uploaded as an input with every action — " +
+                  "keep credentials out of it.",
         ),
         "index": attr.label(
             doc = "Committed ocx index snapshot directory (created with " +
@@ -268,10 +282,12 @@ input (`//:content` is not available in lazy mode).""",
         "no_config": attr.bool(
             default = False,
             doc = "Ignore the host's discovered config tiers (/etc, the user config, " +
-                  "$OCX_HOME/config.toml) and the managed-config snapshot — sets OCX_NO_CONFIG=1. " +
-                  "An explicit `config` still applies. Use this when a corporate managed config " +
-                  "must not reach the build; it also opts out of the exit-78 gate a " +
-                  "required-but-unsynced managed config raises.",
+                  "$OCX_HOME/config.toml) and the managed-config snapshot — sets OCX_NO_CONFIG=1, " +
+                  "and blanks an ambient OCX_CONFIG, OCX_PATCHES and OCX_PATCH_SNAPSHOT, which " +
+                  "OCX_NO_CONFIG alone does not prune. The `config` and `patch_snapshot` attrs " +
+                  "still apply. Use this when a corporate managed config must not reach the " +
+                  "build; it also opts out of the exit-78 gate a required-but-unsynced managed " +
+                  "config raises.",
         ),
         "ocx": attr.label(
             default = "@ocx_tool//:ocx",
@@ -287,7 +303,9 @@ input (`//:content` is not available in lazy mode).""",
             doc = "A committed patches.snapshot.json (written by `ocx patch freeze` next to " +
                   "ocx.lock) freezing the digests of the patch companions composed onto this " +
                   "environment. Sets OCX_PATCH_SNAPSHOT. `ocx lock --check` does not cover " +
-                  "companions — without a frozen snapshot they resolve at fetch time.",
+                  "companions — without a frozen snapshot they resolve at fetch time. With " +
+                  "`bins` it is copied into the repository and uploaded as an input with every " +
+                  "action — keep credentials out of it.",
         ),
         "pins": attr.string_dict(
             doc = "ocx platform key -> 'sha256:…' manifest digest overriding the " +

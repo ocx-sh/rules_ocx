@@ -79,6 +79,7 @@ def _ocx_project_repo_impl(ctx):
         project + ["lock", "--check"],
         ocx_env.env,
         "checking {} against its lockfile".format(ctx.attr.ocx_toml),
+        host.is_windows,
         hints = {
             65: "run 'ocx lock' next to {} and commit the updated ocx.lock".format(ctx.attr.ocx_toml),
             78: ("missing or unsupported ocx.lock next to {} — run 'ocx lock' with the " +
@@ -112,6 +113,7 @@ def _ocx_project_repo_impl(ctx):
         pull,
         ocx_env.env,
         "pulling packages for " + str(ctx.attr.ocx_toml),
+        host.is_windows,
         hints = no_leaf,
     )
 
@@ -124,18 +126,27 @@ def _ocx_project_repo_impl(ctx):
         env_cmd,
         ocx_env.env,
         "composing the environment of " + str(ctx.attr.ocx_toml),
+        host.is_windows,
         hints = no_leaf,
     )
     entries = decode_json(stdout, "ocx env")["entries"]
 
     # Foreign platforms expose no launchers, so they skip the closure call too.
     runnable = ctx.attr.platform in ("", host.ocx_platform)
-    bins = []
+    discovered = struct(bins = [], scanned = [])
     if runnable:
         closure_cmd = ["--format", "json"] + project + ["inspect", "--closure"]
         if ctx.attr.groups:
             closure_cmd += ["-g", ",".join(ctx.attr.groups)]
-        bins = discover_bins(
+
+        # `inspect --closure` spends its 65 on a closure conflict, not on a
+        # stale lockfile — `lock --check` already passed above.
+        closure_hints = dict(no_leaf)
+        closure_hints[65] = ("the composed closure conflicts — two tools in scope declare the " +
+                             "same entrypoint, or one repository resolved to two digests; run " +
+                             "'ocx inspect --closure' next to {} to see the pair, then narrow " +
+                             "`groups` or reconcile the versions").format(ctx.attr.ocx_toml)
+        discovered = discover_bins(
             ctx,
             run_ocx(
                 ctx,
@@ -143,15 +154,17 @@ def _ocx_project_repo_impl(ctx):
                 closure_cmd,
                 ocx_env.env,
                 "reading the declared tool surface of " + str(ctx.attr.ocx_toml),
-                hints = no_leaf,
+                host.is_windows,
+                hints = closure_hints,
             ),
+            "ocx inspect --closure",
             entries,
             host.is_windows,
         )
-    write_launchers(ctx, bins, entries, ocx_env.home, str(binary), host.is_windows)
-    ctx.file("env.bzl", render_env_bzl(entries, ocx_env.home))
+    write_launchers(ctx, discovered.bins, entries, ocx_env.home, str(binary), host.is_windows)
+    ctx.file("env.bzl", render_env_bzl(entries, ocx_env.home, discovered.scanned))
     ctx.file("BUILD.bazel", render_launchers_build(
-        bins,
+        discovered.bins,
         host.is_windows,
         extra = 'exports_files(["env.bzl"])\n',
     ))
@@ -164,8 +177,9 @@ Fails when the lockfile is stale or missing (fix with `ocx lock`). Every
 executable the toolchain's packages declare as their public surface
 (`ocx inspect --closure`) becomes a runnable target `//:<name>`; a package
 shipping no complete `binaries` metadata falls back to scanning the composed
-environment's `path` entries, which also exposes its private executables.
-The raw environment is loadable from `//:env.bzl` (`OCX_ENV`, `OCX_HOME`).
+PATH, which also exposes its private executables — `//:env.bzl`'s
+`OCX_SCANNED_PACKAGES` names the packages that forced it. The raw
+environment is loadable from the same file (`OCX_ENV`, `OCX_HOME`).
 
 With `bins`, provisioning is lazy: nothing is pulled at fetch time, and each
 named executable becomes a launcher that re-enters `ocx run` — content
@@ -195,7 +209,9 @@ do not run on this host.""",
             doc = "An ocx site config.toml (mirrors, registries, [patches]) layered over the " +
                   "host's discovered config — not the project ocx.toml. Sets OCX_CONFIG for " +
                   "every invocation, overriding an ambient one, and the file is watched. " +
-                  "Combine with no_config for a hermetic configuration.",
+                  "Combine with no_config for a hermetic configuration. With `bins` it is " +
+                  "copied into the repository and uploaded as an input with every action — " +
+                  "keep credentials out of it.",
         ),
         "groups": attr.string_list(
             doc = "ocx.toml groups to provision (comma-joined into `-g` for " +
@@ -210,10 +226,12 @@ do not run on this host.""",
         "no_config": attr.bool(
             default = False,
             doc = "Ignore the host's discovered config tiers (/etc, the user config, " +
-                  "$OCX_HOME/config.toml) and the managed-config snapshot — sets OCX_NO_CONFIG=1. " +
-                  "An explicit `config` still applies. Use this when a corporate managed config " +
-                  "must not reach the build; it also opts out of the exit-78 gate a " +
-                  "required-but-unsynced managed config raises.",
+                  "$OCX_HOME/config.toml) and the managed-config snapshot — sets OCX_NO_CONFIG=1, " +
+                  "and blanks an ambient OCX_CONFIG, OCX_PATCHES and OCX_PATCH_SNAPSHOT, which " +
+                  "OCX_NO_CONFIG alone does not prune. The `config` and `patch_snapshot` attrs " +
+                  "still apply. Use this when a corporate managed config must not reach the " +
+                  "build; it also opts out of the exit-78 gate a required-but-unsynced managed " +
+                  "config raises.",
         ),
         "ocx": attr.label(
             default = "@ocx_tool//:ocx",
@@ -235,7 +253,9 @@ do not run on this host.""",
             doc = "A committed patches.snapshot.json (written by `ocx patch freeze` next to " +
                   "ocx.lock) freezing the digests of the patch companions composed onto this " +
                   "environment. Sets OCX_PATCH_SNAPSHOT. `ocx lock --check` does not cover " +
-                  "companions — without a frozen snapshot they resolve at fetch time.",
+                  "companions — without a frozen snapshot they resolve at fetch time. With " +
+                  "`bins` it is copied into the repository and uploaded as an input with every " +
+                  "action — keep credentials out of it.",
         ),
         "platform": attr.string(
             doc = "ocx platform key ('linux/arm64', …) to compose for; empty = host. " +
