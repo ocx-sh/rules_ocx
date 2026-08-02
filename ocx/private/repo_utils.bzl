@@ -31,21 +31,41 @@ OCX_PASSTHROUGH_ENV = [
 # Ambient values that would break an invocation rather than steer it: --global
 # refuses to combine with the explicit --project every call here passes, and
 # --quiet suppresses the very JSON report the parse surface reads (empty stdout,
-# exit 0). Empty = unset.
-_OCX_NEUTRALIZED_ENV = ["OCX_PROJECT", "OCX_GLOBAL", "OCX_QUIET"]
+# exit 0). OCX_PROJECT is a path, and empty is its documented "unset"; the other
+# two are BooleanStrings, which have no empty spelling — "0" neutralizes them
+# without the "invalid boolean value" warning "" logs on every invocation.
+_OCX_NEUTRALIZED_ENV = {"OCX_PROJECT": "", "OCX_GLOBAL": "0", "OCX_QUIET": "0"}
 
-_SYSEXIT_HINTS = {
-    64: "usage error — the pinned ocx version and rules_ocx disagree on the CLI surface; check DEFAULT_OCX_VERSION",
-    65: "stale data — the lockfile does not match its declaration; run 'ocx lock' and commit the result",
+SYSEXIT_HINTS = {
+    64: ("usage error — the pinned ocx CLI and rules_ocx disagree on the command surface; " +
+         "pin an ocx release this rules_ocx supports with ocx.download(version = '…') in " +
+         "MODULE.bazel, or upgrade rules_ocx"),
+    # Tier-neutral: the package tier has no lockfile, so a malformed reference
+    # or digest is named first and 'ocx lock' offered as the project-tier case.
+    65: ("data error — a malformed reference or digest; in a project, a lockfile out of date " +
+         "with ocx.toml ('ocx lock', then commit)"),
     69: "a required service or registry is unavailable — check network, OCX_MIRRORS, and registry auth",
-    75: "transient failure — a rate limit, a short layer blob, or another ocx process holding the project lock; retry",
-    78: ("configuration error — a declared ocx.toml/ocx.lock is missing or its lock_version " +
-         "is unsupported, or a required managed config has never been synced (run " +
-         "'ocx config update'; no_config = True / OCX_NO_CONFIG=1 opts out of the tier)"),
+    74: ("io error — a local read or write failed (disk full, or a denied filesystem " +
+         "operation); check disk space and permissions on OCX_HOME"),
+    75: ("transient registry failure — a timeout, capacity exceeded, or an incomplete " +
+         "transfer; retry, or route through OCX_MIRRORS"),
+    77: ("permission denied — the registry rejected the request for this repository (403), or " +
+         "OCX_HOME is not writable by the current user; check registry access and OCX_HOME's " +
+         "permissions"),
+    # Both project-tier 78s (missing/unsupported ocx.lock) are overridden at
+    # their call sites, so this shared text only ever reaches the package tier,
+    # which has no lockfile at all — leaving one cause to name.
+    78: ("configuration error — a required managed config has never been synced; run " +
+         "'ocx config update' (no_config = True / OCX_NO_CONFIG=1 opts out of the tier)"),
     79: ("not found — the reference, or a required patch companion composed onto it, does not " +
          "exist in the registry; check the name, or refresh the companions with 'ocx patch sync'"),
+    80: "authentication required — the registry needs credentials for this reference; run 'ocx login <registry>'",
     81: ("blocked by policy — offline or frozen mode, a frozen index snapshot, or an ocx.toml " +
          "policy refused the resolution"),
+    # 82 (dirty rc) has no entry: it is raised only by `ocx config setup` and
+    # `ocx self setup` refusing to overwrite a hand-edited managed shell block,
+    # and no repository rule ever runs either command — a hint here would be
+    # dead code.
 }
 
 # Extra attempts granted to a sysexit 75 even when the caller asked for none.
@@ -57,8 +77,56 @@ _CONFIG_HOME_ENV = ["XDG_CONFIG_HOME", "HOME", "APPDATA"]
 # ocx's BooleanString set, case-insensitive.
 _TRUTHY = ["1", "y", "yes", "on", "true"]
 
-def _truthy(value):
+# Windows drive letters, for is_absolute_path — Bazel's Starlark has no
+# per-character alpha predicate.
+_DRIVE_LETTERS = "abcdefghijklmnopqrstuvwxyz"
+
+def truthy(value):
+    """Whether an ocx-style boolean string env value is true.
+
+    Mirrors ocx's `BooleanString` set, case-insensitively; `None` (unset) is
+    false. An unrecognized value (neither the truthy set nor one of ocx's
+    falsy strings) makes ocx itself fail with `InvalidBooleanString` (exit
+    65); `truthy` has no such error path and just returns False for it — a
+    harmless divergence, since the raw value still reaches the real `ocx`
+    invocation for its own enforcement.
+
+    Args:
+        value: string env value, or None.
+
+    Returns:
+        bool.
+    """
     return value != None and value.lower() in _TRUTHY
+
+def is_absolute_path(path, is_windows):
+    """Whether `path` is absolute for the given host.
+
+    POSIX: a leading `/`. Windows: two leading separators (`\\\\server\\share`
+    or its forward-slash spelling `//server/share`, both UNC), or a drive
+    letter followed by `:` and a slash or backslash — a single leading
+    backslash alone is drive-relative, not absolute. Pure function of plain
+    values, so tests can cover it without a repository_ctx.
+
+    Closes only the relative-path case: `repository_ctx.watch()` also
+    rejects the broader class "path under the working directory", which this
+    predicate does not detect — an absolute OCX_HOME inside the workspace
+    still fails that check, which is why isolated_home passes "" instead of
+    a path rather than leaning on this predicate.
+
+    Args:
+        path: path string to test.
+        is_windows: host flag.
+
+    Returns:
+        bool.
+    """
+    if not is_windows:
+        return path.startswith("/")
+    if path.startswith("\\\\") or path.startswith("//"):
+        return True
+    return (len(path) > 2 and path[1] == ":" and path[2] in "/\\" and
+            path[0].lower() in _DRIVE_LETTERS)
 
 def ambient_config_paths(is_windows, is_macos, env, home):
     """The host config files ocx would load, in ocx precedence order.
@@ -136,6 +204,15 @@ def make_ocx_env(ctx, host, isolated_home):
                 fail("rules_ocx: cannot resolve the default OCX_HOME — neither OCX_HOME nor HOME/USERPROFILE is set")
             home = base + ("\\.ocx" if host.is_windows else "/.ocx")
 
+    # Caught here rather than at the first ctx.watch(), which rejects a
+    # relative path with a raw Starlark traceback naming neither the variable
+    # nor the fix.
+    if not is_absolute_path(home, host.is_windows):
+        fail(("rules_ocx: OCX_HOME must be absolute, got '{}' — a repository rule runs from " +
+              "Bazel's own working directory and neither expands '~' nor resolves a relative " +
+              "store. Export an expanded path (OCX_HOME=\"$HOME/.ocx\", not OCX_HOME='~/.ocx'), " +
+              "or set isolated_home = True to keep the store inside the repository.").format(home))
+
     # `ocx run` exports OCX_PROJECT (possibly relative) into child processes;
     # a bazel invoked that way would leak it into every repo-rule ocx call,
     # which runs from a different cwd. Project context only ever comes from
@@ -146,29 +223,53 @@ def make_ocx_env(ctx, host, isolated_home):
     # no repo rule ever has. Pinned off explicitly rather than trusting ocx's
     # TTY probe — the CLI is version-unstable (invariant 2).
     env = {"OCX_HOME": home, "OCX_NO_CONFIG_REFRESH": "1"}
-    for key in _OCX_NEUTRALIZED_ENV:
-        env[key] = ""
+    env.update(_OCX_NEUTRALIZED_ENV)
     for key in OCX_PASSTHROUGH_ENV:
         value = ctx.getenv(key)
         if value != None:
             env[key] = value
 
+    # These name files ocx reads that Bazel would otherwise never see, so
+    # editing an ambient site config would not refetch. Watched only where the
+    # ambient value survives: an attr override replaces it (and ctx.path()
+    # registers that file below), and no_config blanks both. OCX_PATCHES is
+    # deliberately absent: it carries a JSON `[patches]` envelope, not a path.
+    for key, override in [("OCX_CONFIG", ctx.attr.config), ("OCX_PATCH_SNAPSHOT", ctx.attr.patch_snapshot)]:
+        value = env.get(key, "")
+        if override or ctx.attr.no_config or not value:
+            continue
+        if is_absolute_path(value, host.is_windows):
+            ctx.watch(value)
+
     # Attrs beat the ambient environment.
     if ctx.attr.no_config:
         env["OCX_NO_CONFIG"] = "1"
+
+        # OCX_NO_CONFIG only prunes the *discovered* tiers: ocx loads an
+        # explicit OCX_CONFIG regardless, and with the config tier gone an
+        # ambient OCX_PATCHES becomes the *only* patch source — attacker-chosen
+        # companions composed into a build that asked for hermeticity. Empty is
+        # ocx's documented "treat as unset" for all three; the attrs below then
+        # reinstate whatever the caller did ask for.
+        for key in ["OCX_CONFIG", "OCX_PATCHES", "OCX_PATCH_SNAPSHOT"]:
+            env[key] = ""
     if ctx.attr.config:
         env["OCX_CONFIG"] = str(ctx.path(ctx.attr.config))
     if ctx.attr.patch_snapshot:
         env["OCX_PATCH_SNAPSHOT"] = str(ctx.path(ctx.attr.patch_snapshot))
 
-    if not ctx.attr.no_config and not _truthy(ctx.getenv("OCX_NO_CONFIG")):
+    if not ctx.attr.no_config and not truthy(ctx.getenv("OCX_NO_CONFIG")):
         for path in ambient_config_paths(
             host.is_windows,
             host.ocx_platform.startswith("darwin"),
             {key: ctx.getenv(key) or "" for key in _CONFIG_HOME_ENV},
             "" if isolated_home else home,
         ):
-            ctx.watch(path)
+            # ambient_config_paths() derives its user tier from HOME/APPDATA,
+            # neither of which it tests for absoluteness — a relative one would
+            # crash ctx.watch(). Skip the tier instead.
+            if is_absolute_path(path, host.is_windows):
+                ctx.watch(path)
     return struct(env = env, home = home)
 
 def ocx_bin(ctx):
@@ -187,7 +288,7 @@ def ocx_bin(ctx):
     exe = stable.dirname.get_child(stable.basename + ".exe")
     return exe if exe.exists else stable
 
-def run_ocx(ctx, binary, args, env, what, hints = {}, retries = 0):
+def run_ocx(ctx, binary, args, env, what, is_windows, hints = {}, retries = 0):
     """Runs the ocx CLI, mapping failures to actionable messages.
 
     Args:
@@ -196,26 +297,38 @@ def run_ocx(ctx, binary, args, env, what, hints = {}, retries = 0):
         args: argv after the binary.
         env: environment dict (from make_ocx_env().env).
         what: short human description used in error messages.
+        is_windows: host flag (from host_info()); Windows has no `sleep`.
         hints: {exit_code: extra hint} overriding the sysexits defaults.
         retries: extra attempts after a failure. Repo rules fetch in
             parallel, and concurrent `ocx package install` calls of the same
             package can race on store symlink creation (ocx TOCTOU); the
             store is idempotent, so a retry converges. A sysexit 75 is
             retried regardless — it is ocx's own "transient, retry me",
-            raised among other things when a sibling repo rule holds the
-            project lock on the shared ocx.toml.
+            raised when the registry times out or reports capacity exceeded.
+            Attempts are spaced by a linear backoff.
 
     Returns:
         stdout string.
     """
     result = None
-    for attempt in range(max(retries, _TRANSIENT_RETRIES) + 1):
+    attempts = max(retries, _TRANSIENT_RETRIES) + 1
+    for attempt in range(attempts):
         result = ctx.execute([str(binary)] + args, environment = env, timeout = 600)
         if result.return_code == 0:
             return result.stdout
         if attempt >= retries and result.return_code != 75:
             break
-    hint = hints.get(result.return_code) or _SYSEXIT_HINTS.get(result.return_code, "")
+
+        # ponytail: linear 1s, 2s, … — back-to-back execs span microseconds
+        # while a registry rate-limit window spans seconds. The right ceiling
+        # is a registry-policy question; make the schedule an attribute once a
+        # real registry's limits are known. No Batch `sleep`, so Windows keeps
+        # retrying immediately. `sleep` runs through an absolute /bin/sh: a
+        # bare argv resolves against the ambient PATH, which would let anything
+        # named `sleep` execute inside the repository rule.
+        if not is_windows and attempt + 1 < attempts:
+            ctx.execute(["/bin/sh", "-c", 'sleep "$0"', str(attempt + 1)])
+    hint = hints.get(result.return_code) or SYSEXIT_HINTS.get(result.return_code, "")
     fail("rules_ocx: {} failed (exit {}): ocx {}\n{}{}".format(
         what,
         result.return_code,
@@ -229,6 +342,54 @@ def decode_json(stdout, what):
     if not stdout.strip():
         fail("rules_ocx: {} produced no output — expected JSON".format(what))
     return json.decode(stdout)
+
+def closure_packages(stdout, what):
+    """Validates and returns the `packages` list of an `inspect --closure` report.
+
+    Decodes `stdout` itself via decode_json(stdout, what), then validates the
+    result — one error vocabulary for the one command that produced it,
+    whether it failed by not being JSON or by being JSON of the wrong shape.
+
+    `InspectReport` always serializes its top-level `packages` key, so
+    guarding that key fixes nothing. What ocx omits conditionally is each
+    entry's `closure`: `--closure` walks the closure only for a resolved
+    (`Manifest`/`Resolved`) body, so a binding that came back as unresolved
+    `candidates` — an ambiguous tag, or an `ocx inspect` binding projected
+    straight off ocx.lock with no single artifact to walk — carries no
+    `closure` at all. This guards each entry instead: failing when one has
+    no `identifier`, no `closure`, or a `closure` whose `surface.interface`
+    lacks `binaries_complete` or carries a non-list `binaries` — every key
+    declared_bins() indexes unguarded, in the type it indexes it as. The
+    fail() names DEFAULT_OCX_VERSION per invariant 4:
+    this is a shape drift between the pinned ocx and what rules_ocx parses,
+    not a mapped sysexit.
+
+    `install`/`which` reports never reach this function — their top-level
+    shape is `{"<raw>": {...}}`, not this report's `{"packages": [...],
+    ...}` — so they play no part in the drift this guards against.
+
+    Args:
+        stdout: raw stdout of an `ocx [package] inspect --closure` invocation.
+        what: the command string (e.g. "ocx inspect --closure"), passed to
+            decode_json() and reused in the fail() message — the same
+            convention decode_json() and project.bzl already use. Not
+            run_ocx()'s `what` (a human description like "reading the
+            declared tool surface of …"), which never reaches this function.
+
+    Returns:
+        the validated `packages` list.
+    """
+    packages = decode_json(stdout, what)["packages"]
+    for pkg in packages:
+        interface = pkg.get("closure", {}).get("surface", {}).get("interface", {})
+        if (type(interface.get("binaries")) != "list" or
+            "binaries_complete" not in interface or
+            "identifier" not in pkg):
+            fail(("rules_ocx: {} reported '{}' with no closure surface — the pinned ocx CLI " +
+                  "and rules_ocx disagree on the report shape. Move DEFAULT_OCX_VERSION " +
+                  "(ocx/private/versions.bzl) to an ocx release this rules_ocx parses, or " +
+                  "upgrade rules_ocx.").format(what, pkg.get("identifier", "<unnamed package>")))
+    return packages
 
 def list_executables(ctx, directory, is_windows):
     """Lists executable file names in a directory (non-recursive).
@@ -293,12 +454,34 @@ def declared_bins(packages):
             names.append(binary["name"])
     return struct(names = names, incomplete = incomplete)
 
+def path_dirs(entries):
+    """The executable search path an `ocx env` report composes.
+
+    `path`-typed entries carry every colon-list a package contributes, not
+    just PATH: LD_LIBRARY_PATH, MANPATH and PKG_CONFIG_PATH have the same
+    type and name directories holding libraries and man pages, so searching
+    them for tools invents targets from whatever happens to be executable
+    there. Only PATH answers "where do this environment's commands live".
+
+    The key is compared case-insensitively: ocx serializes it verbatim from
+    package metadata, and a package declaring `Path` would otherwise
+    contribute nothing and silently yield zero discovered bins.
+
+    Args:
+        entries: env entries [{"key", "value", "type"}, ...] from `ocx env`.
+
+    Returns:
+        list of directory path strings, in declaration order.
+    """
+    return [e["value"] for e in entries if e["type"] == "path" and e["key"].upper() == "PATH"]
+
 def resolve_bins(ctx, names, entries, is_windows):
-    """Locates each declared executable among the `path`-typed env entries.
+    """Locates each declared executable on the composed PATH.
 
     A declared binary is a name, not a path, so the concrete file is found the
-    way a shell would: first `path` entry holding it wins. A claimed name that
-    no entry holds is dropped — the claim is publisher-declared and unverified.
+    way a shell would: first PATH directory holding it wins. A claimed name
+    that no directory holds is dropped — the claim is publisher-declared and
+    unverified.
 
     Args:
         ctx: repository_ctx.
@@ -310,14 +493,21 @@ def resolve_bins(ctx, names, entries, is_windows):
         list of struct(name, target) where target is the absolute path.
     """
     exts = [".exe", ".bat", ".cmd"] if is_windows else [""]
-    dirs = [e["value"] for e in entries if e["type"] == "path"]
+    dirs = path_dirs(entries)
     bins = []
     for name in names:
         target = ""
         for directory in dirs:
             for ext in exts:
                 candidate = directory + "/" + name + ext
-                if ctx.path(candidate).exists:
+
+                # `exists` is true for a directory too, and a launcher exec-ing
+                # one dies at action time with a bare "Permission denied". A
+                # non-executable regular file dies the same way and is not
+                # caught: `is_dir` is free, an exec-bit test would cost a
+                # ctx.execute per candidate.
+                path = ctx.path(candidate)
+                if path.exists and not path.is_dir:
                     target = candidate
                     break
             if target:
@@ -326,30 +516,34 @@ def resolve_bins(ctx, names, entries, is_windows):
             bins.append(struct(name = name, target = target))
     return bins
 
-def discover_bins(ctx, stdout, entries, is_windows):
+def discover_bins(ctx, stdout, what, entries, is_windows):
     """Runnable tools for a fetched repo: the declared surface, else a PATH scan.
+
+    The fallback is not warned about per fetch — the metadata belongs to a
+    third-party package, so per-fetch noise is unactionable. It is recorded
+    instead: `scanned` names the packages that forced it, and the caller
+    renders it into the repo's env.bzl, where it stays inspectable.
 
     Args:
         ctx: repository_ctx.
         stdout: raw `inspect --closure` JSON.
+        what: the command that produced `stdout` — 'ocx inspect --closure' at
+            the project tier, 'ocx package inspect --closure' at the package
+            tier — reused verbatim in the shape-drift fail().
         entries: env entries from `ocx env`.
         is_windows: host flag.
 
     Returns:
-        list of struct(name, target).
+        struct(bins = [struct(name, target)], scanned = identifiers of the
+        packages whose incomplete metadata forced the PATH scan).
     """
-    surface = declared_bins(decode_json(stdout, "ocx inspect --closure")["packages"])
+    surface = declared_bins(closure_packages(stdout, what))
     if not surface.incomplete:
-        return resolve_bins(ctx, surface.names, entries, is_windows)
-
-    # buildifier: disable=print
-    print(("rules_ocx: no complete `binaries` metadata for {} — falling back to " +
-           "scanning the composed PATH, which also exposes private " +
-           "executables").format(", ".join(surface.incomplete)))
-    return scan_bins(ctx, entries, is_windows)
+        return struct(bins = resolve_bins(ctx, surface.names, entries, is_windows), scanned = [])
+    return struct(bins = scan_bins(ctx, entries, is_windows), scanned = surface.incomplete)
 
 def scan_bins(ctx, entries, is_windows):
-    """Discovers runnable tools by scanning the `path`-typed env entries.
+    """Discovers runnable tools by scanning the composed PATH.
 
     The fallback for packages that declare no complete `binaries` metadata.
     Mirrors ocx PATH semantics: entries in declaration order, first name
@@ -366,17 +560,15 @@ def scan_bins(ctx, entries, is_windows):
     """
     seen = {}
     bins = []
-    for entry in entries:
-        if entry["type"] != "path":
-            continue
-        for basename in list_executables(ctx, entry["value"], is_windows):
+    for directory in path_dirs(entries):
+        for basename in list_executables(ctx, directory, is_windows):
             name = basename
             if is_windows and "." in basename:
                 name = basename[:basename.rfind(".")]
             if name in seen:
                 continue
             seen[name] = True
-            bins.append(struct(name = name, target = entry["value"] + "/" + basename))
+            bins.append(struct(name = name, target = directory + "/" + basename))
     return bins
 
 def rlocation_path(label):
@@ -412,13 +604,26 @@ def stage_lazy_config(ctx, is_windows):
     data = []
     if ctx.attr.no_config:
         exports["OCX_NO_CONFIG"] = "1"
+
+        # OCX_NO_CONFIG prunes only the discovered tiers — the same ambient
+        # OCX_CONFIG / OCX_PATCHES / OCX_PATCH_SNAPSHOT that make_ocx_env()
+        # blanks at fetch time would otherwise be inherited from the action's
+        # environment here. Empty is ocx's "treat as unset"; a set attr
+        # overwrites the entry below.
+        for var in ["OCX_CONFIG", "OCX_PATCHES", "OCX_PATCH_SNAPSHOT"]:
+            exports[var] = ""
     for label, name, var in [
         (ctx.attr.config, "config.toml", "OCX_CONFIG"),
         (ctx.attr.patch_snapshot, "patches.snapshot.json", "OCX_PATCH_SNAPSHOT"),
     ]:
         if not label:
             continue
-        ctx.file(name, ctx.read(label))
+
+        # Not executable: it lands 0644 in the output base — Bazel has no API
+        # to write a repo file 0600, so a config the operator set 0600 becomes
+        # world-readable there, and being a runfile it is uploaded as an action
+        # input with every action. Both attr docs say so.
+        ctx.file(name, ctx.read(label), executable = False)
         exports[var] = str(ctx.path(name)) if is_windows else "$(rlocation {}/{})".format(ctx.name, name)
         data.append(":" + name)
     return struct(exports = exports, data = data)
@@ -445,6 +650,14 @@ def render_lazy_launcher(command, is_windows, exports = {}):
     inputs through the runfiles library, keeping the text identical across
     machines (portable remote-cache keys).
 
+    OCX_PROJECT and OCX_GLOBAL are neutralized first: every command rendered
+    here passes an explicit `--project` (or a digest-pinned reference), and
+    ocx refuses to combine either ambient value with one — so an inherited
+    OCX_GLOBAL would fail the action with a raw ocx usage error. The fetch
+    path neutralizes the same pair via _OCX_NEUTRALIZED_ENV, with the same
+    values: OCX_GLOBAL is a BooleanString, so "0" and not "" (which ocx logs
+    as an invalid boolean on every launcher-run tool).
+
     Args:
         command: pre-quoted argv fragments; POSIX fragments may use
             `$(rlocation …)` — the preamble provides it.
@@ -465,6 +678,7 @@ def render_lazy_launcher(command, is_windows, exports = {}):
             "@echo off",
             "rem Generated by rules_ocx - do not edit.",
             'set "OCX_PROJECT="',
+            'set "OCX_GLOBAL=0"',
         ]
         lines += ['set "{}={}"'.format(key, value) for key, value in exports.items()]
         lines.append("{} %*".format(" ".join(command)))
@@ -474,6 +688,7 @@ def render_lazy_launcher(command, is_windows, exports = {}):
         "# Generated by rules_ocx — do not edit.",
         _RUNFILES_PREAMBLE,
         'export OCX_PROJECT=""',
+        'export OCX_GLOBAL="0"',
     ]
     lines += ['export {}="{}"'.format(key, value) for key, value in exports.items()]
     lines.append('exec {} "$@"'.format(" ".join(command)))
@@ -526,7 +741,7 @@ def render_launcher(entries, target, home, ocx, is_windows):
     lines.append('exec "{}" "$@"'.format(target))
     return "\n".join(lines) + "\n"
 
-def render_env_bzl(entries, home):
+def render_env_bzl(entries, home, scanned = []):
     """Renders the generated repo's env.bzl.
 
     JSON round-trip keeps escaping correct for arbitrary values.
@@ -534,11 +749,13 @@ def render_env_bzl(entries, home):
     Args:
         entries: env entries from `ocx env`.
         home: resolved OCX_HOME.
+        scanned: identifiers of packages whose incomplete `binaries` metadata
+            forced the PATH scan (discover_bins().scanned).
 
     Returns:
         env.bzl content string.
     """
-    payload = json.encode({"entries": entries, "home": home})
+    payload = json.encode({"entries": entries, "home": home, "scanned": scanned})
     return "\n".join([
         '"""Generated by rules_ocx — composed ocx environment."""',
         "",
@@ -549,6 +766,11 @@ def render_env_bzl(entries, home):
         "",
         "# The OCX_HOME these paths point into.",
         'OCX_HOME = _DATA["home"]',
+        "",
+        "# Packages that declared no complete `binaries` surface: their launchers came",
+        "# from scanning PATH, so the target names are unvalidated and include private",
+        "# executables. Empty means every target came from declared metadata.",
+        'OCX_SCANNED_PACKAGES = _DATA["scanned"]',
         "",
     ])
 
