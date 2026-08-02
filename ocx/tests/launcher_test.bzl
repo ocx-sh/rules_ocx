@@ -6,6 +6,7 @@
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 load(
     "//ocx/private:repo_utils.bzl",
+    "ambient_config_paths",
     "declared_bins",
     "render_env_bzl",
     "render_launcher",
@@ -31,6 +32,11 @@ def _sh_launcher_test_impl(ctx):
     # Constants replace.
     asserts.true(env, 'export JAVA_HOME="/store/cc/content"' in script)
     asserts.true(env, script.endswith('exec "/store/aa/content/bin/tool" "$@"\n'))
+
+    # Eager launchers never re-enter ocx for resolution, so the fetch-time
+    # config must not leak into them.
+    asserts.false(env, "OCX_CONFIG" in script)
+    asserts.false(env, "OCX_PATCH_SNAPSHOT" in script)
     return unittest.end(env)
 
 def _bat_launcher_test_impl(ctx):
@@ -47,6 +53,10 @@ def _sh_lazy_launcher_test_impl(ctx):
     script = render_lazy_launcher(
         ['"$(rlocation repo+ocx_tool/ocx)"', "package", "exec", "'ocx.sh/jq@sha256:abc'", "--", "jq"],
         False,
+        exports = {
+            "OCX_NO_CONFIG": "1",
+            "OCX_CONFIG": "$(rlocation repo+pkg/config.toml)",
+        },
     )
     asserts.true(env, script.startswith("#!/usr/bin/env bash"))
 
@@ -54,6 +64,12 @@ def _sh_lazy_launcher_test_impl(ctx):
     asserts.true(env, "runfiles.bash initialization" in script)
     asserts.false(env, "OCX_HOME" in script)
     asserts.true(env, 'export OCX_PROJECT=""' in script)
+
+    # Staged config travels with the launcher, resolved through runfiles.
+    asserts.true(env, 'export OCX_NO_CONFIG="1"' in script)
+    asserts.true(env, 'export OCX_CONFIG="$(rlocation repo+pkg/config.toml)"' in script)
+    asserts.false(env, 'export OCX_CONFIG="/' in script)
+    asserts.true(env, script.index("export OCX_CONFIG=") < script.index("\nexec "))
     asserts.true(env, script.endswith(
         "exec \"$(rlocation repo+ocx_tool/ocx)\" package exec 'ocx.sh/jq@sha256:abc' -- jq \"$@\"\n",
     ))
@@ -64,9 +80,11 @@ def _bat_lazy_launcher_test_impl(ctx):
     script = render_lazy_launcher(
         ['"C:\\repo\\ocx.exe"', "--project", '"C:\\repo\\ocx.toml"', "run", "--", "shellcheck"],
         True,
+        exports = {"OCX_CONFIG": "C:\\repo\\config.toml"},
     )
     asserts.true(env, script.startswith("@echo off"))
     asserts.true(env, 'set "OCX_PROJECT="' in script)
+    asserts.true(env, 'set "OCX_CONFIG=C:\\repo\\config.toml"' in script)
     asserts.true(env, '"C:\\repo\\ocx.exe" --project "C:\\repo\\ocx.toml" run -- shellcheck %*' in script)
     return unittest.end(env)
 
@@ -117,12 +135,59 @@ def _declared_bins_test_impl(ctx):
 
     return unittest.end(env)
 
+def _ambient_config_paths_test_impl(ctx):
+    env = unittest.begin(ctx)
+    posix_env = {"XDG_CONFIG_HOME": "/x/cfg", "HOME": "/home/u", "APPDATA": ""}
+
+    # Linux: /etc tier, XDG user config, then the three OCX_HOME-rooted tiers.
+    asserts.equals(env, [
+        "/etc/ocx/config.toml",
+        "/x/cfg/ocx/config.toml",
+        "/home/u/.ocx/config.toml",
+        "/home/u/.ocx/state/managed-config/snapshot.json",
+        "/home/u/.ocx/state/managed-config/config.toml",
+    ], ambient_config_paths(False, False, posix_env, "/home/u/.ocx"))
+
+    # Unset XDG_CONFIG_HOME falls back to ~/.config; so does a relative one.
+    for xdg in ["", "cfg"]:
+        paths = ambient_config_paths(
+            False,
+            False,
+            {"XDG_CONFIG_HOME": xdg, "HOME": "/home/u"},
+            "",
+        )
+        asserts.equals(env, ["/etc/ocx/config.toml", "/home/u/.config/ocx/config.toml"], paths)
+
+    # macOS ignores XDG entirely.
+    asserts.equals(env, [
+        "/etc/ocx/config.toml",
+        "/home/u/Library/Application Support/ocx/config.toml",
+    ], ambient_config_paths(False, True, posix_env, ""))
+
+    # Windows: APPDATA, backslashes, no /etc tier.
+    asserts.equals(env, [
+        "C:\\Users\\u\\AppData\\Roaming\\ocx\\config.toml",
+        "C:\\Users\\u\\.ocx\\config.toml",
+        "C:\\Users\\u\\.ocx\\state\\managed-config\\snapshot.json",
+        "C:\\Users\\u\\.ocx\\state\\managed-config\\config.toml",
+    ], ambient_config_paths(
+        True,
+        False,
+        {"APPDATA": "C:\\Users\\u\\AppData\\Roaming", "HOME": "", "XDG_CONFIG_HOME": ""},
+        "C:\\Users\\u\\.ocx",
+    ))
+
+    # Nothing to discover: no home (isolated_home) and no env at all.
+    asserts.equals(env, ["/etc/ocx/config.toml"], ambient_config_paths(False, False, {}, ""))
+    return unittest.end(env)
+
 sh_launcher_test = unittest.make(_sh_launcher_test_impl)
 bat_launcher_test = unittest.make(_bat_launcher_test_impl)
 sh_lazy_launcher_test = unittest.make(_sh_lazy_launcher_test_impl)
 bat_lazy_launcher_test = unittest.make(_bat_lazy_launcher_test_impl)
 env_bzl_test = unittest.make(_env_bzl_test_impl)
 declared_bins_test = unittest.make(_declared_bins_test_impl)
+ambient_config_paths_test = unittest.make(_ambient_config_paths_test_impl)
 
 def launcher_test_suite(name):
     """Instantiates the repo_utils pure-helper test suite.
@@ -138,4 +203,5 @@ def launcher_test_suite(name):
         bat_lazy_launcher_test,
         env_bzl_test,
         declared_bins_test,
+        ambient_config_paths_test,
     )

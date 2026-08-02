@@ -17,6 +17,7 @@ load(
     "render_lazy_launcher",
     "rlocation_path",
     "run_ocx",
+    "stage_lazy_config",
     "write_launchers",
 )
 
@@ -39,6 +40,7 @@ def _lazy_package(ctx, host, pkg):
         fail(("rules_ocx: lazy package '{}' must be digest-pinned — the digest is the only " +
               "action-key identity when content is deferred; add the platform to `pins` or " +
               "use an '@sha256:' reference").format(pkg))
+    staged = stage_lazy_config(ctx, host.is_windows)
     ext = ".bat" if host.is_windows else ".sh"
     for name in ctx.attr.bins:
         if host.is_windows:
@@ -46,8 +48,12 @@ def _lazy_package(ctx, host, pkg):
         else:
             command = ['"$(rlocation {})"'.format(rlocation_path(ctx.attr.ocx)), "package", "exec", "'{}'".format(pkg)]
         command += ["--", name]
-        ctx.file("launchers/" + name + ext, render_lazy_launcher(command, host.is_windows), executable = True)
-    data = [str(ctx.attr.ocx)]
+        ctx.file(
+            "launchers/" + name + ext,
+            render_lazy_launcher(command, host.is_windows, exports = staged.exports),
+            executable = True,
+        )
+    data = [str(ctx.attr.ocx)] + staged.data
     if not host.is_windows:
         data.append("@bazel_tools//tools/bash/runfiles")
     ctx.file("BUILD.bazel", render_launchers_build(
@@ -116,7 +122,7 @@ def _ocx_package_repo_impl(ctx):
         return
     binary = ocx_bin(ctx)
     ctx.path(ctx.attr.ocx)  # fetch ordering
-    ocx_env = make_ocx_env(ctx, ctx.attr.isolated_home)
+    ocx_env = make_ocx_env(ctx, host, ctx.attr.isolated_home)
     root_flags = []
     hints = {}
     if ctx.attr.index:
@@ -242,6 +248,13 @@ input (`//:content` is not available in lazy mode).""",
                   "Requires a digest-pinned identity (`pins` or '@sha256:'); " +
                   "incompatible with isolated_home and index.",
         ),
+        "config": attr.label(
+            allow_single_file = True,
+            doc = "An ocx site config.toml (mirrors, registries, [patches]) layered over the " +
+                  "host's discovered config — not the project ocx.toml. Sets OCX_CONFIG for " +
+                  "every invocation, overriding an ambient one, and the file is watched. " +
+                  "Combine with no_config for a hermetic configuration.",
+        ),
         "index": attr.label(
             doc = "Committed ocx index snapshot directory (created with " +
                   "`ocx --index <dir> index update <package>`). When set, tag " +
@@ -252,6 +265,14 @@ input (`//:content` is not available in lazy mode).""",
             default = False,
             doc = "Keep the ocx store inside this repository instead of the shared user OCX_HOME.",
         ),
+        "no_config": attr.bool(
+            default = False,
+            doc = "Ignore the host's discovered config tiers (/etc, the user config, " +
+                  "$OCX_HOME/config.toml) and the managed-config snapshot — sets OCX_NO_CONFIG=1. " +
+                  "An explicit `config` still applies. Use this when a corporate managed config " +
+                  "must not reach the build; it also opts out of the exit-78 gate a " +
+                  "required-but-unsynced managed config raises.",
+        ),
         "ocx": attr.label(
             default = "@ocx_tool//:ocx",
             allow_single_file = True,
@@ -260,6 +281,13 @@ input (`//:content` is not available in lazy mode).""",
         "package": attr.string(
             mandatory = True,
             doc = "Fully-qualified identifier: 'registry/repo[:tag][@sha256:…]'.",
+        ),
+        "patch_snapshot": attr.label(
+            allow_single_file = True,
+            doc = "A committed patches.snapshot.json (written by `ocx patch freeze` next to " +
+                  "ocx.lock) freezing the digests of the patch companions composed onto this " +
+                  "environment. Sets OCX_PATCH_SNAPSHOT. `ocx lock --check` does not cover " +
+                  "companions — without a frozen snapshot they resolve at fetch time.",
         ),
         "pins": attr.string_dict(
             doc = "ocx platform key -> 'sha256:…' manifest digest overriding the " +

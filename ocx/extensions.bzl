@@ -45,6 +45,12 @@ _project = tag_class(
                   "execution. Actions key on the lockfile, so fully remote-cached " +
                   "builds download no tool content.",
         ),
+        "config": attr.label(
+            doc = "An ocx site config.toml (mirrors, registries, [patches]) layered over the " +
+                  "host's discovered config — not the project ocx.toml. Sets OCX_CONFIG for " +
+                  "every invocation, overriding an ambient one, and the file is watched. " +
+                  "Combine with no_config for a hermetic configuration.",
+        ),
         "groups": attr.string_list(
             doc = "ocx.toml groups to provision (scopes both the pull and the " +
                   "composed environment). Reserved names: 'default' = the " +
@@ -54,6 +60,14 @@ _project = tag_class(
             default = False,
             doc = "Use a repository-local ocx store instead of the shared user OCX_HOME.",
         ),
+        "no_config": attr.bool(
+            default = False,
+            doc = "Ignore the host's discovered config tiers (/etc, the user config, " +
+                  "$OCX_HOME/config.toml) and the managed-config snapshot — sets OCX_NO_CONFIG=1. " +
+                  "An explicit `config` still applies. Use this when a corporate managed config " +
+                  "must not reach the build; it also opts out of the exit-78 gate a " +
+                  "required-but-unsynced managed config raises.",
+        ),
         "ocx_lock": attr.label(
             mandatory = True,
             doc = "The committed ocx.lock (watched; edits refetch).",
@@ -61,6 +75,12 @@ _project = tag_class(
         "ocx_toml": attr.label(
             mandatory = True,
             doc = "The project ocx.toml.",
+        ),
+        "patch_snapshot": attr.label(
+            doc = "A committed patches.snapshot.json (written by `ocx patch freeze` next to " +
+                  "ocx.lock) freezing the digests of the patch companions composed onto this " +
+                  "environment. Sets OCX_PATCH_SNAPSHOT. `ocx lock --check` does not cover " +
+                  "companions — without a frozen snapshot they resolve at fetch time.",
         ),
         "platform": attr.string(
             doc = "ocx platform key ('linux/arm64', …) to compose for; empty = host. " +
@@ -85,6 +105,12 @@ _package = tag_class(
                   "execution. Requires a digest-pinned identity (`pins` or " +
                   "'@sha256:'); `//:content` is not available in lazy mode.",
         ),
+        "config": attr.label(
+            doc = "An ocx site config.toml (mirrors, registries, [patches]) layered over the " +
+                  "host's discovered config — not the project ocx.toml. Sets OCX_CONFIG for " +
+                  "every invocation, overriding an ambient one, and the file is watched. " +
+                  "Combine with no_config for a hermetic configuration.",
+        ),
         "index": attr.label(
             doc = "Committed ocx index snapshot directory (created with " +
                   "`ocx --index <dir> index update <package>`, refreshed the same " +
@@ -96,11 +122,25 @@ _package = tag_class(
             default = False,
             doc = "Use a repository-local ocx store instead of the shared user OCX_HOME.",
         ),
+        "no_config": attr.bool(
+            default = False,
+            doc = "Ignore the host's discovered config tiers (/etc, the user config, " +
+                  "$OCX_HOME/config.toml) and the managed-config snapshot — sets OCX_NO_CONFIG=1. " +
+                  "An explicit `config` still applies. Use this when a corporate managed config " +
+                  "must not reach the build; it also opts out of the exit-78 gate a " +
+                  "required-but-unsynced managed config raises.",
+        ),
         "package": attr.string(
             mandatory = True,
             doc = "Fully-qualified identifier: 'registry/repo[:tag][@sha256:…]'. " +
                   "Freeze tag resolution with `index`, or pin per-platform " +
                   "manifest digests with `pins`.",
+        ),
+        "patch_snapshot": attr.label(
+            doc = "A committed patches.snapshot.json (written by `ocx patch freeze` next to " +
+                  "ocx.lock) freezing the digests of the patch companions composed onto this " +
+                  "environment. Sets OCX_PATCH_SNAPSHOT. `ocx lock --check` does not cover " +
+                  "companions — without a frozen snapshot they resolve at fetch time.",
         ),
         "pins": attr.string_dict(
             doc = "Per-platform manifest pins: ocx platform key -> 'sha256:…' digest " +
@@ -166,6 +206,9 @@ def _ocx_impl(module_ctx):
                 groups = tag.groups,
                 platform = tag.platform,
                 isolated_home = tag.isolated_home,
+                config = tag.config,
+                no_config = tag.no_config,
+                patch_snapshot = tag.patch_snapshot,
             )
 
         for tag in mod.tags.package:
@@ -194,6 +237,9 @@ def _ocx_impl(module_ctx):
                         platform = info.declared,
                         resolved_platform = info.real,
                         isolated_home = tag.isolated_home,
+                        config = tag.config,
+                        no_config = tag.no_config,
+                        patch_snapshot = tag.patch_snapshot,
                     )
                 ocx_package_hub(
                     name = tag.name,
@@ -209,6 +255,9 @@ def _ocx_impl(module_ctx):
                     index = tag.index,
                     pins = tag.pins,
                     isolated_home = tag.isolated_home,
+                    config = tag.config,
+                    no_config = tag.no_config,
+                    patch_snapshot = tag.patch_snapshot,
                 )
 
     # No use_repo validation (root_module_direct_deps): the same extension is

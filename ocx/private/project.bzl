@@ -18,6 +18,7 @@ load(
     "render_lazy_launcher",
     "rlocation_path",
     "run_ocx",
+    "stage_lazy_config",
     "write_launchers",
 )
 
@@ -35,6 +36,7 @@ def _lazy_project(ctx, host, binary):
              "the store must be resolvable on whatever machine executes the launcher")
     ctx.file("ocx.toml", ctx.read(ctx.attr.ocx_toml))
     ctx.file("ocx.lock", ctx.read(ctx.attr.ocx_lock))
+    staged = stage_lazy_config(ctx, host.is_windows)
     groups = ["-g", ",".join(ctx.attr.groups)] if ctx.attr.groups else []
     ext = ".bat" if host.is_windows else ".sh"
     for name in ctx.attr.bins:
@@ -48,8 +50,12 @@ def _lazy_project(ctx, host, binary):
                 "run",
             ]
         command += groups + ["--", name]
-        ctx.file("launchers/" + name + ext, render_lazy_launcher(command, host.is_windows), executable = True)
-    data = [":ocx.lock", ":ocx.toml", str(ctx.attr.ocx)]
+        ctx.file(
+            "launchers/" + name + ext,
+            render_lazy_launcher(command, host.is_windows, exports = staged.exports),
+            executable = True,
+        )
+    data = [":ocx.lock", ":ocx.toml", str(ctx.attr.ocx)] + staged.data
     if not host.is_windows:
         data.append("@bazel_tools//tools/bash/runfiles")
     ctx.file("BUILD.bazel", render_launchers_build(
@@ -64,7 +70,7 @@ def _ocx_project_repo_impl(ctx):
     binary = ocx_bin(ctx)
     toml = ctx.path(ctx.attr.ocx_toml)
     ctx.path(ctx.attr.ocx_lock)  # register the lock as an input — edits refetch
-    ocx_env = make_ocx_env(ctx, ctx.attr.isolated_home)
+    ocx_env = make_ocx_env(ctx, host, ctx.attr.isolated_home)
     project = ["--project", str(toml)]
 
     run_ocx(
@@ -76,7 +82,8 @@ def _ocx_project_repo_impl(ctx):
         hints = {
             65: "run 'ocx lock' next to {} and commit the updated ocx.lock".format(ctx.attr.ocx_toml),
             78: ("missing or unsupported ocx.lock next to {} — run 'ocx lock' with the " +
-                 "pinned ocx and commit the result").format(ctx.attr.ocx_toml),
+                 "pinned ocx and commit the result, or run 'ocx config update' if a " +
+                 "required managed config is unsynced").format(ctx.attr.ocx_toml),
         },
     )
 
@@ -90,7 +97,9 @@ def _ocx_project_repo_impl(ctx):
 
     target = ["--platform", ctx.attr.platform] if ctx.attr.platform else []
     no_leaf = {
-        78: "a tool in scope ships no '{}' leaf in ocx.lock — narrow `groups` or drop the platform".format(
+        78: ("a tool in scope ships no '{}' leaf in ocx.lock — narrow `groups` or drop the " +
+             "platform; an unsynced required managed config also exits 78 " +
+             "('ocx config update')").format(
             ctx.attr.platform or host.ocx_platform,
         ),
     }
@@ -181,6 +190,13 @@ do not run on this host.""",
                   "actions key on the lockfile (a runfile) instead of tool content. " +
                   "Incompatible with isolated_home.",
         ),
+        "config": attr.label(
+            allow_single_file = True,
+            doc = "An ocx site config.toml (mirrors, registries, [patches]) layered over the " +
+                  "host's discovered config — not the project ocx.toml. Sets OCX_CONFIG for " +
+                  "every invocation, overriding an ambient one, and the file is watched. " +
+                  "Combine with no_config for a hermetic configuration.",
+        ),
         "groups": attr.string_list(
             doc = "ocx.toml groups to provision (comma-joined into `-g` for " +
                   "`ocx pull`, `ocx env`, and lazy `ocx run`). Reserved names: " +
@@ -190,6 +206,14 @@ do not run on this host.""",
         "isolated_home": attr.bool(
             default = False,
             doc = "Keep the ocx store inside this repository instead of the shared user OCX_HOME.",
+        ),
+        "no_config": attr.bool(
+            default = False,
+            doc = "Ignore the host's discovered config tiers (/etc, the user config, " +
+                  "$OCX_HOME/config.toml) and the managed-config snapshot — sets OCX_NO_CONFIG=1. " +
+                  "An explicit `config` still applies. Use this when a corporate managed config " +
+                  "must not reach the build; it also opts out of the exit-78 gate a " +
+                  "required-but-unsynced managed config raises.",
         ),
         "ocx": attr.label(
             default = "@ocx_tool//:ocx",
@@ -205,6 +229,13 @@ do not run on this host.""",
             mandatory = True,
             allow_single_file = True,
             doc = "The project ocx.toml declaring the toolchain.",
+        ),
+        "patch_snapshot": attr.label(
+            allow_single_file = True,
+            doc = "A committed patches.snapshot.json (written by `ocx patch freeze` next to " +
+                  "ocx.lock) freezing the digests of the patch companions composed onto this " +
+                  "environment. Sets OCX_PATCH_SNAPSHOT. `ocx lock --check` does not cover " +
+                  "companions — without a frozen snapshot they resolve at fetch time.",
         ),
         "platform": attr.string(
             doc = "ocx platform key ('linux/arm64', …) to compose for; empty = host. " +

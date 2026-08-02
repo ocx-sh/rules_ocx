@@ -25,6 +25,7 @@ OCX_PASSTHROUGH_ENV = [
     "OCX_MANAGED_CONFIG",
     "OCX_ALLOW_YANKED",
     "OCX_PATCHES",
+    "OCX_PATCH_SNAPSHOT",
 ]
 
 # Ambient values that would break an invocation rather than steer it: --global
@@ -38,17 +39,87 @@ _SYSEXIT_HINTS = {
     65: "stale data — the lockfile does not match its declaration; run 'ocx lock' and commit the result",
     69: "a required service or registry is unavailable — check network, OCX_MIRRORS, and registry auth",
     75: "transient failure — a rate limit, a short layer blob, or another ocx process holding the project lock; retry",
-    78: "missing configuration — an expected ocx.toml/ocx.lock was not found next to the declared labels",
+    78: ("configuration error — a declared ocx.toml/ocx.lock is missing or its lock_version " +
+         "is unsupported, or a required managed config has never been synced (run " +
+         "'ocx config update'; no_config = True / OCX_NO_CONFIG=1 opts out of the tier)"),
+    79: ("not found — the reference, or a required patch companion composed onto it, does not " +
+         "exist in the registry; check the name, or refresh the companions with 'ocx patch sync'"),
+    81: ("blocked by policy — offline or frozen mode, a frozen index snapshot, or an ocx.toml " +
+         "policy refused the resolution"),
 }
 
 # Extra attempts granted to a sysexit 75 even when the caller asked for none.
 _TRANSIENT_RETRIES = 2
 
-def make_ocx_env(ctx, isolated_home):
-    """Assembles the environment for ocx invocations from this repo rule.
+# Env vars consulted to locate the platform user-config directory.
+_CONFIG_HOME_ENV = ["XDG_CONFIG_HOME", "HOME", "APPDATA"]
+
+# ocx's BooleanString set, case-insensitive.
+_TRUTHY = ["1", "y", "yes", "on", "true"]
+
+def _truthy(value):
+    return value != None and value.lower() in _TRUTHY
+
+def ambient_config_paths(is_windows, is_macos, env, home):
+    """The host config files ocx would load, in ocx precedence order.
+
+    Bazel cannot invalidate on a file it never reads, so the repository rules
+    watch every tier — including the ones that do not exist yet, since
+    `repository_ctx.watch()` registers absence too and creating the file
+    refetches. Pure function of plain values so tests can cover it.
 
     Args:
-        ctx: repository_ctx.
+        is_windows: host flag.
+        is_macos: host flag (different user-config directory).
+        env: {var: value} for XDG_CONFIG_HOME, HOME and APPDATA; "" when unset.
+        home: the resolved OCX_HOME, or "" to drop the OCX_HOME-rooted tiers
+            (isolated_home puts them inside the repo being fetched, which
+            cannot be watched).
+
+    Returns:
+        list of absolute path strings, lowest precedence first.
+    """
+    sep = "\\" if is_windows else "/"
+    paths = []
+    if not is_windows:
+        # ponytail: ocx reads the literal /etc/ocx/config.toml on every OS, but
+        # a Windows host has no /etc — skip the tier instead of watching a path
+        # that can never exist there.
+        paths.append("/etc/ocx/config.toml")
+
+    config_home = ""
+    if is_windows:
+        config_home = env.get("APPDATA", "")
+    elif is_macos:
+        base = env.get("HOME", "")
+        config_home = base + "/Library/Application Support" if base else ""
+    else:
+        # A relative XDG_CONFIG_HOME is ignored, per the XDG spec and dirs-rs.
+        xdg = env.get("XDG_CONFIG_HOME", "")
+        if xdg.startswith("/"):
+            config_home = xdg
+        else:
+            base = env.get("HOME", "")
+            config_home = base + "/.config" if base else ""
+    if config_home:
+        paths.append(sep.join([config_home, "ocx", "config.toml"]))
+
+    if home:
+        paths.append(sep.join([home, "config.toml"]))
+        paths.append(sep.join([home, "state", "managed-config", "snapshot.json"]))
+        paths.append(sep.join([home, "state", "managed-config", "config.toml"]))
+    return paths
+
+def make_ocx_env(ctx, host, isolated_home):
+    """Assembles the environment for ocx invocations from this repo rule.
+
+    Also registers the host's ambient config tiers as watched inputs, so a
+    site config edit — including an `ocx config update` refreshing the managed
+    snapshot — refetches the repos that consumed it.
+
+    Args:
+        ctx: repository_ctx with `config`, `no_config` and `patch_snapshot` attrs.
+        host: host_info() struct.
         isolated_home: if True, keep the ocx store inside this repository
             instead of the shared user OCX_HOME.
 
@@ -60,23 +131,44 @@ def make_ocx_env(ctx, isolated_home):
     else:
         home = ctx.getenv("OCX_HOME")
         if not home:
-            base = ctx.getenv("USERPROFILE") if ctx.os.name.lower().startswith("windows") else ctx.getenv("HOME")
+            base = ctx.getenv("USERPROFILE") if host.is_windows else ctx.getenv("HOME")
             if not base:
                 fail("rules_ocx: cannot resolve the default OCX_HOME — neither OCX_HOME nor HOME/USERPROFILE is set")
-            home = base + ("\\.ocx" if ctx.os.name.lower().startswith("windows") else "/.ocx")
+            home = base + ("\\.ocx" if host.is_windows else "/.ocx")
 
     # `ocx run` exports OCX_PROJECT (possibly relative) into child processes;
     # a bazel invoked that way would leak it into every repo-rule ocx call,
     # which runs from a different cwd. Project context only ever comes from
     # explicit --project flags here, so neutralize it — along with the other
     # ambient knobs that break rather than steer an invocation.
-    env = {"OCX_HOME": home}
+    #
+    # OCX_NO_CONFIG_REFRESH: the background managed-config refresh wants a TTY
+    # no repo rule ever has. Pinned off explicitly rather than trusting ocx's
+    # TTY probe — the CLI is version-unstable (invariant 2).
+    env = {"OCX_HOME": home, "OCX_NO_CONFIG_REFRESH": "1"}
     for key in _OCX_NEUTRALIZED_ENV:
         env[key] = ""
     for key in OCX_PASSTHROUGH_ENV:
         value = ctx.getenv(key)
         if value != None:
             env[key] = value
+
+    # Attrs beat the ambient environment.
+    if ctx.attr.no_config:
+        env["OCX_NO_CONFIG"] = "1"
+    if ctx.attr.config:
+        env["OCX_CONFIG"] = str(ctx.path(ctx.attr.config))
+    if ctx.attr.patch_snapshot:
+        env["OCX_PATCH_SNAPSHOT"] = str(ctx.path(ctx.attr.patch_snapshot))
+
+    if not ctx.attr.no_config and not _truthy(ctx.getenv("OCX_NO_CONFIG")):
+        for path in ambient_config_paths(
+            host.is_windows,
+            host.ocx_platform.startswith("darwin"),
+            {key: ctx.getenv(key) or "" for key in _CONFIG_HOME_ENV},
+            "" if isolated_home else home,
+        ):
+            ctx.watch(path)
     return struct(env = env, home = home)
 
 def ocx_bin(ctx):
@@ -299,6 +391,38 @@ def rlocation_path(label):
     prefix = label.package + "/" if label.package else ""
     return label.workspace_name + "/" + prefix + label.name
 
+def stage_lazy_config(ctx, is_windows):
+    """Stages the config attrs into the repo for lazy launchers to re-export.
+
+    A lazy launcher re-enters ocx at action time with ambient environment
+    only, so fetch-time configuration would never reach it. Copying the files
+    into the repo makes them runfiles — action inputs, so an edit re-keys the
+    actions — and `ctx.read` registers the watch that refetches the repo.
+
+    Args:
+        ctx: repository_ctx with `config`, `no_config` and `patch_snapshot` attrs.
+        is_windows: host flag; Windows launchers bake absolute paths, POSIX
+            ones resolve through runfiles.
+
+    Returns:
+        struct(exports = {env var: value} for render_lazy_launcher,
+        data = label strings to attach to every launcher).
+    """
+    exports = {}
+    data = []
+    if ctx.attr.no_config:
+        exports["OCX_NO_CONFIG"] = "1"
+    for label, name, var in [
+        (ctx.attr.config, "config.toml", "OCX_CONFIG"),
+        (ctx.attr.patch_snapshot, "patches.snapshot.json", "OCX_PATCH_SNAPSHOT"),
+    ]:
+        if not label:
+            continue
+        ctx.file(name, ctx.read(label))
+        exports[var] = str(ctx.path(name)) if is_windows else "$(rlocation {}/{})".format(ctx.name, name)
+        data.append(":" + name)
+    return struct(exports = exports, data = data)
+
 # The canonical Bash runfiles library bootstrap (v3): resolves the runfiles
 # tree or manifest wherever the launcher executes, keeping the script text
 # free of machine-specific absolute paths.
@@ -312,7 +436,7 @@ source "${RUNFILES_DIR:-/dev/null}/$f" 2>/dev/null || \\
   { echo>&2 "ERROR: cannot find $f"; exit 1; }; f=; set -e
 # --- end runfiles.bash initialization v3 ---"""
 
-def render_lazy_launcher(command, is_windows):
+def render_lazy_launcher(command, is_windows, exports = {}):
     """Renders a lazy launcher: ocx is re-entered at execution time.
 
     No store paths are baked in — the wrapped ocx command auto-installs
@@ -327,6 +451,9 @@ def render_lazy_launcher(command, is_windows):
         is_windows: render .bat instead of POSIX sh. Windows launchers bake
             absolute paths (no Batch runfiles library), so their action keys
             are machine-local.
+        exports: env vars set before the command, in insertion order (stable
+            action keys). POSIX values may use `$(rlocation …)` too — the
+            template quotes them.
 
     Returns:
         script content string.
@@ -334,19 +461,23 @@ def render_lazy_launcher(command, is_windows):
     if is_windows:
         # ponytail: absolute paths — portable keys need a Batch runfiles
         # lookup; add one if Windows remote caching ever matters.
-        return "\r\n".join([
+        lines = [
             "@echo off",
             "rem Generated by rules_ocx - do not edit.",
             'set "OCX_PROJECT="',
-            "{} %*".format(" ".join(command)),
-        ]) + "\r\n"
-    return "\n".join([
+        ]
+        lines += ['set "{}={}"'.format(key, value) for key, value in exports.items()]
+        lines.append("{} %*".format(" ".join(command)))
+        return "\r\n".join(lines) + "\r\n"
+    lines = [
         "#!/usr/bin/env bash",
         "# Generated by rules_ocx — do not edit.",
         _RUNFILES_PREAMBLE,
         'export OCX_PROJECT=""',
-        'exec {} "$@"'.format(" ".join(command)),
-    ]) + "\n"
+    ]
+    lines += ['export {}="{}"'.format(key, value) for key, value in exports.items()]
+    lines.append('exec {} "$@"'.format(" ".join(command)))
+    return "\n".join(lines) + "\n"
 
 def render_launcher(entries, target, home, ocx, is_windows):
     """Renders a launcher script applying the ocx env and exec-ing a tool.

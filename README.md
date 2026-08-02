@@ -87,12 +87,68 @@ honored by the repository rules:
 
 Passed through to repo rules as well: `OCX_HOME`, `OCX_INDEX`, `OCX_OFFLINE`,
 `OCX_FROZEN`, `OCX_REMOTE`, `OCX_JOBS`, `OCX_DEFAULT_REGISTRY`, `OCX_CONFIG`,
-`OCX_NO_CONFIG`, `OCX_MANAGED_CONFIG`, `OCX_ALLOW_YANKED`, `OCX_PATCHES`.
+`OCX_NO_CONFIG`, `OCX_MANAGED_CONFIG`, `OCX_ALLOW_YANKED`, `OCX_PATCHES`,
+`OCX_PATCH_SNAPSHOT`.
 
 `OCX_PROJECT`, `OCX_GLOBAL` and `OCX_QUIET` are deliberately *not* passed
 through — they are cleared for every invocation. Project context comes from the
 explicit `--project` flag (which `--global` refuses to combine with), and
 `--quiet` would suppress the JSON reports the rules parse.
+
+## Managed config & patches
+
+ocx layers its site configuration system → user → `$OCX_HOME/config.toml` →
+managed-config snapshot → `OCX_CONFIG` → `--config`, and the repository rules
+run inside that chain rather than around it: whatever mirrors, registries and
+`[patches]` your host config declares apply to the fetch.
+
+Because Bazel can only invalidate on inputs it knows, **every discovered config
+path is watched** — including the ones that do not exist yet. Creating
+`~/.ocx/config.toml`, or letting `ocx config update` refresh the managed
+snapshot, refetches the ocx repos. That is deliberate: a config edit that
+changes what a fetch resolves must not survive as a stale cache entry.
+
+Two attrs on both `ocx.project()` and `ocx.package()` take the host out of the
+loop:
+
+```starlark
+ocx.project(
+    name = "dev_tools",
+    ocx_toml = "//:ocx.toml",
+    ocx_lock = "//:ocx.lock",
+    config = "//:ocx-config.toml",  # committed site config
+    no_config = True,               # ignore every discovered tier
+)
+```
+
+`config` sets `OCX_CONFIG` (overriding an ambient one) and is watched;
+`no_config` sets `OCX_NO_CONFIG=1`, dropping the system, user, `$OCX_HOME` and
+managed tiers while keeping an explicit `config`. Together they are the
+hermetic pattern — the build reads exactly the file you committed. Lazy
+launchers (`bins`) carry both into their runfiles, so a deferred
+`ocx run` / `ocx package exec` sees the same configuration the fetch did.
+
+**Patches** are companion packages a site config composes onto a base package's
+environment (a `[patches]` table; never the project `ocx.toml`). `ocx lock
+--check` deliberately does not cover them, so freeze them explicitly:
+
+```console
+$ ocx patch freeze          # writes patches.snapshot.json next to ocx.lock
+```
+
+Commit that file and point `patch_snapshot = "//:patches.snapshot.json"` at
+it — it sets `OCX_PATCH_SNAPSHOT` and pins the companion digests. Without it,
+companions resolve at fetch time. `ocx patch sync` is the only way to refresh
+the snapshot; it mutates and needs the network (offline it exits 81).
+
+**Managed config in CI**: a `[managed]` source that is required (the default)
+but has never been synced exits **78 on every ocx command** — `lock --check`
+included, before any network call. The repository rules never run `ocx config
+setup` or `ocx config update` themselves; adoption stays an explicit human
+step. The failure message names the command to run, and `no_config = True` /
+`OCX_NO_CONFIG=1` opts the build out of the tier entirely. The background
+snapshot refresh is pinned off (`OCX_NO_CONFIG_REFRESH=1`) — it wants a TTY no
+repository rule has.
 
 ## Reproducibility
 
