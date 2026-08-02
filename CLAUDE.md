@@ -60,6 +60,6 @@ in-tree draft ocx-sh/ocx#12.
 ## Dogfooding
 
 The dev toolchain comes from the committed `ocx.toml`/`ocx.lock`
-(bazelisk, actionlint, git-cliff, go-task, hawkeye, lychee, shellcheck).
+(bazelisk, actionlint, git-cliff, task, hawkeye, lychee, shellcheck).
 `direnv allow` or `ocx run -- <cmd>` to use it. buildifier is not in the
 ocx catalog yet → `buildifier_prebuilt` dev dependency.
