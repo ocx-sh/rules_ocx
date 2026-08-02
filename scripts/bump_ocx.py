@@ -24,7 +24,7 @@ EXPECTED_TARGETS = 8
 # Keep in sync with archive_type() in ocx/private/manifest.bzl.
 KNOWN_EXTS = (".zip", ".tar.gz", ".tar.xz")
 
-REPO = Path(__file__).resolve().parents[4]
+REPO = Path(__file__).resolve().parents[1]
 DIST = REPO / "dist" / "dist.json"
 VERSIONS = REPO / "ocx" / "private" / "versions.bzl"
 WORKFLOWS = REPO / ".github" / "workflows"

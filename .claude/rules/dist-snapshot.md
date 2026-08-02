@@ -5,7 +5,10 @@
 `{version, channel, tag, target, filename, sha256, url}`).
 
 - Refresh: `task dist:update` (curl + sanity check). CI `update-dist.yml`
-  opens a PR on a schedule.
+  runs `scripts/bump_ocx.py` on a schedule and opens a PR that refreshes the
+  snapshot *and* moves the pin to the newest stable. The ocx CLI is
+  version-unstable — that PR is a proposal, not a rubber stamp: read the ocx
+  changelog for the versions being crossed before merging it.
 - Bumping to a new ocx release (snapshot + pin + CI pins + verification):
   use the `update-dist` skill.
 - **Always bump together with `DEFAULT_OCX_VERSION`**

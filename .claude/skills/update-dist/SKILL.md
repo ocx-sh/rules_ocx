@@ -15,8 +15,8 @@ and refuses to write a pin the snapshot cannot support.
 1. **Bump.** From the repo root:
 
    ```sh
-   python3 .claude/skills/update-dist/scripts/bump_ocx.py            # newest stable
-   python3 .claude/skills/update-dist/scripts/bump_ocx.py --version 0.4.3
+   python3 scripts/bump_ocx.py                  # newest stable
+   python3 scripts/bump_ocx.py --version 0.5.2
    ```
 
    Run it; do not read its source. `--help` documents the flags. It fetches

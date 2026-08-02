@@ -17,23 +17,18 @@ concurrency:
 
 jobs:
   update:
-    name: Refresh dist/dist.json
+    name: Refresh dist/dist.json and propose the pin
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v5
-      - name: Refresh snapshot
-        run: |
-          curl -fsSL https://setup.ocx.sh/dist.json -o dist/dist.json
-          python3 - <<'EOF'
-          import json, re
-          pin = re.search(r'DEFAULT_OCX_VERSION = "([^"]+)"',
-                          open("ocx/private/versions.bzl").read()).group(1)
-          rows = [r for r in json.load(open("dist/dist.json"))["releases"]
-                  if r["version"] == pin]
-          assert len(rows) == 8, f"expected 8 targets for {pin}, got {len(rows)}"
-          print(f"dist.json OK: {pin} x {len(rows)} targets")
-          EOF
+      # Refreshes the snapshot and moves DEFAULT_OCX_VERSION plus every
+      # setup-ocx pin to the newest stable in lockstep — it writes nothing if
+      # the snapshot cannot support the target version. Proposing the bump is
+      # safe because the PR is the gate: `task verify` runs the examples
+      # against the new CLI, so a breaking ocx release lands as a red PR.
+      - name: Refresh snapshot and bump the pin
+        run: python3 scripts/bump_ocx.py
       - name: Open PR if changed
         uses: peter-evans/create-pull-request@v7
         with:
@@ -41,9 +36,11 @@ jobs:
           # checks run on the PR.
           token: ${{ secrets.DIST_UPDATE_TOKEN }}
           branch: chore/update-dist
-          commit-message: "chore(dist): refresh dist.json snapshot"
-          title: "chore(dist): refresh dist.json snapshot"
+          commit-message: "chore(dist): refresh dist.json and bump the ocx pin"
+          title: "chore(dist): refresh dist.json and bump the ocx pin"
           body: >
-            Automated refresh of the vendored setup.ocx.sh release manifest.
-            Bump `DEFAULT_OCX_VERSION` in `ocx/private/versions.bzl` separately
-            and deliberately (see `.claude/rules/dist-snapshot.md`).
+            Automated refresh of the vendored setup.ocx.sh release manifest,
+            with `DEFAULT_OCX_VERSION` and the `setup-ocx` pins moved to the
+            newest stable in lockstep (see `.claude/rules/dist-snapshot.md`).
+            The ocx CLI is version-unstable — do not merge on green alone,
+            read the ocx changelog for the versions being crossed.
