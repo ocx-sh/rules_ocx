@@ -22,6 +22,10 @@ Only the latest release is supported with security updates.
 - The ocx binary bootstrap verifies the sha256 recorded in the vendored
   `dist/dist.json` manifest — corporate mirrors (`OCX_INSTALL_MIRROR_URL`)
   can relocate artifacts but cannot alter them.
+- That manifest is refreshed only by `scripts/bump_ocx.py`, which permits no
+  change but *added* rows and validates every row it adds, so a rewritten,
+  dropped or duplicated row upstream fails closed with no override flag
+  (procedure: `.claude/rules/dist-snapshot.md`).
 - Package integrity is enforced by OCX itself via OCI digests; `ocx.lock`
   pins per-platform sha256 digests keyed to the upstream registry host,
   making lockfiles portable across mirrors.

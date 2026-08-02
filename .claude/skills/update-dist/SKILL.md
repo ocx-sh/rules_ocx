@@ -16,12 +16,48 @@ and refuses to write a pin the snapshot cannot support.
 
    ```sh
    python3 scripts/bump_ocx.py                  # newest stable
-   python3 scripts/bump_ocx.py --version 0.5.2
+   python3 scripts/bump_ocx.py --version 0.5.2  # a version you chose
+   python3 scripts/bump_ocx.py --snapshot-only  # refresh only; pin stays put
+   python3 scripts/bump_ocx.py --check          # offline; validate what is committed
    ```
 
-   Run it; do not read its source. `--help` documents the flags. It fetches
-   the snapshot, validates the target version, rewrites the pin and every CI
-   pin, and prints what changed. It writes nothing if validation fails.
+   Run it; do not read its source. `--help` documents the flags; the three
+   modes are mutually exclusive. It fetches the snapshot, runs the guards
+   below, rewrites the pin and every CI pin, and prints what changed. Nothing
+   is written unless every guard passes — including the snapshot itself.
+
+### What it refuses, and what to do about it
+
+`setup.ocx.sh` is the one input this repo cannot verify out of band: it names
+the versions, the artifacts and the sha256 that `@ocx_tool` will execute. Each
+refusal below is a supply-chain signal, not a nuisance. **None of them has an
+override flag** — the fix is upstream, or a deliberate reviewed commit.
+
+| Refusal | What it means |
+|---|---|
+| `latest` is not channel `stable` | Auto-select follows that pointer. Read the changelog, then pin by hand with `--version`. |
+| pin would move backwards | Auto-select never rolls back. `--version` is the deliberate override. |
+| a committed row was rewritten upstream | Its sha256 (or url, tag, filename, channel) moved. A committed row is immutable. |
+| a committed row disappeared upstream | A released artifact must not vanish. |
+| `(version, target)` appears twice | `select_release()` takes the *first* match, so a duplicate shadows a committed sha256 — the shape a poisoned manifest takes. |
+| a new column on every row | A new field changes what an already-committed row means. |
+| a row is not channel `stable` / sha256 not 64 lowercase hex / url not on the ocx release host / an archive extension `archive_type()` does not map | Per-row validation. It covers the pinned version **and every row a refresh adds** — the whole manifest is written, and `ocx.download(version = …)` lets a consumer select any row in it. `--check` re-runs it on every PR via `task lint`. |
+| fewer than 8 targets | The release may still be publishing; retry. This is the one check scoped to the version being pinned — an unconditional one would false-fire mid-publish. |
+
+`--version` is the only bypass, and it bypasses exactly two things: the
+forward-only check and the `latest` channel check. Every row-level guard still
+applies to a version named by hand.
+
+The url check parses the url; it does not prefix-match. `github.com` normalises
+dot segments server-side, so a url of
+`…/ocx-sh/ocx/releases/download/../../../../other/repo/releases/download/v1/x.tar.gz`
+starts with the artifact prefix and still serves *another repository's* release
+asset — and `artifact_url()` hands the value to `download_and_extract` verbatim,
+with the sha256 from the same row. Scheme, host, path prefix and dot segments
+are checked separately; CR, LF, tab, NUL, a query string or a fragment are
+refused outright.
+
+`python3 scripts/bump_ocx_test.py` pins all of the above; `task lint` runs it.
 
 2. **Act on an archive-format NOTE.** If the script reports the archive
    format changed, `archive_type()` in `ocx/private/manifest.bzl` must map
