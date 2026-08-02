@@ -31,8 +31,9 @@ in-tree draft ocx-sh/ocx#12.
 2. The ocx CLI is version-unstable: `DEFAULT_OCX_VERSION`
    (`ocx/private/versions.bzl`) and `dist/dist.json` bump **together**.
 3. Extension impls: no `module_ctx.os`, no getenv — repository rules only.
-4. Sysexits from ocx (64 usage / 65 stale / 78 missing) map to actionable
-   fail() messages that name the exact command to run.
+4. Sysexits from ocx (64 usage / 65 stale / 75 transient / 78 missing or
+   unsupported) map to actionable fail() messages that name the exact
+   command to run; 75 is retried before it ever reaches a fail().
 
 ## Two-tier ocx CLI contract (verified against 0.4.3)
 

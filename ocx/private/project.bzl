@@ -75,7 +75,8 @@ def _ocx_project_repo_impl(ctx):
         "checking {} against its lockfile".format(ctx.attr.ocx_toml),
         hints = {
             65: "run 'ocx lock' next to {} and commit the updated ocx.lock".format(ctx.attr.ocx_toml),
-            78: "no ocx.lock next to {} — run 'ocx lock' and commit it".format(ctx.attr.ocx_toml),
+            78: ("missing or unsupported ocx.lock next to {} — run 'ocx lock' with the " +
+                 "pinned ocx and commit the result").format(ctx.attr.ocx_toml),
         },
     )
 

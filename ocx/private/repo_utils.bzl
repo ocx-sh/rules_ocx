@@ -20,14 +20,29 @@ OCX_PASSTHROUGH_ENV = [
     "OCX_JOBS",
     "OCX_INDEX",
     "OCX_DEFAULT_REGISTRY",
+    "OCX_CONFIG",
+    "OCX_NO_CONFIG",
+    "OCX_MANAGED_CONFIG",
+    "OCX_ALLOW_YANKED",
+    "OCX_PATCHES",
 ]
+
+# Ambient values that would break an invocation rather than steer it: --global
+# refuses to combine with the explicit --project every call here passes, and
+# --quiet suppresses the very JSON report the parse surface reads (empty stdout,
+# exit 0). Empty = unset.
+_OCX_NEUTRALIZED_ENV = ["OCX_PROJECT", "OCX_GLOBAL", "OCX_QUIET"]
 
 _SYSEXIT_HINTS = {
     64: "usage error — the pinned ocx version and rules_ocx disagree on the CLI surface; check DEFAULT_OCX_VERSION",
     65: "stale data — the lockfile does not match its declaration; run 'ocx lock' and commit the result",
     69: "a required service or registry is unavailable — check network, OCX_MIRRORS, and registry auth",
+    75: "transient failure — a rate limit, a short layer blob, or another ocx process holding the project lock; retry",
     78: "missing configuration — an expected ocx.toml/ocx.lock was not found next to the declared labels",
 }
+
+# Extra attempts granted to a sysexit 75 even when the caller asked for none.
+_TRANSIENT_RETRIES = 2
 
 def make_ocx_env(ctx, isolated_home):
     """Assembles the environment for ocx invocations from this repo rule.
@@ -53,8 +68,11 @@ def make_ocx_env(ctx, isolated_home):
     # `ocx run` exports OCX_PROJECT (possibly relative) into child processes;
     # a bazel invoked that way would leak it into every repo-rule ocx call,
     # which runs from a different cwd. Project context only ever comes from
-    # explicit --project flags here, so neutralize it (empty = unset).
-    env = {"OCX_HOME": home, "OCX_PROJECT": ""}
+    # explicit --project flags here, so neutralize it — along with the other
+    # ambient knobs that break rather than steer an invocation.
+    env = {"OCX_HOME": home}
+    for key in _OCX_NEUTRALIZED_ENV:
+        env[key] = ""
     for key in OCX_PASSTHROUGH_ENV:
         value = ctx.getenv(key)
         if value != None:
@@ -90,16 +108,21 @@ def run_ocx(ctx, binary, args, env, what, hints = {}, retries = 0):
         retries: extra attempts after a failure. Repo rules fetch in
             parallel, and concurrent `ocx package install` calls of the same
             package can race on store symlink creation (ocx TOCTOU); the
-            store is idempotent, so a retry converges.
+            store is idempotent, so a retry converges. A sysexit 75 is
+            retried regardless — it is ocx's own "transient, retry me",
+            raised among other things when a sibling repo rule holds the
+            project lock on the shared ocx.toml.
 
     Returns:
         stdout string.
     """
     result = None
-    for _ in range(retries + 1):
+    for attempt in range(max(retries, _TRANSIENT_RETRIES) + 1):
         result = ctx.execute([str(binary)] + args, environment = env, timeout = 600)
         if result.return_code == 0:
             return result.stdout
+        if attempt >= retries and result.return_code != 75:
+            break
     hint = hints.get(result.return_code) or _SYSEXIT_HINTS.get(result.return_code, "")
     fail("rules_ocx: {} failed (exit {}): ocx {}\n{}{}".format(
         what,

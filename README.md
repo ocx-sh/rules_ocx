@@ -86,7 +86,13 @@ honored by the repository rules:
 | `OCX_AUTH_<REGISTRY>_{TYPE,USER,TOKEN}` | Registry credentials (also: docker config). Not enumerable by Bazel — run `bazel fetch --force` after changing auth. |
 
 Passed through to repo rules as well: `OCX_HOME`, `OCX_INDEX`, `OCX_OFFLINE`,
-`OCX_FROZEN`, `OCX_REMOTE`, `OCX_JOBS`, `OCX_DEFAULT_REGISTRY`.
+`OCX_FROZEN`, `OCX_REMOTE`, `OCX_JOBS`, `OCX_DEFAULT_REGISTRY`, `OCX_CONFIG`,
+`OCX_NO_CONFIG`, `OCX_MANAGED_CONFIG`, `OCX_ALLOW_YANKED`, `OCX_PATCHES`.
+
+`OCX_PROJECT`, `OCX_GLOBAL` and `OCX_QUIET` are deliberately *not* passed
+through — they are cleared for every invocation. Project context comes from the
+explicit `--project` flag (which `--global` refuses to combine with), and
+`--quiet` would suppress the JSON reports the rules parse.
 
 ## Reproducibility
 
