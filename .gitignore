@@ -6,3 +6,7 @@ bazel-*
 __pycache__/
 examples/*/MODULE.bazel.lock
 e2e/*/MODULE.bazel.lock
+# `ocx index update` also writes the whole-registry catalog next to the tag
+# roots. Frozen resolution never reads it (the package descriptor carries its
+# own physical address), so keep it out of the committed snapshots.
+examples/*/index/*/c/

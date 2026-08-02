@@ -1,3 +1,3 @@
 [tools]
-shellcheck = "ocx.sh/shellcheck:latest"
-shfmt = "ocx.sh/shfmt:latest"
+shellcheck = "ocx.sh/shellcheck/shellcheck:latest"
+shfmt = "ocx.sh/shfmt/shfmt:latest"

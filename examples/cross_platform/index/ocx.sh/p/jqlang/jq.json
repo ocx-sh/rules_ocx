@@ -1,0 +1,72 @@
+{
+  "name": "ocx.sh/jqlang/jq",
+  "repository": "oci://ghcr.io/ocx-contrib/jqlang/jq",
+  "owners": [
+    {
+      "github": "ocx-bot",
+      "github_id": 309019509
+    }
+  ],
+  "status": "active",
+  "deprecated_message": null,
+  "created": "2026-08-02",
+  "desc": {
+    "digest": "sha256:6e33358a0bf7bfbae68eee78c5fea7692ce95a6ac651c98e10b852a611875e88",
+    "title": "jq",
+    "description": "Command-line JSON processor \u2014 slice, filter, map and transform structured data",
+    "keywords": [
+      "jq",
+      "json",
+      "cli",
+      "query",
+      "filter",
+      "jqlang",
+      "data"
+    ],
+    "readme": "sha256:01ae2f0382124b554357d1432142898ffe7dde53365007ebcc08e3d680cef647",
+    "logo": "sha256:aadba923ee9354cacbfb8a0d65cb56f65d01d39b74501e83ad2da49a378d2ca9"
+  },
+  "upstream": {
+    "org": "jqlang",
+    "repository_url": "https://github.com/jqlang/jq",
+    "disclaimer": "Unaffiliated mirror. jq is a project of the jqlang authors; this OCX package republishes upstream release binaries and is not endorsed by them."
+  },
+  "tags": {
+    "1.8.0_20260802": {
+      "content": "sha256:78f384a60a23514cf4e87f7cb2258cf9cc1a5da07933d2a0742efe616b791164",
+      "observed": "2026-08-02T10:38:41Z"
+    },
+    "1.8.0": {
+      "content": "sha256:78f384a60a23514cf4e87f7cb2258cf9cc1a5da07933d2a0742efe616b791164",
+      "observed": "2026-08-02T10:38:41Z"
+    },
+    "1.8": {
+      "content": "sha256:c295300441831e002c0ba54df8e6126cdd4064c63be2464bdc6b68d0012beec6",
+      "observed": "2026-08-02T10:38:41Z"
+    },
+    "1": {
+      "content": "sha256:c295300441831e002c0ba54df8e6126cdd4064c63be2464bdc6b68d0012beec6",
+      "observed": "2026-08-02T10:38:41Z"
+    },
+    "latest": {
+      "content": "sha256:c295300441831e002c0ba54df8e6126cdd4064c63be2464bdc6b68d0012beec6",
+      "observed": "2026-08-02T10:38:41Z"
+    },
+    "1.8.1_20260802": {
+      "content": "sha256:2695acb88fd1326f1d96fb89700d3e1e90fd8441d3f8024dae86791675a8046e",
+      "observed": "2026-08-02T10:38:41Z"
+    },
+    "1.8.1": {
+      "content": "sha256:2695acb88fd1326f1d96fb89700d3e1e90fd8441d3f8024dae86791675a8046e",
+      "observed": "2026-08-02T10:38:41Z"
+    },
+    "1.8.2_20260802": {
+      "content": "sha256:c295300441831e002c0ba54df8e6126cdd4064c63be2464bdc6b68d0012beec6",
+      "observed": "2026-08-02T10:38:41Z"
+    },
+    "1.8.2": {
+      "content": "sha256:c295300441831e002c0ba54df8e6126cdd4064c63be2464bdc6b68d0012beec6",
+      "observed": "2026-08-02T10:38:41Z"
+    }
+  }
+}

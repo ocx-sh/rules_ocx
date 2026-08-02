@@ -15,30 +15,30 @@ ocx = use_extension("@rules_ocx//ocx:extensions.bzl", "ocx")
 # Floating tag: resolves at fetch time; the fetch log prints the digest to pin.
 ocx.package(
     name = "jq",
-    package = "ocx.sh/jq:latest",
+    package = "ocx.sh/jqlang/jq:latest",
 )
 
 # Frozen index: ':latest' resolves from the committed snapshot in index/
-# (created with `ocx --index index index update ocx.sh/jq`) — OCX's native
+# (created with `ocx --index index index update ocx.sh/jqlang/jq`) — OCX's native
 # tag locking. Deterministic until the snapshot is refreshed and committed.
 ocx.package(
     name = "jq_frozen",
     index = "//:index",
-    package = "ocx.sh/jq:latest",
+    package = "ocx.sh/jqlang/jq:latest",
 )
 
 # Digest-pinned: fully reproducible. OCX pins *per-platform* manifest
 # digests (indices move when a platform is added and may be GC'd);
-# `ocx package install -p <platform> ocx.sh/jq:latest` reports each digest.
+# `ocx package install -p <platform> ocx.sh/jqlang/jq:latest` reports each digest.
 # Platforms without a pin fall back to `package`.
 ocx.package(
     name = "jq_pinned",
-    package = "ocx.sh/jq:latest",
+    package = "ocx.sh/jqlang/jq:latest",
     pins = {
-        "darwin/amd64": "sha256:b17686a01c7d3d6252e4c8ce681ff8f06e6e06f293200a6b2f20e3923614a2cb",
-        "darwin/arm64": "sha256:5be7552a463835dead65ca4c858ebc10703a0d9cff7308967f04d08fa8e2da1a",
-        "linux/amd64": "sha256:11814b34158ab143969a8efffe59a320dd07c0b176a65366427514b326e2a347",
-        "windows/amd64": "sha256:8434027cf0a6c340a10e533ecdfd8137f085e476437352b98237294adf821c7d",
+        "darwin/amd64": "sha256:f750c91d28769d12298ba9a4c10340152fcbdd48c48102bf275c21d736cc72a2",
+        "darwin/arm64": "sha256:c5cf10597aacad9b7925f937c966ec72145ea6a40f7f7ef4cac11f90c43130b1",
+        "linux/amd64": "sha256:913ff41f5e643a73c17a2e560e349d8eea255f50b293156e58da15b957baacae",
+        "windows/amd64": "sha256:bab93861d95a25d33163cc9499cb17bb109028d6537ca55b8427af21c1fdc989",
     },
 )
 
@@ -48,12 +48,12 @@ ocx.package(
 ocx.package(
     name = "jq_lazy",
     bins = ["jq"],
-    package = "ocx.sh/jq:latest",
+    package = "ocx.sh/jqlang/jq:latest",
     pins = {
-        "darwin/amd64": "sha256:b17686a01c7d3d6252e4c8ce681ff8f06e6e06f293200a6b2f20e3923614a2cb",
-        "darwin/arm64": "sha256:5be7552a463835dead65ca4c858ebc10703a0d9cff7308967f04d08fa8e2da1a",
-        "linux/amd64": "sha256:11814b34158ab143969a8efffe59a320dd07c0b176a65366427514b326e2a347",
-        "windows/amd64": "sha256:8434027cf0a6c340a10e533ecdfd8137f085e476437352b98237294adf821c7d",
+        "darwin/amd64": "sha256:f750c91d28769d12298ba9a4c10340152fcbdd48c48102bf275c21d736cc72a2",
+        "darwin/arm64": "sha256:c5cf10597aacad9b7925f937c966ec72145ea6a40f7f7ef4cac11f90c43130b1",
+        "linux/amd64": "sha256:913ff41f5e643a73c17a2e560e349d8eea255f50b293156e58da15b957baacae",
+        "windows/amd64": "sha256:bab93861d95a25d33163cc9499cb17bb109028d6537ca55b8427af21c1fdc989",
     },
 )
 use_repo(ocx, "jq", "jq_frozen", "jq_lazy", "jq_pinned")

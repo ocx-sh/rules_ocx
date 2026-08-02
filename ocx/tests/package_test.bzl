@@ -17,25 +17,25 @@ def _pinned_ref_test_impl(ctx):
     # Matching pin replaces any digest on the reference.
     asserts.equals(
         env,
-        "ocx.sh/jq:latest@sha256:" + "a" * 64,
-        pinned_ref("ocx.sh/jq:latest", _PINS, "linux/amd64"),
+        "ocx.sh/jqlang/jq:latest@sha256:" + "a" * 64,
+        pinned_ref("ocx.sh/jqlang/jq:latest", _PINS, "linux/amd64"),
     )
     asserts.equals(
         env,
-        "ocx.sh/jq:latest@sha256:" + "b" * 64,
-        pinned_ref("ocx.sh/jq:latest@sha256:" + "c" * 64, _PINS, "darwin/arm64"),
+        "ocx.sh/jqlang/jq:latest@sha256:" + "b" * 64,
+        pinned_ref("ocx.sh/jqlang/jq:latest@sha256:" + "c" * 64, _PINS, "darwin/arm64"),
     )
 
     # Unpinned platform falls back to the reference verbatim.
     asserts.equals(
         env,
-        "ocx.sh/jq:latest",
-        pinned_ref("ocx.sh/jq:latest", _PINS, "windows/amd64"),
+        "ocx.sh/jqlang/jq:latest",
+        pinned_ref("ocx.sh/jqlang/jq:latest", _PINS, "windows/amd64"),
     )
     asserts.equals(
         env,
-        "ocx.sh/jq:latest",
-        pinned_ref("ocx.sh/jq:latest", {}, "linux/amd64"),
+        "ocx.sh/jqlang/jq:latest",
+        pinned_ref("ocx.sh/jqlang/jq:latest", {}, "linux/amd64"),
     )
     return unittest.end(env)
 

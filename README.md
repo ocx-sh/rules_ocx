@@ -27,7 +27,7 @@ ocx.project(
 # Ad-hoc: a single package, tag-floating or digest-pinned.
 ocx.package(
     name = "jq",
-    package = "ocx.sh/jq:latest",
+    package = "ocx.sh/jqlang/jq:latest",
 )
 
 use_repo(ocx, "jq", "tools")
@@ -100,7 +100,7 @@ explicit `--project` flag (which `--global` refuses to combine with), and
   sha256 digests). A stale lock fails the fetch with instructions.
 - **Package tier**, pick one:
   - `index = "//:index"` — commit an index snapshot
-    (`ocx --index index index update ocx.sh/jq`); tags resolve frozen from it,
+    (`ocx --index index index update ocx.sh/jqlang/jq`); tags resolve frozen from it,
     so `:latest` stays reproducible until you refresh the snapshot. OCX's
     native tag locking, works across all `platforms`.
   - `pins = {"linux/amd64": "sha256:…"}` — explicit per-platform manifest
