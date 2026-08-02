@@ -23,10 +23,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
       # Refreshes the snapshot and moves DEFAULT_OCX_VERSION plus every
-      # setup-ocx pin to the newest stable in lockstep — it writes nothing if
-      # the snapshot cannot support the target version. Proposing the bump is
-      # safe because the PR is the gate: `task verify` runs the examples
-      # against the new CLI, so a breaking ocx release lands as a red PR.
+      # setup-ocx pin to the newest stable in lockstep. Nothing is written
+      # unless every guard passes: the refresh may only *add* rows (no
+      # rewrite, drop, duplicate or new column on a committed row), `latest`
+      # must be channel stable, the pin only moves forward, and every row of
+      # the target version — plus every row the refresh adds, since the whole
+      # manifest ships and ocx.download(version = …) can select any of it —
+      # must be stable, with a hex sha256 and a url that parses to the ocx
+      # release host. A guard tripping fails this job and opens no PR —
+      # that is the alarm, and it has no override flag. Proposing the bump is
+      # safe because the PR is the second gate: `task verify` runs the
+      # examples against the new CLI, so a breaking ocx release lands red.
       - name: Refresh snapshot and bump the pin
         run: python3 scripts/bump_ocx.py
       - name: Open PR if changed
@@ -42,5 +49,12 @@ jobs:
             Automated refresh of the vendored setup.ocx.sh release manifest,
             with `DEFAULT_OCX_VERSION` and the `setup-ocx` pins moved to the
             newest stable in lockstep (see `.claude/rules/dist-snapshot.md`).
-            The ocx CLI is version-unstable — do not merge on green alone,
-            read the ocx changelog for the versions being crossed.
+
+
+            `dist/dist.json` is `linguist-generated`, so GitHub collapses its
+            diff. Do not read it row by row — `scripts/bump_ocx.py` already
+            refused to produce this PR if the refresh did anything but *add*
+            rows, if `latest` was not stable, or if the pin would have moved
+            backwards. What is left for a human is the part no guard can
+            check: the ocx CLI is version-unstable, so read the ocx changelog
+            for the versions being crossed. Do not merge on green alone.
