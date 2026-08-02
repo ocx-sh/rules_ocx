@@ -6,13 +6,14 @@
 Run with --help first; do not read this source to use it.
 
 Writes dist/dist.json; unless --snapshot-only, also ocx/private/versions.bzl
-and the setup-ocx pins in .github/workflows/*.yml. Per-row validation (also
-what --check runs, and what `task dist:check` is) requires the pinned version
-to be present for all 8 targets, each with channel "stable", a
-64-lowercase-hex sha256, an artifact URL on the ocx release host, and an
-archive extension that manifest.bzl's archive_type() actually maps. A refresh
-additionally requires that the incoming manifest only *adds* rows to the
-committed one, and holds every added row to that same per-row bar.
+and the setup-ocx pins in .github/workflows/*.yml and *.yaml. Per-row
+validation holds every row in the file — not just the pinned version's — to
+channel "stable", a 64-lowercase-hex sha256, an artifact URL on the ocx
+release host, and an archive extension that manifest.bzl's archive_type()
+actually maps; the pinned version must additionally be present for all 8
+targets. --check (= `task dist:check`) runs that offline over the committed
+file; a refresh additionally requires that the incoming manifest only *adds*
+rows to the committed one.
 """
 
 import argparse
@@ -188,9 +189,10 @@ def validate(manifest, version):
     """Fails loudly on anything that would break @ocx_tool for this version.
     The target-count check is deliberately scoped to `version`: an
     unconditional one would false-fire while upstream is mid-publish.
-    check_row() is not scoped — assert_additions_only() runs it over every row
-    a refresh adds, because those ship in the same file and any of them can be
-    selected with ocx.download(version = ...).
+    check_row() is not scoped — --check runs it over every committed row and
+    assert_additions_only() over every row a refresh adds, because those ship
+    in the same file and any of them can be selected with
+    ocx.download(version = ...).
     """
     rows = rows_for(manifest, version)
     if len(rows) != EXPECTED_TARGETS:
@@ -322,9 +324,17 @@ def write_pin(version):
 
 
 def write_ci_pins(version):
-    """Repins `ocx-sh/setup-ocx` steps so CI dogfoods the version we ship."""
+    """Repins `ocx-sh/setup-ocx` steps so CI dogfoods the version we ship.
+
+    A step whose `version:` this cannot rewrite is a die(), not a skip: nothing
+    else in the repo cross-checks the CI pin against DEFAULT_OCX_VERSION, and a
+    miss is otherwise indistinguishable from success (hits stays 0 and main()
+    prints "already current"), so CI would keep dogfooding the old binary while
+    `task verify` stays green. Both spellings of the extension are globbed —
+    .github/workflows already holds a .yaml.
+    """
     touched = []
-    for wf in sorted(WORKFLOWS.glob("*.yml")):
+    for wf in sorted(list(WORKFLOWS.glob("*.yml")) + list(WORKFLOWS.glob("*.yaml"))):
         lines = wf.read_text().splitlines(keepends=True)
         hits = 0
         for i, line in enumerate(lines):
@@ -340,6 +350,13 @@ def write_ci_pins(version):
                         lines[j] = f'{m.group(1)}"{version}"{m.group(3)}{eol}'
                         hits += 1
                     break
+            else:
+                die(
+                    f"{wf.name}:{i + 1}: this setup-ocx step has no `version: \"<x.y.z>\"` in the "
+                    f"3 lines below it, so the CI pin cannot be moved to {version} — CI would keep "
+                    f"running the old ocx while the snapshot and DEFAULT_OCX_VERSION move. Quote "
+                    f"the value and keep it directly under `with:`, or repin this step by hand."
+                )
         if hits:
             wf.write_text("".join(lines))
             touched.append(f"{wf.name} ({hits})")
@@ -373,10 +390,17 @@ def main():
     if args.check:
         manifest = load_snapshot()
         pin = current_pin()
-        index_rows(manifest, DIST)  # a duplicate row hand-landed in the snapshot
+        # index_rows() for a duplicate row hand-landed in the snapshot, then
+        # check_row() over *every* committed row: only the 8-target count is
+        # scoped to the pin. A hand-edited row for a version nobody pins today
+        # is still a url+sha256 pair ocx.download(version = ...) can select, and
+        # dist/dist.json is linguist-generated, so no reviewer sees the diff.
+        indexed = index_rows(manifest, DIST)
+        for (version, target), r in sorted(indexed.items()):
+            check_row(r, f"{version} {target}")
         rows = validate(manifest, pin)
         exts = sorted({ext_of(r["filename"]) for r in rows})
-        print(f"OK: {pin} x {len(rows)} targets, archives {exts}")
+        print(f"OK: {pin} x {len(rows)} targets, archives {exts}; {len(indexed)} rows checked")
         return
 
     before = current_pin()

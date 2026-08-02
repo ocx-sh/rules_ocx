@@ -9,10 +9,10 @@ setup.ocx.sh is the one input this repo cannot verify out of band: it names
 the versions, the artifacts and the sha256 that @ocx_tool will execute. These
 tests pin the four guards that keep that server from choosing what we pin —
 F1 (per-row: stable channel, hex sha256, a url that really resolves to the
-release host, a mapped archive extension — on the pinned version and on every
-row a refresh adds), F1b (direction), F2 (additions only, no duplicate
-(version, target)), F3 (no write before the guards run). No network, no
-writes; every fixture is inline.
+release host, a mapped archive extension — on every row in the committed file
+and on every row a refresh adds; plus all 8 targets for the pinned version),
+F1b (direction), F2 (additions only, no duplicate (version, target)), F3 (no
+write before the guards run). No network, no writes; every fixture is inline.
 """
 
 import contextlib
@@ -215,6 +215,22 @@ def test_f1_validate_refuses_a_non_stable_row():
     dies(bump_ocx.validate, all_beta, "0.6.0", why="a wholly beta release")
 
 
+def test_f1_validate_refuses_a_partial_target_set():
+    """F1(b): AGENTS.md invariant 2 — the pinned version must be present for
+    all 8 targets, or @ocx_tool has no row at all on the hosts that are
+    missing. Asserting the *return* length does not pin this: an 8-row fixture
+    returns 8 whether the count check runs or not, so the fixture has to be
+    short."""
+    partial = manifest("0.5.2")
+    partial["releases"] = partial["releases"][:3]
+    msg = dies(bump_ocx.validate, partial, "0.5.2", why="3 of the 8 targets")
+    assert "got 3" in msg, f"die() must name the count it found; got: {msg}"
+
+    # A version absent altogether is the same failure, and the likelier one:
+    # an operator naming a --version that upstream never published.
+    dies(bump_ocx.validate, manifest("0.5.2"), "0.9.9", why="a version with no rows at all")
+
+
 def test_f1_validate_refuses_a_sha256_that_is_not_lowercase_hex():
     """F1(b): a length check is not a hex check — "z"*64 passes it, and a
     64-element list passes it too and then reaches download_and_extract as a
@@ -243,6 +259,10 @@ def test_f1_validate_refuses_an_artifact_url_off_the_release_host():
     assert len(bump_ocx.validate(manifest("0.5.2"), "0.5.2")) == len(TARGETS), "the real URL shape must pass"
     for bad in (
         "https://evil.example/v0.5.2/ocx.tar.gz",
+        # On github.com, over https, no dot segment, no separator trick — just
+        # another repository. The path prefix is the only thing refusing it,
+        # and anyone can create a repo and cut a release under it.
+        "https://github.com/attacker/evil/releases/download/v1/ocx.tar.gz",
         "https://github.com.evil.example/ocx-sh/ocx/releases/download/v0.5.2/ocx.tar.gz",
         "https://github.com@evil.example/ocx-sh/ocx/releases/download/v0.5.2/ocx.tar.gz",
         "https://GITHUB.COM/ocx-sh/ocx/releases/download/v0.5.2/ocx.tar.gz",
@@ -475,6 +495,30 @@ def test_wiring_check_path_validates_the_committed_snapshot():
     assert "twice" in msg, f"--check must name the duplication; got: {msg}"
 
 
+def test_wiring_check_validates_every_committed_row_not_just_the_pinned_one():
+    """F1(b) x the committed file. --check is the only guard a PR that *edits*
+    dist/dist.json ever meets: `task lint` runs it, and the refresh guards
+    (F2) only run when the script fetches. Scoping check_row() to the pinned
+    version left every other row unexamined — a hand-edited row for a version
+    nobody pins today is still a url+sha256 pair ocx.download(version = ...)
+    selects, and the file is linguist-generated, so GitHub collapses the diff
+    that carries it. The next scheduled refresh would trip on the rewrite, but
+    blames upstream rather than the commit that made it."""
+    for field, bad in (
+        ("url", "https://evil.example/ocx.tar.gz"),
+        ("url", f"{bump_ocx.ARTIFACT_PREFIX}../../../../attacker/evil/releases/download/v1/ocx.tar.gz"),
+        ("sha256", "d" * 64 + "0"),
+        ("channel", "nightly"),
+        ("filename", "ocx.tar.bz2"),
+    ):
+        tainted = manifest("0.4.3", "0.5.2")  # 0.5.2 is pinned; 0.4.3 is not
+        tainted["releases"][0][field] = bad
+        assert tainted["releases"][0]["version"] == "0.4.3", "the tampered row must not be the pinned one"
+        with sandbox("0.5.2", tainted, argv=["--check"]):
+            msg = dies(bump_ocx.main, why=f"a committed non-pinned row with {field}={bad!r}")
+        assert "0.4.3" in msg, f"die() must name the offending row; got: {msg}"
+
+
 def test_wiring_check_on_an_unreadable_snapshot_dies_instead_of_tracebacking():
     """The module docstring promises die(); a truncated or half-merged
     dist/dist.json is a plausible way to arrive here, and a JSONDecodeError
@@ -542,6 +586,57 @@ def test_wiring_a_poisoned_added_row_blocks_both_write_paths():
             before = (tmp / "dist.json").read_bytes()
             dies(bump_ocx.main, why=f"a poisoned added row under {argv or ['(auto-bump)']}")
             assert (tmp / "dist.json").read_bytes() == before, f"{argv or '(auto-bump)'} wrote the poisoned manifest"
+
+
+def test_wiring_a_validate_failure_also_blocks_the_write():
+    """F3, ordering. Every added row here is clean, so assert_additions_only()
+    passes and validate() is the guard that dies — 4 of 8 targets on the
+    version `latest` points at, i.e. a normal mid-publish release day. Pinning
+    the write against the *poisoned-row* test alone leaves DIST.write_bytes()
+    free to move above validate(), which would commit a manifest whose pinned
+    version cannot resolve on half the hosts."""
+    committed = manifest("0.5.1", "0.5.2")
+    mid_publish = manifest("0.5.1", "0.5.2", "0.5.3")
+    mid_publish["releases"] = [
+        r for r in mid_publish["releases"] if r["version"] != "0.5.3" or r["target"] in TARGETS[:4]
+    ]
+    with sandbox("0.5.2", committed, argv=[]) as tmp, served(json.dumps(mid_publish).encode()):
+        before = (tmp / "dist.json").read_bytes()
+        dies(bump_ocx.main, why="a `latest` with 4 of 8 targets published")
+        assert (tmp / "dist.json").read_bytes() == before, "the write must land after validate()"
+        assert 'DEFAULT_OCX_VERSION = "0.5.2"' in (tmp / "versions.bzl").read_text(), "the pin must stay put"
+
+
+def test_wiring_ci_pins_cover_yaml_and_refuse_to_miss_a_step():
+    """Invariant 2 is a lockstep: DEFAULT_OCX_VERSION and the setup-ocx pins
+    move together, and nothing else in the repo cross-checks them. A step this
+    cannot rewrite therefore has to be loud — `hits == 0` reads exactly like
+    "already current" otherwise, and CI would go on running the old ocx with
+    `task verify` green. `.yaml` is a real spelling: .github/workflows already
+    holds publish.yaml."""
+    committed = manifest("0.5.1", "0.5.2")
+    incoming = json.dumps(manifest("0.5.1", "0.5.2", "0.5.3")).encode()
+
+    with sandbox("0.5.2", committed, argv=[]) as tmp, served(incoming):
+        (tmp / "workflows" / "publish.yaml").write_text(
+            '      - uses: ocx-sh/setup-ocx@v1\n        with:\n          version: "0.4.9"\n'
+        )
+        bump_ocx.main()
+        assert '"0.5.3"' in (tmp / "workflows" / "publish.yaml").read_text(), ".yaml workflows must be repinned too"
+
+    for case, body in (
+        ("an unquoted pin", '      - uses: ocx-sh/setup-ocx@v1\n        with:\n          version: 0.4.9\n'),
+        (
+            "a reordered with: block",
+            "      - uses: ocx-sh/setup-ocx@v1\n        with:\n          cache: true\n"
+            '          token: x\n          version: "0.4.9"\n',
+        ),
+        ("no version key at all", "      - uses: ocx-sh/setup-ocx@v1\n"),
+    ):
+        with sandbox("0.5.2", committed, argv=[]) as tmp, served(incoming):
+            (tmp / "workflows" / "other.yml").write_text(body)
+            msg = dies(bump_ocx.main, why=case)
+        assert "setup-ocx" in msg, f"die() must name the step it could not repin ({case}); got: {msg}"
 
 
 def test_wiring_the_bump_path_writes_the_fetched_bytes_verbatim():

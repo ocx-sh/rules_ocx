@@ -209,6 +209,25 @@ _MALFORMED_CLOSURE_REPORTS = {
         _closure_package("ocx.sh/a/a:latest@sha256:aa", ["shellcheck"]),
         {"identifier": "ocx.sh/b/b:latest@sha256:bb"},
     ],
+    # A non-object entry: iterating an object walks its *keys*, so `pkg` is a
+    # string and pkg.get() is "'string' value has no field or method 'get'" —
+    # a traceback where this fail() is the whole point of the function.
+    "entry_not_an_object": ["ocx.sh/a/a:latest@sha256:aa"],
+    "closure_not_an_object": [{
+        "identifier": "ocx.sh/a/a:latest@sha256:aa",
+        "closure": "ocx.sh/a/a:latest@sha256:aa",
+    }],
+}
+
+# The container, not an entry: the value of the top-level `packages` key, or
+# its absence. ocx's own source carries the comment that `packages` is an
+# array and not an object keyed by request string — so the object shape was on
+# the table, and a guard that holds only for today's shape is not a guard.
+_MALFORMED_CLOSURE_CONTAINERS = {
+    "no_packages_key": {"resolved": 0},
+    "packages_is_an_object": {"packages": {"ocx.sh/a/a": {"identifier": "x"}}},
+    "packages_is_a_string": {"packages": "ocx.sh/a/a:latest@sha256:aa"},
+    "report_is_a_list": [{"identifier": "ocx.sh/a/a:latest@sha256:aa"}],
 }
 
 def _bad_closure_report_impl(ctx):
@@ -410,12 +429,15 @@ def launcher_test_suite(name):
     Args:
         name: name of the test suite target.
     """
+    reports = {case: {"packages": packages} for case, packages in _MALFORMED_CLOSURE_REPORTS.items()}
+    reports.update(_MALFORMED_CLOSURE_CONTAINERS)
+
     guards = []
-    for case, packages in _MALFORMED_CLOSURE_REPORTS.items():
+    for case, report in reports.items():
         subject = "{}_malformed_{}".format(name, case)
         _bad_closure_report(
             name = subject,
-            report = json.encode({"packages": packages}),
+            report = json.encode(report),
             tags = ["manual"],
         )
         guards.append(partial.make(

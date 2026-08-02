@@ -86,10 +86,13 @@ def truthy(value):
 
     Mirrors ocx's `BooleanString` set, case-insensitively; `None` (unset) is
     false. An unrecognized value (neither the truthy set nor one of ocx's
-    falsy strings) makes ocx itself fail with `InvalidBooleanString` (exit
-    65); `truthy` has no such error path and just returns False for it — a
-    harmless divergence, since the raw value still reaches the real `ocx`
-    invocation for its own enforcement.
+    falsy strings) is not an error on this path: `env::flag()` logs "has
+    invalid boolean value" and falls back to the flag's default, which is
+    false for every flag read here — the same warning `_OCX_NEUTRALIZED_ENV`
+    above avoids by passing "0" rather than "". Returning False therefore
+    matches what ocx itself does with the value, which still reaches the real
+    invocation. (`InvalidBooleanString` (exit 65) is the config-file path,
+    not the env one.)
 
     Args:
         value: string env value, or None.
@@ -343,6 +346,12 @@ def decode_json(stdout, what):
         fail("rules_ocx: {} produced no output — expected JSON".format(what))
     return json.decode(stdout)
 
+# `value` if it is a JSON object, else an empty one — so a chained .get() over
+# a drifted report yields a missing key instead of a Starlark type error, and
+# the one fail() below stays the only way out of closure_packages().
+def _as_dict(value):
+    return value if type(value) == "dict" else {}
+
 def closure_packages(stdout, what):
     """Validates and returns the `packages` list of an `inspect --closure` report.
 
@@ -350,17 +359,25 @@ def closure_packages(stdout, what):
     result — one error vocabulary for the one command that produced it,
     whether it failed by not being JSON or by being JSON of the wrong shape.
 
-    `InspectReport` always serializes its top-level `packages` key, so
-    guarding that key fixes nothing. What ocx omits conditionally is each
-    entry's `closure`: `--closure` walks the closure only for a resolved
-    (`Manifest`/`Resolved`) body, so a binding that came back as unresolved
-    `candidates` — an ambiguous tag, or an `ocx inspect` binding projected
-    straight off ocx.lock with no single artifact to walk — carries no
-    `closure` at all. This guards each entry instead: failing when one has
-    no `identifier`, no `closure`, or a `closure` whose `surface.interface`
-    lacks `binaries_complete` or carries a non-list `binaries` — every key
-    declared_bins() indexes unguarded, in the type it indexes it as. The
-    fail() names DEFAULT_OCX_VERSION per invariant 4:
+    `InspectReport` always serializes its top-level `packages` key, and it is
+    an array — but a guard that only holds for today's shape is not a guard,
+    so the container is checked too: a report that is not an object, has no
+    `packages`, or whose `packages` is anything but a list fails here rather
+    than tracebacking out of a raw index (iterating an object would walk its
+    *keys*, and a string entry then has no `.get`).
+
+    What ocx omits conditionally is each entry's `closure`: `--closure` walks
+    the closure only for a resolved (`Manifest`/`Resolved`) body, so a binding
+    that came back as unresolved `candidates` — an ambiguous tag, or an
+    `ocx inspect` binding projected straight off ocx.lock with no single
+    artifact to walk — carries no `closure` at all. Each entry is therefore
+    checked too: it must be an object with an `identifier`, and its
+    `closure.surface.interface` must carry `binaries_complete` and a list
+    `binaries` — every key declared_bins() indexes off a *package* entry, in
+    the type it indexes it as. What is not guarded is `name` inside each
+    `binaries` element: `BinaryAttribution.name` is a non-`Option` `String`,
+    so it is always serialized, and a drift there would still traceback.
+    The fail() names DEFAULT_OCX_VERSION per invariant 4:
     this is a shape drift between the pinned ocx and what rules_ocx parses,
     not a mapped sysexit.
 
@@ -379,16 +396,24 @@ def closure_packages(stdout, what):
     Returns:
         the validated `packages` list.
     """
-    packages = decode_json(stdout, what)["packages"]
-    for pkg in packages:
-        interface = pkg.get("closure", {}).get("surface", {}).get("interface", {})
+    packages = _as_dict(decode_json(stdout, what)).get("packages")
+    drift = ""
+    if type(packages) != "list":
+        drift = "no 'packages' list (got {})".format(type(packages))
+    for pkg in packages if type(packages) == "list" else []:
+        if type(pkg) != "dict":
+            drift = "a 'packages' entry that is not an object (got {})".format(type(pkg))
+            break
+        interface = _as_dict(_as_dict(_as_dict(pkg.get("closure")).get("surface")).get("interface"))
         if (type(interface.get("binaries")) != "list" or
             "binaries_complete" not in interface or
             "identifier" not in pkg):
-            fail(("rules_ocx: {} reported '{}' with no closure surface — the pinned ocx CLI " +
-                  "and rules_ocx disagree on the report shape. Move DEFAULT_OCX_VERSION " +
-                  "(ocx/private/versions.bzl) to an ocx release this rules_ocx parses, or " +
-                  "upgrade rules_ocx.").format(what, pkg.get("identifier", "<unnamed package>")))
+            drift = "'{}' with no closure surface".format(pkg.get("identifier", "<unnamed package>"))
+            break
+    if drift:
+        fail(("rules_ocx: {} reported {} — the pinned ocx CLI and rules_ocx disagree on the " +
+              "report shape. Move DEFAULT_OCX_VERSION (ocx/private/versions.bzl) to an ocx " +
+              "release this rules_ocx parses, or upgrade rules_ocx.").format(what, drift))
     return packages
 
 def list_executables(ctx, directory, is_windows):

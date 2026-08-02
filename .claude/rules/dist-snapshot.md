@@ -33,16 +33,19 @@
 - **Always bump together with `DEFAULT_OCX_VERSION`**
   (`ocx/private/versions.bzl`): the pinned version must exist in the
   snapshot for all 8 targets — `task dist:check` (= `bump_ocx.py --check`,
-  offline) verifies that, plus per-row stable channel, hex sha256, artifact
-  host and a mapped archive extension, plus a whole-file shape check: a
-  `releases` list of rows carrying a string version and target, with no
-  `(version, target)` appearing twice. A duplicate is red repo-wide, not
-  only on the refresh path, because `select_release()` takes the *first*
-  match — a second row shadows a committed sha256 however it landed. It all
-  runs in `task lint`, so every PR re-checks the committed file, not just
-  the ones that refresh it. The 8-target count is the one check scoped to
-  the pinned version: an unconditional one would false-fire while upstream
-  is mid-publish.
+  offline) verifies that, plus a whole-file shape check (a `releases` list of
+  rows carrying a string version and target, with no `(version, target)`
+  appearing twice), plus the per-row bar — stable channel, hex sha256,
+  artifact host, mapped archive extension — **on every row in the file, not
+  only the pinned version's**. A row nobody pins today is still a url+sha256
+  pair `ocx.download(version = …)` can select, so the only check scoped to
+  the pin is the 8-target count: an unconditional one would false-fire while
+  upstream is mid-publish. A duplicate is likewise red repo-wide, not only on
+  the refresh path, because `select_release()` takes the *first* match — a
+  second row shadows a committed sha256 however it landed. It all runs in
+  `task lint`, so every PR re-checks the committed file, not just the ones
+  that refresh it — the refresh guards (additions-only) never see a
+  hand-edited commit at all.
 - Never edit rows by hand; the sha256 values are the security boundary
   (mirrors can relocate artifacts, never alter them). `.gitattributes` marks
   this file `linguist-generated`, so GitHub collapses its diff — a row that
