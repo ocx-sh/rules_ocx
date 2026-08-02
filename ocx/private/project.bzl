@@ -10,6 +10,7 @@ load(":platforms.bzl", "host_info")
 load(
     ":repo_utils.bzl",
     "decode_json",
+    "discover_bins",
     "make_ocx_env",
     "ocx_bin",
     "render_env_bzl",
@@ -17,7 +18,6 @@ load(
     "render_lazy_launcher",
     "rlocation_path",
     "run_ocx",
-    "scan_bins",
     "write_launchers",
 )
 
@@ -119,8 +119,26 @@ def _ocx_project_repo_impl(ctx):
     )
     entries = decode_json(stdout, "ocx env")["entries"]
 
+    # Foreign platforms expose no launchers, so they skip the closure call too.
     runnable = ctx.attr.platform in ("", host.ocx_platform)
-    bins = scan_bins(ctx, entries, host.is_windows) if runnable else []
+    bins = []
+    if runnable:
+        closure_cmd = ["--format", "json"] + project + ["inspect", "--closure"]
+        if ctx.attr.groups:
+            closure_cmd += ["-g", ",".join(ctx.attr.groups)]
+        bins = discover_bins(
+            ctx,
+            run_ocx(
+                ctx,
+                binary,
+                closure_cmd,
+                ocx_env.env,
+                "reading the declared tool surface of " + str(ctx.attr.ocx_toml),
+                hints = no_leaf,
+            ),
+            entries,
+            host.is_windows,
+        )
     write_launchers(ctx, bins, entries, ocx_env.home, str(binary), host.is_windows)
     ctx.file("env.bzl", render_env_bzl(entries, ocx_env.home))
     ctx.file("BUILD.bazel", render_launchers_build(
@@ -134,9 +152,11 @@ ocx_project_repo = repository_rule(
     doc = """Provisions the toolchain declared in a workspace ocx.toml/ocx.lock.
 
 Fails when the lockfile is stale or missing (fix with `ocx lock`). Every
-executable reachable through the composed environment's `path` entries
-becomes a runnable target `//:<name>`; the raw environment is loadable from
-`//:env.bzl` (`OCX_ENV`, `OCX_HOME`).
+executable the toolchain's packages declare as their public surface
+(`ocx inspect --closure`) becomes a runnable target `//:<name>`; a package
+shipping no complete `binaries` metadata falls back to scanning the composed
+environment's `path` entries, which also exposes its private executables.
+The raw environment is loadable from `//:env.bzl` (`OCX_ENV`, `OCX_HOME`).
 
 With `bins`, provisioning is lazy: nothing is pulled at fetch time, and each
 named executable becomes a launcher that re-enters `ocx run` — content

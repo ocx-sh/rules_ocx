@@ -9,6 +9,7 @@ load(":platforms.bzl", "host_info", "ocx_platform_constraints", "os_arch", "slug
 load(
     ":repo_utils.bzl",
     "decode_json",
+    "discover_bins",
     "make_ocx_env",
     "ocx_bin",
     "render_env_bzl",
@@ -16,7 +17,6 @@ load(
     "render_lazy_launcher",
     "rlocation_path",
     "run_ocx",
-    "scan_bins",
     "write_launchers",
 )
 
@@ -183,7 +183,22 @@ def _ocx_package_repo_impl(ctx):
     if ctx.path(root + "/entrypoints").exists:
         ctx.symlink(root + "/entrypoints", "entrypoints")
 
-    bins = scan_bins(ctx, entries, host.is_windows) if runnable else []
+    # Foreign platforms expose no launchers, so they skip the closure call too.
+    bins = []
+    if runnable:
+        bins = discover_bins(
+            ctx,
+            run_ocx(
+                ctx,
+                binary,
+                json_pkg + ["inspect", "--closure"] + platform_arg + [pkg],
+                ocx_env.env,
+                "reading the declared surface of " + pkg,
+                hints = hints,
+            ),
+            entries,
+            host.is_windows,
+        )
     write_launchers(ctx, bins, entries, ocx_env.home, str(binary), host.is_windows)
     ctx.file("env.bzl", render_env_bzl(entries, ocx_env.home))
     ctx.file("BUILD.bazel", render_launchers_build(
@@ -204,9 +219,12 @@ ocx_package_repo = repository_rule(
     implementation = _ocx_package_repo_impl,
     doc = """Provisions a single OCX package from an OCI registry.
 
-`//:content` is the package tree; every executable reachable through the
-package environment becomes a runnable target `//:<name>` (host-platform
-repos only). For reproducibility, commit an index snapshot and reference it
+`//:content` is the package tree; every executable the package declares as
+its public surface (`ocx package inspect --closure`) becomes a runnable
+target `//:<name>` (host-platform repos only). A package shipping no
+complete `binaries` metadata falls back to scanning the composed PATH, which
+also exposes its private executables. For reproducibility, commit an index
+snapshot and reference it
 via `index` (tags then resolve frozen from the snapshot), or pin
 per-platform manifest digests via `pins` — plain floating tags resolve at
 fetch time and log the resolved digest.

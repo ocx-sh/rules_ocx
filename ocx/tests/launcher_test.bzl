@@ -1,10 +1,16 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 The OCX Authors
 
-"""Unit tests for the launcher/env renderers in ocx/private/repo_utils.bzl."""
+"""Unit tests for the pure helpers in ocx/private/repo_utils.bzl."""
 
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
-load("//ocx/private:repo_utils.bzl", "render_env_bzl", "render_launcher", "render_lazy_launcher")
+load(
+    "//ocx/private:repo_utils.bzl",
+    "declared_bins",
+    "render_env_bzl",
+    "render_launcher",
+    "render_lazy_launcher",
+)
 
 _ENTRIES = [
     {"key": "PATH", "value": "/store/aa/content/bin", "type": "path"},
@@ -74,14 +80,52 @@ def _env_bzl_test_impl(ctx):
     asserts.true(env, "/store/aa/content/bin" in content)
     return unittest.end(env)
 
+def _closure_package(identifier, binaries, complete = True):
+    return {
+        "identifier": identifier,
+        "closure": {
+            "surface": {
+                "interface": {
+                    "binaries": [{"name": n, "package": identifier} for n in binaries],
+                    "binaries_complete": complete,
+                },
+            },
+        },
+    }
+
+def _declared_bins_test_impl(ctx):
+    env = unittest.begin(ctx)
+
+    surface = declared_bins([
+        _closure_package("ocx.sh/a/a:latest@sha256:aa", ["shellcheck"]),
+        _closure_package("ocx.sh/b/b:latest@sha256:bb", ["shfmt", "shellcheck"]),
+    ])
+
+    # Declaration order, and the first package claiming a name wins (PATH semantics).
+    asserts.equals(env, ["shellcheck", "shfmt"], surface.names)
+    asserts.equals(env, [], surface.incomplete)
+
+    # An empty complete claim is a real answer: the package exposes nothing.
+    asserts.equals(env, [], declared_bins([_closure_package("ocx.sh/c/c:latest", [])]).names)
+
+    # One incomplete package poisons the batch — the union is now a subset of PATH.
+    mixed = declared_bins([
+        _closure_package("ocx.sh/a/a:latest@sha256:aa", ["shellcheck"]),
+        _closure_package("ocx.sh/legacy:latest@sha256:cc", [], complete = False),
+    ])
+    asserts.equals(env, ["ocx.sh/legacy:latest@sha256:cc"], mixed.incomplete)
+
+    return unittest.end(env)
+
 sh_launcher_test = unittest.make(_sh_launcher_test_impl)
 bat_launcher_test = unittest.make(_bat_launcher_test_impl)
 sh_lazy_launcher_test = unittest.make(_sh_lazy_launcher_test_impl)
 bat_lazy_launcher_test = unittest.make(_bat_lazy_launcher_test_impl)
 env_bzl_test = unittest.make(_env_bzl_test_impl)
+declared_bins_test = unittest.make(_declared_bins_test_impl)
 
 def launcher_test_suite(name):
-    """Instantiates the launcher-rendering test suite.
+    """Instantiates the repo_utils pure-helper test suite.
 
     Args:
         name: name of the test suite target.
@@ -93,4 +137,5 @@ def launcher_test_suite(name):
         sh_lazy_launcher_test,
         bat_lazy_launcher_test,
         env_bzl_test,
+        declared_bins_test,
     )

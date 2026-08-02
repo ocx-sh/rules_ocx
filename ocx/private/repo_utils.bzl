@@ -170,9 +170,96 @@ def list_executables(ctx, directory, is_windows):
         return []
     return [name for name in result.stdout.splitlines() if name]
 
-def scan_bins(ctx, entries, is_windows):
-    """Discovers runnable tools from the `path`-typed env entries.
+def declared_bins(packages):
+    """The public executable names an `inspect --closure` report claims.
 
+    `interface` is the surface a consumer sees on PATH; `private` holds the
+    package's internal executables, which never become targets.
+
+    Args:
+        packages: the `packages` list of an `ocx [package] inspect --closure`
+            report.
+
+    Returns:
+        struct(names, incomplete): `names` in declaration order with the first
+        occurrence of a name winning (ocx PATH semantics), `incomplete` the
+        identifiers of packages whose `binaries` claim is not complete. A
+        non-empty `incomplete` makes `names` a subset of what is really on
+        PATH, so the caller must fall back to scan_bins().
+    """
+    seen = {}
+    names = []
+    incomplete = []
+    for pkg in packages:
+        interface = pkg["closure"]["surface"]["interface"]
+        if not interface["binaries_complete"]:
+            incomplete.append(pkg["identifier"])
+        for binary in interface["binaries"]:
+            if binary["name"] in seen:
+                continue
+            seen[binary["name"]] = True
+            names.append(binary["name"])
+    return struct(names = names, incomplete = incomplete)
+
+def resolve_bins(ctx, names, entries, is_windows):
+    """Locates each declared executable among the `path`-typed env entries.
+
+    A declared binary is a name, not a path, so the concrete file is found the
+    way a shell would: first `path` entry holding it wins. A claimed name that
+    no entry holds is dropped — the claim is publisher-declared and unverified.
+
+    Args:
+        ctx: repository_ctx.
+        names: declared executable names, in PATH-precedence order.
+        entries: env entries [{"key", "value", "type"}, ...] from `ocx env`.
+        is_windows: host flag; Windows executables carry an extension.
+
+    Returns:
+        list of struct(name, target) where target is the absolute path.
+    """
+    exts = [".exe", ".bat", ".cmd"] if is_windows else [""]
+    dirs = [e["value"] for e in entries if e["type"] == "path"]
+    bins = []
+    for name in names:
+        target = ""
+        for directory in dirs:
+            for ext in exts:
+                candidate = directory + "/" + name + ext
+                if ctx.path(candidate).exists:
+                    target = candidate
+                    break
+            if target:
+                break
+        if target:
+            bins.append(struct(name = name, target = target))
+    return bins
+
+def discover_bins(ctx, stdout, entries, is_windows):
+    """Runnable tools for a fetched repo: the declared surface, else a PATH scan.
+
+    Args:
+        ctx: repository_ctx.
+        stdout: raw `inspect --closure` JSON.
+        entries: env entries from `ocx env`.
+        is_windows: host flag.
+
+    Returns:
+        list of struct(name, target).
+    """
+    surface = declared_bins(decode_json(stdout, "ocx inspect --closure")["packages"])
+    if not surface.incomplete:
+        return resolve_bins(ctx, surface.names, entries, is_windows)
+
+    # buildifier: disable=print
+    print(("rules_ocx: no complete `binaries` metadata for {} — falling back to " +
+           "scanning the composed PATH, which also exposes private " +
+           "executables").format(", ".join(surface.incomplete)))
+    return scan_bins(ctx, entries, is_windows)
+
+def scan_bins(ctx, entries, is_windows):
+    """Discovers runnable tools by scanning the `path`-typed env entries.
+
+    The fallback for packages that declare no complete `binaries` metadata.
     Mirrors ocx PATH semantics: entries in declaration order, first name
     wins. Windows binaries are keyed by their extension-less name.
 

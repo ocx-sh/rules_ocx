@@ -108,9 +108,12 @@ ocx_package_repo(<a href="#ocx_package_repo-name">name</a>, <a href="#ocx_packag
 
 Provisions a single OCX package from an OCI registry.
 
-`//:content` is the package tree; every executable reachable through the
-package environment becomes a runnable target `//:<name>` (host-platform
-repos only). For reproducibility, commit an index snapshot and reference it
+`//:content` is the package tree; every executable the package declares as
+its public surface (`ocx package inspect --closure`) becomes a runnable
+target `//:<name>` (host-platform repos only). A package shipping no
+complete `binaries` metadata falls back to scanning the composed PATH, which
+also exposes its private executables. For reproducibility, commit an index
+snapshot and reference it
 via `index` (tags then resolve frozen from the snapshot), or pin
 per-platform manifest digests via `pins` — plain floating tags resolve at
 fetch time and log the resolved digest.
@@ -150,9 +153,11 @@ ocx_project_repo(<a href="#ocx_project_repo-name">name</a>, <a href="#ocx_projec
 Provisions the toolchain declared in a workspace ocx.toml/ocx.lock.
 
 Fails when the lockfile is stale or missing (fix with `ocx lock`). Every
-executable reachable through the composed environment's `path` entries
-becomes a runnable target `//:<name>`; the raw environment is loadable from
-`//:env.bzl` (`OCX_ENV`, `OCX_HOME`).
+executable the toolchain's packages declare as their public surface
+(`ocx inspect --closure`) becomes a runnable target `//:<name>`; a package
+shipping no complete `binaries` metadata falls back to scanning the composed
+environment's `path` entries, which also exposes its private executables.
+The raw environment is loadable from `//:env.bzl` (`OCX_ENV`, `OCX_HOME`).
 
 With `bins`, provisioning is lazy: nothing is pulled at fetch time, and each
 named executable becomes a launcher that re-enters `ocx run` — content
