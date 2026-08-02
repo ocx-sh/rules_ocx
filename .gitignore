@@ -10,3 +10,7 @@ e2e/*/MODULE.bazel.lock
 # roots. Frozen resolution never reads it (the package descriptor carries its
 # own physical address), so keep it out of the committed snapshots.
 examples/*/index/*/c/
+.agents/worktrees/
+# Local agent scratch: harness telemetry and MCP server caches.
+.claude/state/
+.serena/

@@ -17,7 +17,7 @@ import hook_utils
 
 _GIT_COMMIT_RE = re.compile(r"\bgit\s+commit\b")
 
-# Matches conventional commit types used in this project (see CLAUDE.md)
+# Matches conventional commit types used in this project (see AGENTS.md)
 _CONVENTIONAL_RE = re.compile(
     r"^(feat|fix|refactor|ci|chore|docs|test|perf|build|style)(\(.+\))?(!)?\s*: .+"
 )
