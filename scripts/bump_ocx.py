@@ -10,8 +10,9 @@ and the setup-ocx pins in .github/workflows/*.yml and *.yaml. Per-row
 validation holds every row in the file — not just the pinned version's — to
 channel "stable", a 64-lowercase-hex sha256, an artifact URL on the ocx
 release host, and an archive extension that manifest.bzl's archive_type()
-actually maps; the pinned version must additionally be present for all 8
-targets. --check (= `task dist:check`) runs that offline over the committed
+actually maps; the pinned version must additionally cover at least 8 targets,
+and a bump must not drop any target the outgoing pin already covers.
+--check (= `task dist:check`) runs that offline over the committed
 file; a refresh additionally requires that the incoming manifest only *adds*
 rows to the committed one.
 """
@@ -34,6 +35,15 @@ KNOWN_EXTS = (".zip", ".tar.gz", ".tar.xz")
 ARTIFACT_HOST = "github.com"
 ARTIFACT_PATH = "/ocx-sh/ocx/releases/download/"
 ARTIFACT_PREFIX = f"https://{ARTIFACT_HOST}{ARTIFACT_PATH}"
+# One url path segment: no separator, no dot-segment spelling, no space. Every
+# tag and filename in the committed snapshot is a strict subset of this.
+SEGMENT = r"[A-Za-z0-9._+-]+"
+SEGMENT_RE = re.compile(SEGMENT)
+# The shape a release asset url actually has: <tag>/<filename>, one segment
+# each. Built from ARTIFACT_PATH and SEGMENT so the prefix, the url pattern and
+# the per-field checks in check_row() cannot drift apart — artifact_url() in
+# ocx/private/manifest.bzl composes the mirror url from those same two fields.
+ARTIFACT_PATH_RE = re.compile(re.escape(ARTIFACT_PATH) + f"{SEGMENT}/{SEGMENT}")
 RELEASE_PAGE = "https://github.com/ocx-sh/ocx/releases"
 SHA256_RE = re.compile(r"[0-9a-f]{64}")
 
@@ -59,30 +69,57 @@ def ext_of(filename):
 def on_release_host(u):
     """True only for a URL that really resolves to the ocx release host.
 
-    startswith(ARTIFACT_PREFIX) is not a host check: GitHub normalises dot
-    segments server-side, so a url of
-    ".../releases/download/../../../../attacker/evil/releases/download/v1/ocx.tar.gz"
-    matches the prefix and still serves *another repository's* release asset
-    (verified live: the traversal 302s to the same asset the direct url does,
-    with and without curl --path-as-is). Anyone can create a repo and a
-    release, so that is attacker-chosen bytes with an attacker-chosen sha256
-    from the same row. Parse into components instead, and refuse the separator
-    characters a prefix match also waves through.
+    The path is checked against an *allowlist* of the shape a release asset
+    has, because the blocklist that preceded it was defeated twice — the
+    second time by four payload classes at once.
+
+    Generation 1, startswith(ARTIFACT_PREFIX) alone, fell to a dot segment:
+    GitHub normalises "/../" server-side, so ".../releases/download/../../../
+    ../attacker/evil/releases/download/v1/ocx.tar.gz" matches the prefix and
+    still serves *another repository's* release asset. Generation 2 added a
+    ".."-segment refusal, and fell to all four of: a literal backslash
+    ("download/..\\..\\..\\..\\attacker\\evil\\..." is one path segment to
+    urlsplit and four traversals to github.com, which normalises "\\" to
+    "/"), the same thing spelled %5c, an extra path segment, and a %2f
+    separator. Both generations were verified live — the crafted url 302s to
+    the other repository's asset, byte-identical to fetching it directly. The
+    url and the sha256 sit in the same attacker-authored row, so every one of
+    those reaches attacker-chosen bytes under a matching hash.
+
+    Four at once is the argument: a blocklist of separators is an open set,
+    and the next entry is always already out there. ARTIFACT_PATH_RE instead
+    names what a valid url looks like — <tag>/<filename>, no separator in the
+    charset — and everything else is refused by construction.
+
+    The two checks either side of it are not redundant with it; each is the
+    only one refusing a case the others pass. startswith() runs on the *raw*
+    path, so it is what refuses ".../releases/download%2fv1/x.tar.gz", whose
+    decoded path matches the pattern cleanly. The dot segment check runs after
+    decoding, so it is what refuses ".../download/../x.tar.gz", whose two
+    segments are both inside the charset. Deleting either reopens a case.
     """
-    if not isinstance(u, str) or any(c in u for c in "\r\n\t\0"):
+    # Allowlist, not a blocklist of the four obvious ones: urlsplit() lstrips
+    # WHATWG C0-or-space, so a leading \x01-\x08, \x0b, \x0c or \x0e-\x20 is
+    # dropped before any check below sees it and stays in the stored url.
+    # The space is spelled out because isprintable() counts it as printable by
+    # definition, and a url may not carry a raw one (RFC 3986).
+    if not isinstance(u, str) or not (u.isascii() and u.isprintable()) or " " in u:
         return False
     try:
         p = urlsplit(u)
     except ValueError:  # e.g. a malformed IPv6 literal
         return False
+    # Unquoted: %2e%2e is a dot segment, and %2f a separator, to anything that
+    # normalises — so both checks below run on what github.com will see.
+    path = unquote(p.path)
     return bool(
         p.scheme == "https"
         and p.netloc == ARTIFACT_HOST  # netloc, not hostname: userinfo must not pass
         and not p.query
         and not p.fragment
         and p.path.startswith(ARTIFACT_PATH)
-        # unquoted: %2e%2e is a dot segment to anything that normalises.
-        and ".." not in unquote(p.path).split("/")
+        and ARTIFACT_PATH_RE.fullmatch(path)
+        and ".." not in path.split("/")
     )
 
 
@@ -175,8 +212,23 @@ def check_row(r, where):
             f"belong in OCX_INSTALL_MIRROR_URL; if the release host really moved, change "
             f"ARTIFACT_HOST/ARTIFACT_PATH in this script deliberately."
         )
+    # artifact_url() composes the mirror url as <mirror>/<tag>/<filename>, so
+    # these two are path segments in their own right. Neither was checked: tag
+    # only ever reached die() interpolation, filename only ext_of(), which is
+    # an endswith. OCX_INSTALL_MIRROR_URL fixes the scheme and authority, but a
+    # dot segment here still walks the path below them.
+    for field in ("tag", "filename"):
+        value = r.get(field)
+        if not isinstance(value, str) or not SEGMENT_RE.fullmatch(value):
+            die(
+                f"{where}: {field} is {value!r}, which is not a single path segment — "
+                f"artifact_url() in ocx/private/manifest.bzl builds the mirror url as "
+                f"<mirror>/<tag>/<filename>, so a separator or a dot segment here walks "
+                f"out of the release directory inside OCX_INSTALL_MIRROR_URL. Check "
+                f"{RELEASE_PAGE} against {DIST_URL}; never edit rows by hand."
+            )
     filename = r.get("filename")
-    if not isinstance(filename, str) or ext_of(filename) is None:
+    if ext_of(filename) is None:
         die(
             f"{where}: filename {filename!r} has no extension known to archive_type() "
             f"in ocx/private/manifest.bzl (known: {', '.join(KNOWN_EXTS)}). Teach "
@@ -185,19 +237,46 @@ def check_row(r, where):
         )
 
 
-def validate(manifest, version):
+def validate(manifest, version, required=frozenset()):
     """Fails loudly on anything that would break @ocx_tool for this version.
-    The target-count check is deliberately scoped to `version`: an
-    unconditional one would false-fire while upstream is mid-publish.
-    check_row() is not scoped — --check runs it over every committed row and
-    assert_additions_only() over every row a refresh adds, because those ship
-    in the same file and any of them can be selected with
+    The target checks are deliberately scoped to `version`: an unconditional
+    one would false-fire while upstream is mid-publish. `required` is the set
+    of targets the *outgoing* pin already covers, which `version` must cover
+    too — see below. check_row() is not scoped — --check runs it over every
+    committed row and assert_additions_only() over every row a refresh adds,
+    because those ship in the same file and any of them can be selected with
     ocx.download(version = ...).
+
+    Not self-sufficient: this counts rows, so a duplicate (version, target)
+    inflates both the coverage set and the floor. Every caller must run
+    index_rows() first — main() does, on both the --check and the refresh
+    path — or a shadowing row passes here as a legitimate extra target.
     """
     rows = rows_for(manifest, version)
-    if len(rows) != EXPECTED_TARGETS:
+    # Coverage, not headcount: 9 rows that skip aarch64-apple-darwin clear any
+    # count check, and the refresh path cannot catch that either, because a
+    # brand-new version has no committed rows for assert_additions_only() to
+    # compare against. Measured against what the outgoing pin covers rather
+    # than a hardcoded list, so upstream renaming a target does not need a
+    # code change here — it needs the operator to look, which it gets.
+    missing = sorted(required - {r["target"] for r in rows})
+    if missing:
         die(
-            f"expected {EXPECTED_TARGETS} targets for {version}, got {len(rows)} — "
+            f"{version} has no row for {', '.join(missing)}, which the current pin covers — "
+            f"the release may still be publishing (retry), or upstream dropped or renamed the "
+            f"target, in which case select_release() in ocx/private/manifest.bzl fail()s on "
+            f"that host. Check {RELEASE_PAGE} before pinning it."
+        )
+    # The coarse backstop, one-sided on purpose: too *few* rows is a release
+    # still publishing. Too many is upstream adding a target — a normal
+    # release, and failing it would turn `task dist:check` red repo-wide with a
+    # "retry" that never helps. An extra row is not trusted for being extra:
+    # check_row() below runs on every row returned, assert_additions_only() on
+    # every row a refresh adds, and index_rows() has already refused a
+    # duplicate (version, target) on both paths.
+    if len(rows) < EXPECTED_TARGETS:
+        die(
+            f"expected at least {EXPECTED_TARGETS} targets for {version}, got {len(rows)} — "
             f"the release may still be publishing; retry or pass --version"
         )
     for r in rows:
@@ -418,7 +497,10 @@ def main():
         version = newest_stable(manifest)
         if version != before:
             assert_forward(before, version)
-    rows = validate(manifest, version)
+    # Every target the committed pin covers has to survive the move; `before`
+    # is read from the committed snapshot, so upstream cannot shrink the set
+    # it is measured against.
+    rows = validate(manifest, version, {r["target"] for r in rows_for(committed, before)})
 
     old_exts = sorted({ext_of(r["filename"]) for r in rows_for(manifest, before)}) if before != version else []
     new_exts = sorted({ext_of(r["filename"]) for r in rows})

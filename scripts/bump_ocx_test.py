@@ -80,11 +80,22 @@ def dies(fn, *args, why="this input"):
 
 @contextlib.contextmanager
 def served(body):
-    """Serves `body` to the next urlopen(); keeps the tests off the network."""
+    """Serves `body` to the next urlopen(); keeps the tests off the network.
+
+    Yields the list of Requests it was handed, so a test can assert on what we
+    send as well as on what we do with the answer — the User-Agent among it,
+    which setup.ocx.sh 403s without.
+    """
     real = urllib.request.urlopen
-    urllib.request.urlopen = lambda req, timeout=None: io.BytesIO(body)
+    seen = []
+
+    def fake_urlopen(req, timeout=None):
+        seen.append(req)
+        return io.BytesIO(body)
+
+    urllib.request.urlopen = fake_urlopen
     try:
-        yield
+        yield seen
     finally:
         urllib.request.urlopen = real
 
@@ -201,6 +212,19 @@ def test_f1_an_absent_latest_pointer_falls_back_instead_of_dying():
     assert bump_ocx.newest_stable(m) == "0.5.2"
 
 
+def test_f1_newest_stable_dies_when_there_is_nothing_stable_to_pick():
+    """F1(a): with no `latest` pointer, newest_stable() falls back to filtering
+    `releases` by channel — and a manifest that is entirely prerelease leaves
+    that filter empty, so there is no version to auto-select at all. It has to
+    die() with a message: max() over the empty list raises a bare ValueError,
+    and the caller is the unattended update-dist cron, whose whole output would
+    then be a traceback."""
+    beta_only = manifest("0.6.0", channel="beta")
+    del beta_only["latest"]
+    msg = dies(bump_ocx.newest_stable, beta_only, why="a manifest with no stable row and no latest")
+    assert "stable" in msg, f"die() must name what was missing; got: {msg}"
+
+
 def test_f1_validate_refuses_a_non_stable_row():
     """F1(b): the per-row channel check runs on auto-select, on --version and
     on --check, so it also catches a beta the operator named by hand."""
@@ -229,6 +253,54 @@ def test_f1_validate_refuses_a_partial_target_set():
     # A version absent altogether is the same failure, and the likelier one:
     # an operator naming a --version that upstream never published.
     dies(bump_ocx.validate, manifest("0.5.2"), "0.9.9", why="a version with no rows at all")
+
+
+def test_f1_validate_tolerates_a_target_upstream_adds():
+    """F1(b): the count check is one-sided deliberately. It exists to catch a
+    release that is still publishing — *fewer* rows than targets — and
+    upstream adding a 9th target (riscv64, loongarch) is a normal release day,
+    not an attack. Under an equality check that release turns `task dist:check`
+    red for the whole repo, on every PR, with a message telling the operator to
+    retry something that will never change. The added row is not trusted for
+    being extra: check_row() still runs on it here, assert_additions_only() on
+    the refresh path, and --check on every later PR.
+    """
+    widened = manifest("0.5.2")
+    widened["releases"].append(row("0.5.2", "riscv64gc-unknown-linux-gnu"))
+    assert len(bump_ocx.validate(widened, "0.5.2")) == len(TARGETS) + 1, "a new target must not fail the pin"
+
+    poisoned = manifest("0.5.2")
+    poisoned["releases"].append(row("0.5.2", "riscv64gc-unknown-linux-gnu", channel="nightly"))
+    dies(bump_ocx.validate, poisoned, "0.5.2", why="a 9th target row on the nightly channel")
+
+
+def test_f1_validate_refuses_a_version_that_drops_a_committed_target():
+    """F1(b): a row *count* is not target coverage. Nine rows that skip
+    aarch64-apple-darwin clear the floor, and the refresh path cannot catch it
+    either — a brand-new version has no committed rows for
+    assert_additions_only() to compare against — so select_release() in
+    ocx/private/manifest.bzl is left to fail() on the host that lost its row.
+    Coverage is what the count was proxying for, measured against the targets
+    the *outgoing* pin already covers: self-maintaining, and it does not
+    hardcode a target list that upstream renames out from under us.
+    """
+    incoming = manifest("0.5.2", "0.5.3")
+    incoming["releases"] = [
+        r for r in incoming["releases"] if r["version"] != "0.5.3" or r["target"] != "aarch64-apple-darwin"
+    ]
+    for extra in ("riscv64gc-unknown-linux-gnu", "loongarch64-unknown-linux-gnu"):
+        incoming["releases"].append(row("0.5.3", extra))
+    assert len(bump_ocx.rows_for(incoming, "0.5.3")) == 9, "the fixture must clear the row-count floor"
+
+    msg = dies(bump_ocx.validate, incoming, "0.5.3", set(TARGETS), why="9 rows that skip a committed target")
+    assert "aarch64-apple-darwin" in msg, f"die() must name the missing target; got: {msg}"
+
+    # A superset is still a normal release day: covering every outgoing target
+    # and adding two more must pass, or every new target becomes an outage.
+    widened = manifest("0.5.2", "0.5.3")
+    for extra in ("riscv64gc-unknown-linux-gnu", "loongarch64-unknown-linux-gnu"):
+        widened["releases"].append(row("0.5.3", extra))
+    assert len(bump_ocx.validate(widened, "0.5.3", set(TARGETS))) == len(TARGETS) + 2
 
 
 def test_f1_validate_refuses_a_sha256_that_is_not_lowercase_hex():
@@ -275,6 +347,9 @@ def test_f1_validate_refuses_an_artifact_url_off_the_release_host():
         f"{good}\0",
         f"{good}?redirect=https://evil.example/ocx.tar.gz",
         f"{good}#https://evil.example",
+        # urlsplit() raises on a malformed IPv6 literal; the guard answers
+        # False rather than letting ValueError out into check_row().
+        "https://[::1/ocx-sh/ocx/releases/download/v1/ocx.tar.gz",
         None,
         123,
         [good],
@@ -282,6 +357,73 @@ def test_f1_validate_refuses_an_artifact_url_off_the_release_host():
         m = manifest("0.5.2")
         m["releases"][2]["url"] = bad
         dies(bump_ocx.validate, m, "0.5.2", why=f"url={bad!r}")
+
+
+def test_f1_url_guard_allowlists_the_asset_shape_instead_of_blocking_separators():
+    """F1(b), the third bypass of this one guard. `startswith` fell to a dot
+    segment; refusing dot segments then fell to a literal backslash — one path
+    segment to urlsplit, four traversals to github.com, which normalises "\\"
+    to "/" server-side (verified live: the payload below 302s to another
+    repository's release asset, byte-identical to fetching it directly). The
+    url and the sha256 come out of the same attacker-authored row, so that is
+    attacker-chosen bytes under a matching hash.
+
+    Blocking separators is an open set — that is what has now failed three
+    times. The guard allowlists the shape a release asset actually has
+    instead: `<tag>/<filename>`, one segment each, out of a charset that
+    contains no separator at all. A bare ".." clears that charset, so the dot
+    segment check stays as the second half of the pair.
+
+    The authority half pins `p.netloc == ARTIFACT_HOST`: an exact compare on
+    the raw netloc, not `.hostname`, which lowercases and drops both userinfo
+    and the port and would wave the middle four of these through.
+    """
+    good = f"{bump_ocx.ARTIFACT_PREFIX}v0.5.2/ocx-x86_64-unknown-linux-gnu.tar.gz"
+    for bad in (
+        # Literal backslashes: urlsplit sees one segment, github.com sees four.
+        rf"{bump_ocx.ARTIFACT_PREFIX}..\..\..\..\ATTACKER/REPO/releases/download/v1/ocx.tar.gz",
+        f"{bump_ocx.ARTIFACT_PREFIX}..%5c..%5c..%5c..%5cATTACKER/REPO/releases/download/v1/ocx.tar.gz",
+        # The same traversal spelled with *exactly* two slash-separated
+        # segments, so the shape check has nothing to say and the charset is
+        # the only thing refusing it. Without these two, adding "\" to the
+        # character classes passes the whole suite and reopens the bypass.
+        rf"{bump_ocx.ARTIFACT_PREFIX}..\..\..\..\ATTACKER\REPO\releases\download\v0.5.2/ocx-x86_64-unknown-linux-gnu.tar.gz",
+        f"{bump_ocx.ARTIFACT_PREFIX}..%5c..%5c..%5cATTACKER%5cREPO/ocx.tar.gz",
+        "https://user@github.com/ocx-sh/ocx/releases/download/v1/ocx.tar.gz",
+        "https://github.com@evil.example/ocx-sh/ocx/releases/download/v1/ocx.tar.gz",
+        "https://github.com:443/ocx-sh/ocx/releases/download/v1/ocx.tar.gz",
+        "https://GitHub.com/ocx-sh/ocx/releases/download/v1/ocx.tar.gz",
+        "https://github.com./ocx-sh/ocx/releases/download/v1/ocx.tar.gz",
+        # A third path segment is not an asset url whatever it spells.
+        f"{bump_ocx.ARTIFACT_PREFIX}v1/a/b.tar.gz",
+        f"{bump_ocx.ARTIFACT_PREFIX}v1%2fATTACKER%2fREPO%2freleases%2fdownload%2fv1/ocx.tar.gz",
+        # The two cases that pin the checks either side of the pattern; neither
+        # is exploitable, and each is refused by exactly one of them. ".."
+        # clears the charset, so the dot segment check is the only refusal...
+        f"{bump_ocx.ARTIFACT_PREFIX}../ocx.tar.gz",
+        # ...and this one's *decoded* path matches the pattern cleanly, so the
+        # raw-path startswith() is the only refusal. Delete either line in
+        # on_release_host() and one of these two starts passing.
+        "https://github.com/ocx-sh/ocx/releases/download%2fv1/ocx.tar.gz",
+    ):
+        assert not bump_ocx.on_release_host(bad), f"on_release_host accepted {bad!r}"
+
+    # Every C0 control, DEL and space, not just the four that were once
+    # blocklisted: urlsplit() lstrips WHATWG C0-or-space, so a *leading*
+    # \x01-\x08, \x0b, \x0c or \x0e-\x20 is dropped during parsing and never
+    # seen by any check downstream of it, while staying in the stored url.
+    for c in [chr(i) for i in range(0x21)] + ["\x7f"]:
+        for injected in (f"{c}{good}", f"{good}{c}"):
+            assert not bump_ocx.on_release_host(injected), f"on_release_host accepted {injected!r}"
+
+    # Every archive shape in the committed snapshot still passes: a guard that
+    # refuses dist/dist.json is not a guard, it is an outage.
+    for ok in (
+        good,
+        f"{bump_ocx.ARTIFACT_PREFIX}v0.5.2/ocx-aarch64-pc-windows-msvc.zip",
+        f"{bump_ocx.ARTIFACT_PREFIX}v0.4.2/ocx-aarch64-apple-darwin.tar.xz",
+    ):
+        assert bump_ocx.on_release_host(ok), f"on_release_host refused the committed shape {ok!r}"
 
 
 def test_f1_validate_refuses_a_filename_it_cannot_type():
@@ -296,6 +438,33 @@ def test_f1_validate_refuses_a_filename_it_cannot_type():
     missing = manifest("0.5.2")
     del missing["releases"][4]["filename"]
     dies(bump_ocx.validate, missing, "0.5.2", why="a row with no filename at all")
+
+
+def test_f1_validate_refuses_a_tag_or_filename_that_is_not_one_path_segment():
+    """F1(b), the mirror path. artifact_url() in ocx/private/manifest.bzl
+    composes the mirror url as <mirror>/<tag>/<filename>, and neither field was
+    reaching a check: `tag` appeared only inside die() message interpolation,
+    `filename` only through ext_of(), which is an endswith. So tag="../../../.."
+    with a filename to match walks out of the release directory inside whatever
+    OCX_INSTALL_MIRROR_URL points at — the scheme and authority are the
+    operator's, but the path below them is not, which matters when the mirror
+    is a shared artifact proxy. The sha256 is in the same row, so nothing else
+    catches it. Same one-segment charset as the url path, because these two
+    fields are literally the two segments of it.
+    """
+    for field, bad in (
+        ("tag", "../../../.."),
+        ("tag", "v0.5.2/../../evil"),
+        ("tag", r"v0.5.2\..\..\evil"),
+        ("tag", None),
+        ("tag", ["v0.5.2"]),
+        ("filename", "../../../../evil.example/x.tar.gz"),
+        # Passes ext_of()'s endswith and is still not one path segment.
+        ("filename", "a b.tar.gz"),
+    ):
+        m = manifest("0.5.2")
+        m["releases"][5][field] = bad
+        dies(bump_ocx.validate, m, "0.5.2", why=f"{field}={bad!r}")
 
 
 # --- F1b: the pin only ever moves forward -----------------------------------
@@ -337,6 +506,21 @@ def test_f2_rewritten_row_is_refused():
         tampered["releases"][0][field] = "0" * 64 if field == "sha256" else "rewritten"
         assert tampered["releases"][0][field] != base["releases"][0][field]
         dies(bump_ocx.assert_additions_only, base, tampered, why=f"a rewritten {field}")
+
+    # A field *removed* from a committed row is the same rewrite, and the half
+    # the comparison is easiest to get wrong: iterating the incoming row's
+    # fields alone lets a dropped sha256 read as "nothing moved". Hence the
+    # union of both field sets. The message must name the field, so this
+    # cannot pass on some unrelated guard dying first.
+    for field in ROW_FIELDS:
+        stripped = manifest("0.5.1", "0.5.2")
+        del stripped["releases"][0][field]
+        msg = dies(bump_ocx.assert_additions_only, base, stripped, why=f"a deleted {field}")
+        # "sha256: ", not "sha256": the bare field name matches the message's
+        # fixed boilerplate ("its sha256 is what...", ".../tag/v0.5.1") and
+        # would pass for any rewrite at all. The rendered form is "sha256: 'x'
+        # -> None".
+        assert f"{field}: " in msg, f"die() must name the dropped field; got: {msg}"
 
 
 def test_f2_dropped_row_is_refused_and_named():
@@ -448,6 +632,21 @@ def test_f3_unparseable_response_leaves_the_snapshot_intact():
     error page served in place of the manifest must leave disk untouched."""
     with snapshot_untouched(), served(b"<html>503 Service Unavailable</html>"):
         dies(bump_ocx.fetch_snapshot, why="an HTML error page")
+
+
+def test_f3_fetch_identifies_itself_to_the_manifest_host():
+    """setup.ocx.sh 403s the default Python-urllib agent, so the User-Agent is
+    load-bearing rather than cosmetic: drop it and every refresh — scheduled or
+    manual — dies at the fetch, reporting an HTTP error whose actual cause is
+    the header we sent. served() yields the Requests it was handed so that can
+    be asserted; stubbing urlopen with a lambda that ignored its argument meant
+    nothing ever looked."""
+    with snapshot_untouched(), served(json.dumps(manifest("0.5.2")).encode()) as seen:
+        bump_ocx.fetch_snapshot()
+    assert len(seen) == 1, f"expected exactly one fetch; got {len(seen)}"
+    assert seen[0].get_full_url() == bump_ocx.DIST_URL, seen[0].get_full_url()
+    # urllib stores header names capitalised, hence "User-agent".
+    assert seen[0].get_header("User-agent") == "rules-ocx-update-dist", seen[0].header_items()
 
 
 # --- wiring: a guard that main() never calls protects nothing ---------------
@@ -586,6 +785,25 @@ def test_wiring_a_poisoned_added_row_blocks_both_write_paths():
             before = (tmp / "dist.json").read_bytes()
             dies(bump_ocx.main, why=f"a poisoned added row under {argv or ['(auto-bump)']}")
             assert (tmp / "dist.json").read_bytes() == before, f"{argv or '(auto-bump)'} wrote the poisoned manifest"
+
+
+def test_wiring_the_bump_path_measures_coverage_against_the_outgoing_pin():
+    """A guard main() never calls protects nothing: validate()'s coverage check
+    only bites if the bump path hands it the targets the *committed* pin
+    covers. 0.5.3 arrives with 9 rows — clearing the count floor — and still no
+    aarch64-apple-darwin, so nothing may be written."""
+    committed = manifest("0.5.1", "0.5.2")
+    incoming = manifest("0.5.1", "0.5.2", "0.5.3")
+    incoming["releases"] = [
+        r for r in incoming["releases"] if r["version"] != "0.5.3" or r["target"] != "aarch64-apple-darwin"
+    ]
+    for extra in ("riscv64gc-unknown-linux-gnu", "loongarch64-unknown-linux-gnu"):
+        incoming["releases"].append(row("0.5.3", extra))
+    with sandbox("0.5.2", committed, argv=[]) as tmp, served(json.dumps(incoming).encode()):
+        before = (tmp / "dist.json").read_bytes()
+        msg = dies(bump_ocx.main, why="a bump to a version missing a committed target")
+        assert (tmp / "dist.json").read_bytes() == before, "the write must not land"
+    assert "aarch64-apple-darwin" in msg, f"die() must name the missing target; got: {msg}"
 
 
 def test_wiring_a_validate_failure_also_blocks_the_write():
