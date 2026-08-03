@@ -109,14 +109,13 @@ _package = tag_class(
             doc = "Name of the generated repository (hub name when `platforms` is set).",
         ),
         "bins": attr.string_list(
-            doc = "Lazy provisioning: names of the executables to expose. When set, " +
-                  "nothing is installed at fetch time — each name becomes a launcher " +
-                  "re-entering `ocx package exec`, materializing the package on first " +
-                  "execution. Requires a digest-pinned identity (`pins` or " +
-                  "'@sha256:'); `//:content` is not available in lazy mode. " +
-                  "Incompatible with index — a snapshot resolves at fetch time only. Nothing " +
-                  "runs ocx at fetch time, so no host config tier is watched: the launcher " +
-                  "resolves configuration live on each run.",
+            doc = "Lazy provisioning: names of the executables to expose. Nothing is " +
+                  "installed at fetch time — each name becomes a launcher re-entering " +
+                  "`ocx package exec`, materializing the package on first execution, and " +
+                  "no host config tier is watched because the launcher resolves " +
+                  "configuration live on each run. Requires a digest-pinned identity " +
+                  "(`pins` or '@sha256:'); `//:content` is unavailable in lazy mode, and " +
+                  "`index` is incompatible because a snapshot resolves at fetch time only.",
         ),
         "config": attr.label(
             doc = "An ocx site config.toml (mirrors, registries, [patches]) layered over the " +

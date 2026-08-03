@@ -60,8 +60,9 @@ opens:
 
 1. **The allowlist** (on the *decoded* path): it must fullmatch exactly two
    `[A-Za-z0-9._+-]` segments, `<tag>/<filename>`, under the literal
-   `/ocx-sh/ocx/releases/download/` prefix. That rejects backslashes, encoded
-   separators and extra path segments in one rule.
+   `/ocx-sh/ocx/releases/download/` prefix. It refuses a literal backslash,
+   a `%5c`-encoded one (which decodes to a character outside the charset)
+   and any extra path segment. It does **not** refuse `%2f` — see 3.
 2. **The dot-segment refusal**: a bare `..` clears the charset above, so
    `".." not in path.split("/")` is still doing work.
 3. **`startswith(ARTIFACT_PATH)` on the *raw* path**: it is the only check that

@@ -28,18 +28,23 @@
   at the source, and only then decide — by hand, in a reviewed commit.
 - The url check is an **allowlist**, not a prefix match: the decoded path
   must fullmatch exactly two `[A-Za-z0-9._+-]` segments — `<tag>/<filename>`
-  — under the literal `/ocx-sh/ocx/releases/download/` prefix. That single
-  rule rejects backslashes, `%5c`/`%2f`-encoded separators and extra path
-  segments alike, because a blocklist of separator characters is an open set
-  and this guard has already been defeated twice — the second time by four
+  — under the literal `/ocx-sh/ocx/releases/download/` prefix. It is three
+  cooperating checks, and each is the *only* one refusing a payload class,
+  so none is redundant: the allowlist refuses a literal or `%5c` backslash
+  and any extra path segment; `startswith(ARTIFACT_PATH)` on the **raw**
+  path refuses `…/releases/download%2fv1/x.tar.gz`, whose decoded path
+  fullmatches cleanly; and `".." not in path.split("/")` refuses a bare
+  `..`, which clears the charset. The shape matters as much as the charset —
+  with two segments and no separator in the class, a traversal cannot
+  descend again. A blocklist of separator characters is an open set, and
+  this guard has already been defeated twice — the second time by four
   payload classes at once. Generation 1, `startswith()` alone, fell to
   `…/ocx-sh/ocx/releases/download/../../../../other/repo/releases/download/v1/x.tar.gz`
   (`github.com` normalises dot segments server-side and serves *another
   repository's* asset). Generation 2, `startswith` plus a `..`-segment
   refusal, fell to a literal backslash, a `%5c`-encoded one, an extra path
   segment and a `%2f` separator — a backslash is one path segment to
-  `urlsplit` and four traversals to github.com. A bare `..` still clears the
-  charset, so the dot-segment check stays as the other half of the pair.
+  `urlsplit` and four traversals to github.com.
   `tag` and `filename` *are* those two segments — the mirror url is
   `<mirror>/<tag>/<filename>` — so they are validated against the same
   charset constant by construction, not by coincidence. Before that, an

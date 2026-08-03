@@ -56,7 +56,7 @@ Every executable the toolchain's packages declare as their public surface
 `@tools//:<name>`; a host-platform `ocx.package()` exposes its own the same
 way at `@<name>//:<bin>` (with `platforms = [...]` the launchers live in the
 per-platform repos — the `@<name>` hub aliases only `//:content`, or the lazy
-`bins` names). A declared name no directory on the composed PATH holds is
+`bins` names). A declared name that no directory on the composed PATH holds is
 dropped silently — a missing target raises no error, so check
 `bazel query @tools//...` if one you expected is absent.
 
@@ -192,7 +192,9 @@ repository rule has.
     resolved digest.
 - Remote execution is a non-goal for now: launchers reference absolute
   `OCX_HOME` store paths (the nixpkgs model). Use `isolated_home = True` to
-  keep a store per repository if you need stricter isolation.
+  keep a store per repository if you need stricter isolation — at the cost
+  of a full per-repository re-download, and it cannot be combined with
+  `bins` (lazy provisioning) below.
 
 ## Lazy provisioning
 
