@@ -9,6 +9,8 @@ time."""
 load(":platforms.bzl", "host_info")
 load(
     ":repo_utils.bzl",
+    "CONFIG_ATTRS",
+    "check_bin_names",
     "decode_json",
     "discover_bins",
     "make_ocx_env",
@@ -18,9 +20,12 @@ load(
     "render_lazy_launcher",
     "rlocation_path",
     "run_ocx",
+    "sh_quote",
     "stage_lazy_config",
     "write_launchers",
 )
+
+visibility(["//ocx", "//ocx/tests"])
 
 def _lazy_project(ctx, host, binary):
     """Renders text-only launchers deferring `ocx pull` to first execution.
@@ -34,10 +39,14 @@ def _lazy_project(ctx, host, binary):
     if ctx.attr.isolated_home:
         fail("rules_ocx: bins (lazy provisioning) is incompatible with isolated_home — " +
              "the store must be resolvable on whatever machine executes the launcher")
+    check_bin_names(ctx.attr.bins)
     ctx.file("ocx.toml", ctx.read(ctx.attr.ocx_toml))
     ctx.file("ocx.lock", ctx.read(ctx.attr.ocx_lock))
     staged = stage_lazy_config(ctx, host.is_windows)
-    groups = ["-g", ",".join(ctx.attr.groups)] if ctx.attr.groups else []
+    groups = []
+    if ctx.attr.groups:
+        joined = ",".join(ctx.attr.groups)
+        groups = ["-g", joined if host.is_windows else sh_quote(joined)]
     ext = ".bat" if host.is_windows else ".sh"
     for name in ctx.attr.bins:
         if host.is_windows:
@@ -133,7 +142,7 @@ def _ocx_project_repo_impl(ctx):
 
     # Foreign platforms expose no launchers, so they skip the closure call too.
     runnable = ctx.attr.platform in ("", host.ocx_platform)
-    discovered = struct(bins = [], scanned = [])
+    discovered = struct(bins = [], scanned = [], rejected = [])
     if runnable:
         closure_cmd = ["--format", "json"] + project + ["inspect", "--closure"]
         if ctx.attr.groups:
@@ -162,7 +171,7 @@ def _ocx_project_repo_impl(ctx):
             host.is_windows,
         )
     write_launchers(ctx, discovered.bins, entries, ocx_env.home, str(binary), host.is_windows)
-    ctx.file("env.bzl", render_env_bzl(entries, ocx_env.home, discovered.scanned))
+    ctx.file("env.bzl", render_env_bzl(entries, ocx_env.home, discovered.scanned, discovered.rejected))
     ctx.file("BUILD.bazel", render_launchers_build(
         discovered.bins,
         host.is_windows,
@@ -196,22 +205,13 @@ ocx.lock: that platform's leaves are pulled into the store and `env.bzl`
 holds their absolute store paths (sysroots, target libraries, container
 image content). Foreign repos expose no runnable launchers — the binaries
 do not run on this host.""",
-    attrs = {
+    attrs = CONFIG_ATTRS | {
         "bins": attr.string_list(
             doc = "Lazy provisioning: names of the executables to expose (not " +
                   "validated at fetch time). When set, nothing is pulled during the " +
                   "fetch — each name becomes a launcher re-entering `ocx run`, and " +
                   "actions key on the lockfile (a runfile) instead of tool content. " +
                   "Incompatible with isolated_home.",
-        ),
-        "config": attr.label(
-            allow_single_file = True,
-            doc = "An ocx site config.toml (mirrors, registries, [patches]) layered over the " +
-                  "host's discovered config — not the project ocx.toml. Sets OCX_CONFIG for " +
-                  "every invocation, overriding an ambient one, and the file is watched. " +
-                  "Combine with no_config for a hermetic configuration. With `bins` it is " +
-                  "copied into the repository and uploaded as an input with every action — " +
-                  "keep credentials out of it.",
         ),
         "groups": attr.string_list(
             doc = "ocx.toml groups to provision (comma-joined into `-g` for " +
@@ -222,16 +222,6 @@ do not run on this host.""",
         "isolated_home": attr.bool(
             default = False,
             doc = "Keep the ocx store inside this repository instead of the shared user OCX_HOME.",
-        ),
-        "no_config": attr.bool(
-            default = False,
-            doc = "Ignore the host's discovered config tiers (/etc, the user config, " +
-                  "$OCX_HOME/config.toml) and the managed-config snapshot — sets OCX_NO_CONFIG=1, " +
-                  "and blanks an ambient OCX_CONFIG, OCX_PATCHES and OCX_PATCH_SNAPSHOT, which " +
-                  "OCX_NO_CONFIG alone does not prune. The `config` and `patch_snapshot` attrs " +
-                  "still apply. Use this when a corporate managed config must not reach the " +
-                  "build; it also opts out of the exit-78 gate a required-but-unsynced managed " +
-                  "config raises.",
         ),
         "ocx": attr.label(
             default = "@ocx_tool//:ocx",
@@ -247,15 +237,6 @@ do not run on this host.""",
             mandatory = True,
             allow_single_file = True,
             doc = "The project ocx.toml declaring the toolchain.",
-        ),
-        "patch_snapshot": attr.label(
-            allow_single_file = True,
-            doc = "A committed patches.snapshot.json (written by `ocx patch freeze` next to " +
-                  "ocx.lock) freezing the digests of the patch companions composed onto this " +
-                  "environment. Sets OCX_PATCH_SNAPSHOT. `ocx lock --check` does not cover " +
-                  "companions — without a frozen snapshot they resolve at fetch time. With " +
-                  "`bins` it is copied into the repository and uploaded as an input with every " +
-                  "action — keep credentials out of it.",
         ),
         "platform": attr.string(
             doc = "ocx platform key ('linux/arm64', …) to compose for; empty = host. " +

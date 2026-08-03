@@ -7,6 +7,8 @@ Pure functions on (os name, arch) strings so they are unit-testable; the
 repository rules pass `repository_ctx.os.name` / `.arch` in.
 """
 
+visibility(["//ocx", "//ocx/tests"])
+
 # os/arch prefix of an ocx platform key -> Bazel constraint labels.
 _OS = {
     "linux": "@platforms//os:linux",

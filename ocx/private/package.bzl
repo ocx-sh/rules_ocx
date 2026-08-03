@@ -8,8 +8,11 @@ multi-platform hub that select()s between per-platform repos."""
 load(":platforms.bzl", "host_info", "ocx_platform_constraints", "os_arch", "slug")
 load(
     ":repo_utils.bzl",
+    "CONFIG_ATTRS",
+    "check_bin_names",
     "decode_json",
     "discover_bins",
+    "is_absolute_path",
     "make_ocx_env",
     "ocx_bin",
     "render_env_bzl",
@@ -17,9 +20,12 @@ load(
     "render_lazy_launcher",
     "rlocation_path",
     "run_ocx",
+    "sh_quote",
     "stage_lazy_config",
     "write_launchers",
 )
+
+visibility(["//ocx", "//ocx/tests"])
 
 def _lazy_package(ctx, host, pkg):
     """Renders text-only launchers deferring `ocx package install` to first use.
@@ -40,13 +46,14 @@ def _lazy_package(ctx, host, pkg):
         fail(("rules_ocx: lazy package '{}' must be digest-pinned — the digest is the only " +
               "action-key identity when content is deferred; add the platform to `pins` or " +
               "use an '@sha256:' reference").format(pkg))
+    check_bin_names(ctx.attr.bins)
     staged = stage_lazy_config(ctx, host.is_windows)
     ext = ".bat" if host.is_windows else ".sh"
     for name in ctx.attr.bins:
         if host.is_windows:
             command = ['"{}"'.format(ocx_bin(ctx)), "package", "exec", '"{}"'.format(pkg)]
         else:
-            command = ['"$(rlocation {})"'.format(rlocation_path(ctx.attr.ocx)), "package", "exec", "'{}'".format(pkg)]
+            command = ['"$(rlocation {})"'.format(rlocation_path(ctx.attr.ocx)), "package", "exec", sh_quote(pkg)]
         command += ["--", name]
         ctx.file(
             "launchers/" + name + ext,
@@ -176,6 +183,15 @@ def _ocx_package_repo_impl(ctx):
     )
     root = decode_json(stdout, "ocx package which").values()[0]
 
+    # Externally sourced like every other string parsed here: checked before it
+    # becomes a symlink target, so a drifted report names the pin to move
+    # instead of tracebacking out of ctx.symlink().
+    if type(root) != "string" or not is_absolute_path(root, host.is_windows):
+        fail(("rules_ocx: ocx package which reported '{}' for '{}', not an absolute store " +
+              "path — the pinned ocx CLI and rules_ocx disagree on the report shape. Move " +
+              "DEFAULT_OCX_VERSION (ocx/private/versions.bzl) to an ocx release this " +
+              "rules_ocx parses, or upgrade rules_ocx.").format(root, pkg))
+
     stdout = run_ocx(
         ctx,
         binary,
@@ -193,7 +209,7 @@ def _ocx_package_repo_impl(ctx):
         ctx.symlink(root + "/entrypoints", "entrypoints")
 
     # Foreign platforms expose no launchers, so they skip the closure call too.
-    discovered = struct(bins = [], scanned = [])
+    discovered = struct(bins = [], scanned = [], rejected = [])
     if runnable:
         # `inspect --closure` spends its 65 on a closure conflict; the generic
         # hint names a lockfile this tier does not have.
@@ -217,7 +233,7 @@ def _ocx_package_repo_impl(ctx):
             host.is_windows,
         )
     write_launchers(ctx, discovered.bins, entries, ocx_env.home, str(binary), host.is_windows)
-    ctx.file("env.bzl", render_env_bzl(entries, ocx_env.home, discovered.scanned))
+    ctx.file("env.bzl", render_env_bzl(entries, ocx_env.home, discovered.scanned, discovered.rejected))
     ctx.file("BUILD.bazel", render_launchers_build(
         discovered.bins,
         host.is_windows,
@@ -251,7 +267,7 @@ With `bins`, provisioning is lazy: nothing is installed at fetch time, and
 each named executable becomes a launcher re-entering `ocx package exec` —
 content materializes on first execution and never becomes a Bazel action
 input (`//:content` is not available in lazy mode).""",
-    attrs = {
+    attrs = CONFIG_ATTRS | {
         "bins": attr.string_list(
             doc = "Lazy provisioning: names of the executables to expose (not " +
                   "validated at fetch time). When set, nothing is installed during " +
@@ -259,15 +275,6 @@ input (`//:content` is not available in lazy mode).""",
                   "`ocx package exec`, keyed on the digest-pinned reference. " +
                   "Requires a digest-pinned identity (`pins` or '@sha256:'); " +
                   "incompatible with isolated_home and index.",
-        ),
-        "config": attr.label(
-            allow_single_file = True,
-            doc = "An ocx site config.toml (mirrors, registries, [patches]) layered over the " +
-                  "host's discovered config — not the project ocx.toml. Sets OCX_CONFIG for " +
-                  "every invocation, overriding an ambient one, and the file is watched. " +
-                  "Combine with no_config for a hermetic configuration. With `bins` it is " +
-                  "copied into the repository and uploaded as an input with every action — " +
-                  "keep credentials out of it.",
         ),
         "index": attr.label(
             doc = "Committed ocx index snapshot directory (created with " +
@@ -279,16 +286,6 @@ input (`//:content` is not available in lazy mode).""",
             default = False,
             doc = "Keep the ocx store inside this repository instead of the shared user OCX_HOME.",
         ),
-        "no_config": attr.bool(
-            default = False,
-            doc = "Ignore the host's discovered config tiers (/etc, the user config, " +
-                  "$OCX_HOME/config.toml) and the managed-config snapshot — sets OCX_NO_CONFIG=1, " +
-                  "and blanks an ambient OCX_CONFIG, OCX_PATCHES and OCX_PATCH_SNAPSHOT, which " +
-                  "OCX_NO_CONFIG alone does not prune. The `config` and `patch_snapshot` attrs " +
-                  "still apply. Use this when a corporate managed config must not reach the " +
-                  "build; it also opts out of the exit-78 gate a required-but-unsynced managed " +
-                  "config raises.",
-        ),
         "ocx": attr.label(
             default = "@ocx_tool//:ocx",
             allow_single_file = True,
@@ -297,15 +294,6 @@ input (`//:content` is not available in lazy mode).""",
         "package": attr.string(
             mandatory = True,
             doc = "Fully-qualified identifier: 'registry/repo[:tag][@sha256:…]'.",
-        ),
-        "patch_snapshot": attr.label(
-            allow_single_file = True,
-            doc = "A committed patches.snapshot.json (written by `ocx patch freeze` next to " +
-                  "ocx.lock) freezing the digests of the patch companions composed onto this " +
-                  "environment. Sets OCX_PATCH_SNAPSHOT. `ocx lock --check` does not cover " +
-                  "companions — without a frozen snapshot they resolve at fetch time. With " +
-                  "`bins` it is copied into the repository and uploaded as an input with every " +
-                  "action — keep credentials out of it.",
         ),
         "pins": attr.string_dict(
             doc = "ocx platform key -> 'sha256:…' manifest digest overriding the " +

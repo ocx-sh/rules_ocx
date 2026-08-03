@@ -5,17 +5,26 @@
 
 load("@bazel_skylib//lib:partial.bzl", "partial")
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
+load("//ocx/private:platforms.bzl", "host_info")
 load(
     "//ocx/private:repo_utils.bzl",
+    "OCX_PASSTHROUGH_ENV",
     "SYSEXIT_HINTS",
     "ambient_config_paths",
+    "check_bin_names",
     "closure_packages",
     "declared_bins",
+    "decode_json",
+    "discover_bins",
     "is_absolute_path",
+    "make_ocx_env",
     "path_dirs",
     "render_env_bzl",
     "render_launcher",
+    "render_launchers_build",
     "render_lazy_launcher",
+    "run_ocx",
+    "stage_lazy_config",
     "truthy",
 )
 
@@ -25,19 +34,474 @@ _ENTRIES = [
     {"key": "JAVA_HOME", "value": "/store/cc/content", "type": "constant"},
 ]
 
+def _fs_ctx(files = [], dirs = [], listing = {}):
+    """A repository_ctx stand-in exposing a canned filesystem.
+
+    Covers everything the discovery helpers touch: `ctx.path().exists/is_dir`,
+    `readdir()` (the Windows scan) and the one `ctx.execute` the POSIX scan
+    shells out to.
+
+    Args:
+        files: absolute paths that exist as executable regular files.
+        dirs: absolute paths that exist as directories.
+        listing: {directory: [basename, ...]} returned by a scan of it.
+
+    Returns:
+        the fake ctx struct.
+    """
+
+    def path(p):
+        p = str(p)
+
+        def readdir():
+            return [
+                struct(basename = n, is_dir = (p + "/" + n) in dirs)
+                for n in listing.get(p, [])
+            ]
+
+        return struct(
+            exists = p in files or p in dirs or p in listing,
+            is_dir = p in dirs or p in listing,
+            readdir = readdir,
+        )
+
+    # The keyword names are repository_ctx's, so they cannot be renamed away.
+    # buildifier: disable=unused-variable
+    def execute(argv, environment = None, timeout = None):
+        # list_executables' POSIX branch passes the directory last.
+        directory = argv[-1]
+        found = [n for n in listing.get(directory, []) if directory + "/" + n in files]
+        return struct(
+            return_code = 0,
+            stdout = "".join([n + "\n" for n in found]),
+            stderr = "",
+        )
+
+    return struct(path = path, execute = execute)
+
+def _replay_ctx(codes, calls, sleeps = None):
+    """A repository_ctx stand-in replaying a scripted sequence of exit codes.
+
+    Args:
+        codes: return codes to hand back, one per ocx invocation; the last is
+            repeated once exhausted.
+        calls: mutable list every ocx argv is appended to, so a test can count
+            the attempts run_ocx() actually made.
+        sleeps: mutable list every backoff exec's environment is appended to,
+            or None to ignore them.
+
+    Returns:
+        the fake ctx struct.
+    """
+
+    # buildifier: disable=unused-variable
+    def execute(argv, environment = None, timeout = None):
+        # The backoff sleep is not an attempt.
+        if argv[0] == "/bin/sh":
+            if sleeps != None:
+                sleeps.append(environment)
+            return struct(return_code = 0, stdout = "", stderr = "")
+        calls.append(argv)
+        code = codes[min(len(calls), len(codes)) - 1]
+        return struct(return_code = code, stdout = "out{}".format(code), stderr = "boom")
+
+    return struct(execute = execute)
+
+def _env_ctx(env = {}, no_config = False, config = None, patch_snapshot = None):
+    """A repository_ctx stand-in for make_ocx_env() / stage_lazy_config().
+
+    `path` returns the string it was given: these two only ever str() the
+    result, and the fetched-file semantics play no part in what is asserted.
+
+    Args:
+        env: the ambient environment ctx.getenv() reads.
+        no_config: the `no_config` attr.
+        config: the `config` attr (a path string stands in for the label).
+        patch_snapshot: the `patch_snapshot` attr.
+
+    Returns:
+        the fake ctx struct.
+    """
+
+    def getenv(key):
+        return env.get(key)
+
+    def path(p):
+        return p
+
+    # buildifier: disable=unused-variable
+    def watch(p):
+        return None
+
+    def read(label):
+        return "# staged from {}\n".format(label)
+
+    # buildifier: disable=unused-variable
+    def file(name, content, executable = False):
+        return None
+
+    return struct(
+        getenv = getenv,
+        path = path,
+        watch = watch,
+        read = read,
+        file = file,
+        name = "test_repo",
+        attr = struct(no_config = no_config, config = config, patch_snapshot = patch_snapshot),
+    )
+
+# The ambient environment the config tests steer: every channel `no_config`
+# has to close, plus one it must leave alone.
+_AMBIENT = {
+    "OCX_HOME": "/home/u/.ocx",
+    "OCX_CONFIG": "/site/config.toml",
+    "OCX_PATCHES": "{\"patches\":{\"ocx.sh/evil\":\"latest\"}}",
+    "OCX_PATCH_SNAPSHOT": "/site/patches.snapshot.json",
+    "OCX_MIRRORS": "https://mirror.example",
+}
+
+def _make_ocx_env_test_impl(ctx):
+    """F4/F5: what the fetch-time environment blanks, neutralizes and forwards."""
+    env = unittest.begin(ctx)
+    host = host_info("linux", "amd64")
+
+    ambient = make_ocx_env(_env_ctx(env = _AMBIENT), host, False).env
+    asserts.equals(env, "/home/u/.ocx", ambient["OCX_HOME"])
+    asserts.equals(env, "/site/config.toml", ambient["OCX_CONFIG"])
+    asserts.equals(env, "https://mirror.example", ambient["OCX_MIRRORS"])
+
+    # Knobs that break rather than steer an invocation. OCX_GLOBAL and
+    # OCX_QUIET are BooleanStrings with no empty spelling, so "0" and not ""
+    # — which ocx logs as an invalid boolean on every single invocation.
+    asserts.equals(env, "", ambient["OCX_PROJECT"])
+    asserts.equals(env, "0", ambient["OCX_GLOBAL"])
+    asserts.equals(env, "0", ambient["OCX_QUIET"])
+    asserts.equals(env, "1", ambient["OCX_NO_CONFIG_REFRESH"])
+
+    # no_config: OCX_NO_CONFIG prunes only the *discovered* tiers. Without
+    # these three blanks an ambient OCX_PATCHES becomes the only patch source
+    # left in a build that asked for hermeticity.
+    blanked = make_ocx_env(_env_ctx(env = _AMBIENT, no_config = True), host, False).env
+    asserts.equals(env, "1", blanked["OCX_NO_CONFIG"])
+    for key in ["OCX_CONFIG", "OCX_PATCHES", "OCX_PATCH_SNAPSHOT"]:
+        asserts.equals(env, "", blanked[key], key + " survived no_config")
+
+    # The attrs are what the caller did ask for, so they are reinstated over
+    # the blanks — but OCX_PATCHES has no attr and stays closed.
+    attrs = make_ocx_env(
+        _env_ctx(
+            env = _AMBIENT,
+            no_config = True,
+            config = "/w/cfg.toml",
+            patch_snapshot = "/w/snap.json",
+        ),
+        host,
+        False,
+    ).env
+    asserts.equals(env, "/w/cfg.toml", attrs["OCX_CONFIG"])
+    asserts.equals(env, "/w/snap.json", attrs["OCX_PATCH_SNAPSHOT"])
+    asserts.equals(env, "", attrs["OCX_PATCHES"])
+    return unittest.end(env)
+
+def _stage_lazy_config_test_impl(ctx):
+    """F4: a lazy launcher re-exports the same blanking at action time."""
+    env = unittest.begin(ctx)
+
+    # The launcher re-enters ocx with the *action's* ambient environment, so
+    # the fetch-time blanks would never reach it without these exports.
+    exports = stage_lazy_config(_env_ctx(no_config = True), False).exports
+    asserts.equals(env, "1", exports["OCX_NO_CONFIG"])
+    for key in ["OCX_CONFIG", "OCX_PATCHES", "OCX_PATCH_SNAPSHOT"]:
+        asserts.equals(env, "", exports.get(key, "<not exported>"), key + " survived no_config")
+
+    # Nothing configured, nothing to re-export.
+    asserts.equals(env, {}, stage_lazy_config(_env_ctx(), False).exports)
+
+    # A staged file travels as a runfile and is resolved through runfiles, not
+    # as the fetch-time absolute path.
+    staged = stage_lazy_config(_env_ctx(no_config = True, config = "//w:cfg.toml"), False)
+    asserts.equals(env, "$(rlocation test_repo/config.toml)", staged.exports["OCX_CONFIG"])
+    asserts.equals(env, "", staged.exports["OCX_PATCH_SNAPSHOT"])
+    asserts.equals(env, [":config.toml"], staged.data)
+    return unittest.end(env)
+
+# W17/F5: the env vars AGENTS.md pins as forwarded to every ocx invocation.
+# getenv() is what registers them with Bazel, so dropping one silently stops
+# a build from re-fetching when it changes.
+_PASSTHROUGH_ENV = [
+    "OCX_MIRRORS",
+    "OCX_INSECURE_REGISTRIES",
+    "OCX_OFFLINE",
+    "OCX_FROZEN",
+    "OCX_REMOTE",
+    "OCX_JOBS",
+    "OCX_INDEX",
+    "OCX_DEFAULT_REGISTRY",
+    "OCX_CONFIG",
+    "OCX_NO_CONFIG",
+    "OCX_MANAGED_CONFIG",
+    "OCX_ALLOW_YANKED",
+    "OCX_PATCHES",
+    "OCX_PATCH_SNAPSHOT",
+]
+
+def _passthrough_env_test_impl(ctx):
+    """W17/F5: all 14 forwarded env vars, and nothing else."""
+    env = unittest.begin(ctx)
+    asserts.equals(env, _PASSTHROUGH_ENV, OCX_PASSTHROUGH_ENV)
+    asserts.equals(env, 14, len(OCX_PASSTHROUGH_ENV))
+
+    # Resolved or neutralized, never forwarded verbatim.
+    for key in ["OCX_HOME", "OCX_NO_CONFIG_REFRESH", "OCX_PROJECT", "OCX_GLOBAL", "OCX_QUIET"]:
+        asserts.false(env, key in OCX_PASSTHROUGH_ENV, key + " is not a passthrough")
+    return unittest.end(env)
+
+# F1: names ocx's own `BinaryName` grammar admits
+
+def _run_ocx_retry_test_impl(ctx):
+    """F2: only a transient sysexit buys another registry round-trip."""
+    env = unittest.begin(ctx)
+
+    # 75 is ocx's own "transient, retry me" — retried even when the caller
+    # asked for no retries at all.
+    calls = []
+    sleeps = []
+    asserts.equals(env, "out0", _run_ocx(_replay_ctx([75, 75, 0], calls, sleeps), retries = 0))
+    asserts.equals(env, 3, len(calls))
+
+    # The backoff shells out to an absolute /bin/sh, but the bare `sleep` in
+    # it would resolve against whatever PATH the repository rule inherited
+    # (CWE-426) — so the exec carries its own.
+    asserts.equals(env, 2, len(sleeps))
+    asserts.equals(env, {"PATH": "/usr/bin:/bin"}, sleeps[0])
+
+    # 74 is the store-symlink TOCTOU two parallel fetches race on: retried up
+    # to the caller's budget.
+    calls = []
+    asserts.equals(env, "out0", _run_ocx(_replay_ctx([74, 0], calls), retries = 2))
+    asserts.equals(env, 2, len(calls))
+
+    # 69 is a registry that may simply come back.
+    calls = []
+    asserts.equals(env, "out0", _run_ocx(_replay_ctx([69, 0], calls), retries = 2))
+    asserts.equals(env, 2, len(calls))
+
+    # A first-attempt success costs exactly one call.
+    calls = []
+    asserts.equals(env, "out0", _run_ocx(_replay_ctx([0], calls), retries = 2))
+    asserts.equals(env, 1, len(calls))
+    return unittest.end(env)
+
+def _run_ocx(fake, retries = 0, hints = {}):
+    """run_ocx() against a fake ctx, with the arguments a test does not vary."""
+    return run_ocx(fake, "/fake/ocx", ["install", "pkg"], {}, "installing pkg", False, hints = hints, retries = retries)
+
+# F1: names ocx's own `BinaryName` grammar admits — it forbids only
+# `/ \ < > : " | ? *` and non-graphic ASCII — that reach a generated BUILD
+# file, a launcher script and a file name verbatim.
+_HOSTILE_BIN_NAMES = [
+    "$(touch PWNED)",
+    "`id`",
+    "semi;colon",
+    "-rf",
+    "..",
+    "sp ace",
+    "pipe|d",
+]
+
+# F1: the shapes real tools ship, which the charset must keep admitting.
+_REAL_BIN_NAMES = ["jq", "git-lfs", "python3.11", "clang++", "x86_64-linux-gnu-gcc", "_hidden"]
+
+def _bin_name_guard_test_impl(ctx):
+    """F1: an injecting publisher-declared name never reaches a renderer."""
+    env = unittest.begin(ctx)
+    names = _REAL_BIN_NAMES + _HOSTILE_BIN_NAMES
+    got = discover_bins(
+        _fs_ctx(files = ["/store/aa/content/bin/" + n for n in names]),
+        json.encode({"packages": [_closure_package("ocx.sh/a/a:1@sha256:aa", names)]}),
+        "ocx inspect --closure",
+        _ENTRIES,
+        False,
+    )
+
+    # Legitimate names survive unchanged; nothing else is rendered at all.
+    asserts.equals(env, _REAL_BIN_NAMES, [b.name for b in got.bins])
+
+    # Dropped rather than fatal: one third-party package's bad metadata must
+    # not break an unrelated consumer's build. Recorded so it stays visible.
+    asserts.equals(env, _HOSTILE_BIN_NAMES, got.rejected)
+
+    # Closing the loop on the sinks themselves. A name carrying `"` would end
+    # the native_binary(name = "…") literal early and turn the rest of the
+    # generated BUILD into attacker-authored top-level Starlark, which Bazel
+    # evaluates on any build, query or test.
+    build = render_launchers_build(got.bins, False)
+    for hostile in _HOSTILE_BIN_NAMES:
+        asserts.false(env, hostile in build, hostile + " reached the generated BUILD")
+    for b in got.bins:
+        script = render_launcher(_ENTRIES, b.target, "/home/u/.ocx", "/repo/ocx", False)
+        asserts.true(env, script.endswith("exec '{}' \"$@\"\n".format(b.target)))
+    return unittest.end(env)
+
+def _scan_fallback_test_impl(ctx):
+    """F5: an incomplete `binaries` claim scans PATH instead of trusting it."""
+    env = unittest.begin(ctx)
+    got = discover_bins(
+        _fs_ctx(
+            files = ["/store/aa/content/bin/declared", "/store/aa/content/bin/private-helper"],
+            listing = {"/store/aa/content/bin": ["declared", "private-helper"]},
+        ),
+        json.encode({"packages": [
+            _closure_package("ocx.sh/legacy:1@sha256:cc", ["declared"], complete = False),
+        ]}),
+        "ocx inspect --closure",
+        _ENTRIES,
+        False,
+    )
+    asserts.equals(env, ["ocx.sh/legacy:1@sha256:cc"], got.scanned)
+
+    # The scan is what exposes the package's private executables — inverting
+    # the branch yields only the declared name and an empty `scanned`.
+    asserts.equals(env, ["declared", "private-helper"], [b.name for b in got.bins])
+
+    # A complete claim takes the declared path: the private executable on the
+    # same directory is not a target.
+    complete = discover_bins(
+        _fs_ctx(
+            files = ["/store/aa/content/bin/declared", "/store/aa/content/bin/private-helper"],
+            listing = {"/store/aa/content/bin": ["declared", "private-helper"]},
+        ),
+        json.encode({"packages": [_closure_package("ocx.sh/a/a:1@sha256:aa", ["declared"])]}),
+        "ocx inspect --closure",
+        _ENTRIES,
+        False,
+    )
+    asserts.equals(env, [], complete.scanned)
+    asserts.equals(env, ["declared"], [b.name for b in complete.bins])
+    return unittest.end(env)
+
+def _windows_scan_test_impl(ctx):
+    """F6: a Windows PATH scan keys on the extension — and must still stat."""
+    env = unittest.begin(ctx)
+    got = discover_bins(
+        _fs_ctx(
+            files = ["C:/store/bin/jq.exe", "C:/store/bin/build.cmd"],
+            dirs = ["C:/store/bin/tools.exe"],
+            listing = {"C:/store/bin": ["jq.exe", "tools.exe", "build.cmd", "readme.txt"]},
+        ),
+        json.encode({"packages": [
+            _closure_package("ocx.sh/legacy:1@sha256:cc", [], complete = False),
+        ]}),
+        "ocx package inspect --closure",
+        [{"key": "PATH", "value": "C:/store/bin", "type": "path"}],
+        True,
+    )
+
+    # A directory named `tools.exe` is not a tool — the same rejection
+    # resolve_bins() makes on the declared path. `readme.txt` is not either.
+    asserts.equals(env, ["jq", "build"], [b.name for b in got.bins])
+    asserts.equals(env, ["C:/store/bin/jq.exe", "C:/store/bin/build.cmd"], [b.target for b in got.bins])
+    return unittest.end(env)
+
+def _resolve_bins_order_test_impl(ctx):
+    """F5: first PATH directory holding a real file wins; a directory does not."""
+    env = unittest.begin(ctx)
+
+    # `exists` is true for a directory too, and a launcher exec-ing one dies at
+    # action time with a bare "Permission denied" — so the first candidate here
+    # must be skipped in favour of the second directory's regular file.
+    got = discover_bins(
+        _fs_ctx(
+            files = ["/store/bb/content/jq"],
+            dirs = ["/store/aa/content/bin/jq"],
+        ),
+        json.encode({"packages": [_closure_package("ocx.sh/a/a:1@sha256:aa", ["jq"])]}),
+        "ocx inspect --closure",
+        _ENTRIES,
+        False,
+    )
+    asserts.equals(env, ["/store/bb/content/jq"], [b.target for b in got.bins])
+
+    # Both real: the first PATH entry wins (ocx PATH semantics).
+    first = discover_bins(
+        _fs_ctx(files = ["/store/aa/content/bin/jq", "/store/bb/content/jq"]),
+        json.encode({"packages": [_closure_package("ocx.sh/a/a:1@sha256:aa", ["jq"])]}),
+        "ocx inspect --closure",
+        _ENTRIES,
+        False,
+    )
+    asserts.equals(env, ["/store/aa/content/bin/jq"], [b.target for b in first.bins])
+    return unittest.end(env)
+
+def _sh_launcher_quoting_test_impl(ctx):
+    """F1: publisher-controlled env values and store paths render inert."""
+    env = unittest.begin(ctx)
+    script = render_launcher(
+        [
+            {"key": "GREETING", "value": "$(touch PWNED)", "type": "constant"},
+            {"key": "QUOTED", "value": "it's", "type": "constant"},
+            {"key": "PATH", "value": "/store/`id`/bin", "type": "path"},
+            {"key": "bad key", "value": "x", "type": "constant"},
+            {"key": "1BAD", "value": "x", "type": "constant"},
+        ],
+        # The name is charset-guarded, but the directory it is joined onto
+        # comes from `ocx env` — so the exec target is publisher-controlled too.
+        "/store/$(touch PWNED)/bin/jq",
+        "/home/u/.ocx",
+        "/repo/ocx",
+        False,
+    )
+    asserts.true(env, "export GREETING='$(touch PWNED)'" in script)
+    asserts.true(env, "export QUOTED='it'\\''s'" in script)
+
+    # The `${PATH:+…}` suffix must stay expandable, the value must not.
+    asserts.true(env, "export PATH='/store/`id`/bin'\"${PATH:+:${PATH}}\"" in script)
+    asserts.true(env, script.endswith("exec '/store/$(touch PWNED)/bin/jq' \"$@\"\n"))
+
+    # A key that is not a shell identifier has no safe `export` at all.
+    asserts.false(env, "bad key" in script)
+    asserts.false(env, "1BAD" in script)
+    return unittest.end(env)
+
+def _bat_launcher_quoting_test_impl(ctx):
+    """F1: `set "K=V"` breaks on a literal `%` or `"` in a hostile value."""
+    env = unittest.begin(ctx)
+    script = render_launcher(
+        [
+            {"key": "PCT", "value": "100%OCX_HOME%", "type": "constant"},
+            {"key": "QUOTE", "value": 'ev"il', "type": "constant"},
+            {"key": "PATH", "value": "C:\\store\\bin", "type": "path"},
+        ],
+        "C:\\store\\bin\\jq.exe",
+        "C:\\Users\\u\\.ocx",
+        "C:\\repo\\ocx.exe",
+        True,
+    )
+
+    # `%%` is the literal percent of a batch file; an unescaped one expands.
+    asserts.true(env, 'set "PCT=100%%OCX_HOME%%"' in script)
+
+    # A literal quote closes the quoted region and has no in-place escape, so
+    # the entry is dropped rather than rendered.
+    asserts.false(env, "QUOTE" in script)
+
+    # The trailing `%PATH%` is a real expansion and must survive.
+    asserts.true(env, 'set "PATH=C:\\store\\bin;%PATH%"' in script)
+    return unittest.end(env)
+
 def _sh_launcher_test_impl(ctx):
     env = unittest.begin(ctx)
     script = render_launcher(_ENTRIES, "/store/aa/content/bin/tool", "/home/u/.ocx", "/repo/ocx", False)
     asserts.true(env, script.startswith("#!/usr/bin/env bash"))
-    asserts.true(env, 'export OCX_HOME="/home/u/.ocx"' in script)
-    asserts.true(env, 'export OCX_BINARY_PIN="/repo/ocx"' in script)
+    asserts.true(env, "export OCX_HOME='/home/u/.ocx'" in script)
+    asserts.true(env, "export OCX_BINARY_PIN='/repo/ocx'" in script)
 
     # Both path values joined in declaration order, existing value appended.
-    asserts.true(env, 'export PATH="/store/aa/content/bin:/store/bb/content${PATH:+:${PATH}}"' in script)
+    asserts.true(env, "export PATH='/store/aa/content/bin:/store/bb/content'\"${PATH:+:${PATH}}\"" in script)
 
     # Constants replace.
-    asserts.true(env, 'export JAVA_HOME="/store/cc/content"' in script)
-    asserts.true(env, script.endswith('exec "/store/aa/content/bin/tool" "$@"\n'))
+    asserts.true(env, "export JAVA_HOME='/store/cc/content'" in script)
+    asserts.true(env, script.endswith("exec '/store/aa/content/bin/tool' \"$@\"\n"))
 
     # Eager launchers never re-enter ocx for resolution, so the fetch-time
     # config must not leak into them.
@@ -74,6 +538,11 @@ def _sh_lazy_launcher_test_impl(ctx):
     # "" is invalid and makes ocx log a warning on every launcher-run tool.
     asserts.true(env, 'export OCX_PROJECT=""' in script)
     asserts.true(env, 'export OCX_GLOBAL="0"' in script)
+
+    # OCX_QUIET is absent by design, though the fetch-time environment
+    # neutralizes it: no JSON report is parsed at action time, so a
+    # launcher-run tool's own verbosity stays the user's to set.
+    asserts.false(env, "OCX_QUIET" in script)
 
     # Staged config travels with the launcher, resolved through runfiles.
     asserts.true(env, 'export OCX_NO_CONFIG="1"' in script)
@@ -252,6 +721,74 @@ closure_packages_guard_test = analysistest.make(
     expect_failure = True,
 )
 
+# A Starlark failure carries the traceback, and the traceback echoes the
+# *source line* of every frame — so a fragment written literally into the call
+# below would match the echo whatever the code did. Held in a constant so the
+# call site cannot spell it.
+_CALLSITE_HINT = "the call-site hint, not the shared table"
+
+# Guards whose whole point is a fail(), which a unittest impl cannot catch:
+# {case: fragment the message must carry}. Every case is exercised through a
+# target whose analysis is expected to fail — a case that *succeeds* returns
+# normally from _guard_impl and the analysistest reports it as a miss.
+_GUARD_CASES = {
+    # F2: a permanent sysexit must not buy a second registry round-trip. The
+    # scripted 0 behind it succeeds if — and only if — the code was retried.
+    "retry_79": "exit 79",
+    "retry_80": "exit 80",
+    "retry_81": "exit 81",
+    "retry_65": "exit 65",
+    # F5: a call-site hint beats the shared sysexits table.
+    "hint_precedence": _CALLSITE_HINT,
+    # F5: decode_json's own guard — every malformed-closure fixture is valid
+    # JSON, so neither branch of it was exercised. Malformed (rather than
+    # absent) output raises out of json.decode itself, which names neither the
+    # command nor rules_ocx — so the fragment is json.decode's own wording.
+    "decode_empty": "produced no output",
+    "decode_garbage": "unexpected character",
+    # F5: a relative OCX_HOME is caught before ctx.watch() tracebacks on it.
+    "relative_home": "OCX_HOME must be absolute",
+    # F1: an explicitly declared bins entry is an error, not a silent drop.
+    "bad_bins_attr": "cannot be a launcher",
+    # F1: a batch file has no escape for a literal quote in the exec target.
+    "bat_target_quote": "no escape inside a batch file",
+}
+
+def _guard_impl(ctx):
+    case = ctx.attr.case
+    if case.startswith("retry_"):
+        # The trailing 0 is reached only when the leading code was retried.
+        _run_ocx(_replay_ctx([int(case[len("retry_"):]), 0], []), retries = 2)
+    elif case == "hint_precedence":
+        # 65 has a shared hint too, so only precedence decides which is shown.
+        _run_ocx(_replay_ctx([65], []), hints = {65: _CALLSITE_HINT})
+    elif case == "decode_empty":
+        decode_json("   \n", "ocx package env")
+    elif case == "decode_garbage":
+        decode_json("oops", "ocx package env")
+    elif case == "relative_home":
+        make_ocx_env(_env_ctx(env = {"OCX_HOME": "relative/.ocx"}), host_info("linux", "amd64"), False)
+    elif case == "bad_bins_attr":
+        check_bin_names(["jq", "$(touch PWNED)"])
+    elif case == "bat_target_quote":
+        render_launcher([], "C:\\store\\ev\"il\\jq.exe", "C:\\Users\\u\\.ocx", "C:\\repo\\ocx.exe", True)
+    else:
+        fail("test bug: unknown guard case '{}'".format(case))
+    return []
+
+_guard = rule(implementation = _guard_impl, attrs = {"case": attr.string()})
+
+def _guard_test_impl(ctx):
+    env = analysistest.begin(ctx)
+    asserts.expect_failure(env, ctx.attr.expected)
+    return analysistest.end(env)
+
+guard_test = analysistest.make(
+    _guard_test_impl,
+    expect_failure = True,
+    attrs = {"expected": attr.string()},
+)
+
 def _ambient_config_paths_test_impl(ctx):
     env = unittest.begin(ctx)
     posix_env = {"XDG_CONFIG_HOME": "/x/cfg", "HOME": "/home/u", "APPDATA": ""}
@@ -348,8 +885,10 @@ def _is_absolute_path_test_impl(ctx):
         asserts.true(env, is_absolute_path(path, True), path + " is absolute on Windows")
 
     # Drive-relative is not absolute: one leading backslash means "root of the
-    # current drive", `C:x` means "cwd of drive C".
-    for path in ["\\Windows\\System32", "C:", "C:ocx", ".ocx", "~\\.ocx", "ocx", ""]:
+    # current drive", `C:x` means "cwd of drive C". `1:/x` and `::/x` have the
+    # *shape* of a drive path but no drive letter — without the letter check
+    # they read as absolute.
+    for path in ["\\Windows\\System32", "C:", "C:ocx", ".ocx", "~\\.ocx", "ocx", "", "1:/x", "::/x"]:
         asserts.false(env, is_absolute_path(path, True), repr(path) + " is relative on Windows")
 
     # Cross-host: a POSIX root is not a Windows absolute path.
@@ -412,6 +951,16 @@ def _sysexit_hints_test_impl(ctx):
 
 sh_launcher_test = unittest.make(_sh_launcher_test_impl)
 bat_launcher_test = unittest.make(_bat_launcher_test_impl)
+bin_name_guard_test = unittest.make(_bin_name_guard_test_impl)
+scan_fallback_test = unittest.make(_scan_fallback_test_impl)
+windows_scan_test = unittest.make(_windows_scan_test_impl)
+resolve_bins_order_test = unittest.make(_resolve_bins_order_test_impl)
+sh_launcher_quoting_test = unittest.make(_sh_launcher_quoting_test_impl)
+bat_launcher_quoting_test = unittest.make(_bat_launcher_quoting_test_impl)
+run_ocx_retry_test = unittest.make(_run_ocx_retry_test_impl)
+make_ocx_env_test = unittest.make(_make_ocx_env_test_impl)
+stage_lazy_config_test = unittest.make(_stage_lazy_config_test_impl)
+passthrough_env_test = unittest.make(_passthrough_env_test_impl)
 sh_lazy_launcher_test = unittest.make(_sh_lazy_launcher_test_impl)
 bat_lazy_launcher_test = unittest.make(_bat_lazy_launcher_test_impl)
 env_bzl_test = unittest.make(_env_bzl_test_impl)
@@ -445,10 +994,29 @@ def launcher_test_suite(name):
             target_under_test = ":" + subject,
         ))
 
+    for case, expected in _GUARD_CASES.items():
+        subject = "{}_guard_{}".format(name, case)
+        _guard(name = subject, case = case, tags = ["manual"])
+        guards.append(partial.make(
+            guard_test,
+            target_under_test = ":" + subject,
+            expected = expected,
+        ))
+
     unittest.suite(
         name,
         sh_launcher_test,
         bat_launcher_test,
+        bin_name_guard_test,
+        scan_fallback_test,
+        windows_scan_test,
+        resolve_bins_order_test,
+        sh_launcher_quoting_test,
+        bat_launcher_quoting_test,
+        run_ocx_retry_test,
+        make_ocx_env_test,
+        stage_lazy_config_test,
+        passthrough_env_test,
         sh_lazy_launcher_test,
         bat_lazy_launcher_test,
         env_bzl_test,

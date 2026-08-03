@@ -7,6 +7,8 @@ Everything that can be a pure function of plain values (launcher rendering,
 env-file rendering) is one, so tests/ can cover it without a repository_ctx.
 """
 
+visibility(["//ocx", "//ocx/tests"])
+
 # Env vars forwarded verbatim to every ocx invocation. getenv() registers
 # them with Bazel, so changing one invalidates the fetched repos.
 # OCX_AUTH_<REGISTRY>_* cannot be enumerated here — document `bazel fetch
@@ -71,6 +73,14 @@ SYSEXIT_HINTS = {
 # Extra attempts granted to a sysexit 75 even when the caller asked for none.
 _TRANSIENT_RETRIES = 2
 
+# The only sysexits another attempt can change: 69 a registry that may come
+# back, 74 the store-symlink TOCTOU two parallel fetches race on, 75 ocx's own
+# "transient, retry me". Everything else is settled on the first answer — a
+# typo'd reference (79), expired credentials (80) or a policy block (81) would
+# otherwise burn three registry round-trips and the backoff between them,
+# multiplied by the platform count on a hub.
+_RETRYABLE = [69, 74, 75]
+
 # Env vars consulted to locate the platform user-config directory.
 _CONFIG_HOME_ENV = ["XDG_CONFIG_HOME", "HOME", "APPDATA"]
 
@@ -80,6 +90,116 @@ _TRUTHY = ["1", "y", "yes", "on", "true"]
 # Windows drive letters, for is_absolute_path — Bazel's Starlark has no
 # per-character alpha predicate.
 _DRIVE_LETTERS = "abcdefghijklmnopqrstuvwxyz"
+
+_ALPHA = _DRIVE_LETTERS + "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+_DIGITS = "0123456789"
+
+# Characters a discovered tool name may contain. ocx's `BinaryName` grammar
+# forbids only `/ \ < > : " | ? *` and non-graphic ASCII, so it admits `$ ( )
+# ; ' ` and space — publisher-controlled metadata that becomes a shell word, a
+# Starlark string literal in a generated BUILD file and a file name. Wide
+# enough for the shapes real tools ship (git-lfs, python3.11, clang++,
+# x86_64-linux-gnu-gcc) and nothing that carries meaning in any of the three.
+_BIN_NAME_CHARS = _ALPHA + _DIGITS + "._+-"
+
+# POSIX portable environment variable names: a letter or underscore, then
+# letters, digits and underscores.
+_ENV_KEY_CHARS = _ALPHA + _DIGITS + "_"
+
+def valid_bin_name(name):
+    """Whether a discovered tool name is safe to render verbatim.
+
+    The name reaches three sinks unescaped — `native_binary(name = "…")` in a
+    generated BUILD file, a launcher's shell text, and the `launchers/<name>`
+    path written for it — so one charset covers all three. A leading `-` is
+    refused because the name is also passed as an argv word (`ocx run -- …`),
+    and `.`/`..` because it is a path component, though both are made of
+    admitted characters.
+
+    Args:
+        name: the declared or scanned executable name.
+
+    Returns:
+        bool.
+    """
+    if not name or name.startswith("-") or name == "." or name == "..":
+        return False
+    for c in name.elems():
+        if c not in _BIN_NAME_CHARS:
+            return False
+    return True
+
+def check_bin_names(names):
+    """fail()s on a declared `bins` entry that cannot be rendered safely.
+
+    The lazy tiers render launchers straight from the `bins` attr, never
+    through discover_bins() — so the charset guard has to be applied here too.
+    A discovered name is dropped and recorded, but a name written into
+    `bins = [...]` was asked for by an ocx.package()/ocx.project() caller (any
+    module in the graph, not only the root), so dropping it would silently
+    produce a missing target instead of an answer.
+
+    Args:
+        names: the `bins` attr value.
+    """
+    for name in names:
+        if not valid_bin_name(name):
+            fail(("rules_ocx: bins entry '{}' cannot be a launcher — the name becomes a " +
+                  "BUILD target, a shell word and a file name, so it is limited to " +
+                  "letters, digits and '. _ + -' (and may not lead with '-')").format(name))
+
+def valid_env_key(key):
+    """Whether an `ocx env` entry key is a usable environment variable name.
+
+    `ocx` serializes the key verbatim from package metadata; anything outside
+    the POSIX portable set has no safe `export`/`set` spelling at all.
+
+    Args:
+        key: the entry's `key`.
+
+    Returns:
+        bool.
+    """
+    if not key or key[0] in _DIGITS:
+        return False
+    for c in key.elems():
+        if c not in _ENV_KEY_CHARS:
+            return False
+    return True
+
+def sh_quote(value):
+    """A POSIX shell word that expands to exactly `value`.
+
+    Single quotes suppress every expansion; the only character they cannot
+    carry is `'` itself, spelled by closing, escaping and reopening.
+
+    Args:
+        value: arbitrary string.
+
+    Returns:
+        the quoted word, including its quotes.
+    """
+    return "'" + value.replace("'", "'\\''") + "'"
+
+def bat_value(value):
+    """A value safe inside a Batch `set "KEY=VALUE"`, or None if there is none.
+
+    `%` opens a variable expansion and `%%` is its literal spelling in a batch
+    file. A literal `"` closes the quoted region and has no in-place escape,
+    so such a value cannot be rendered at all.
+
+    Args:
+        value: arbitrary string.
+
+    Returns:
+        the escaped value, or None when it cannot be rendered safely.
+    """
+
+    # ponytail: dropped, not escaped — `set K="a""b"` behaviour differs across
+    # cmd.exe versions, and a store path cannot hold `"` on Windows anyway.
+    if "\"" in value:
+        return None
+    return value.replace("%", "%%")
 
 def truthy(value):
     """Whether an ocx-style boolean string env value is true.
@@ -180,6 +300,41 @@ def ambient_config_paths(is_windows, is_macos, env, home):
         paths.append(sep.join([home, "state", "managed-config", "snapshot.json"]))
         paths.append(sep.join([home, "state", "managed-config", "config.toml"]))
     return paths
+
+# The attr schema make_ocx_env() and stage_lazy_config() read off ctx.attr.
+# Declared once, next to the functions that consume it: a rule splatting this
+# into its `attrs` is the contract, so the two cannot drift apart. Stardoc
+# sorts attributes alphabetically, so splatting changes no rendered doc.
+CONFIG_ATTRS = {
+    "config": attr.label(
+        allow_single_file = True,
+        doc = "An ocx site config.toml (mirrors, registries, [patches]) layered over the " +
+              "host's discovered config — not the project ocx.toml. Sets OCX_CONFIG for " +
+              "every invocation, overriding an ambient one, and the file is watched. " +
+              "Combine with no_config for a hermetic configuration. With `bins` it is " +
+              "copied into the repository and uploaded as an input with every action — " +
+              "keep credentials out of it.",
+    ),
+    "no_config": attr.bool(
+        default = False,
+        doc = "Ignore the host's discovered config tiers (/etc, the user config, " +
+              "$OCX_HOME/config.toml) and the managed-config snapshot — sets OCX_NO_CONFIG=1, " +
+              "and blanks an ambient OCX_CONFIG, OCX_PATCHES and OCX_PATCH_SNAPSHOT, which " +
+              "OCX_NO_CONFIG alone does not prune. The `config` and `patch_snapshot` attrs " +
+              "still apply. Use this when a corporate managed config must not reach the " +
+              "build; it also opts out of the exit-78 gate a required-but-unsynced managed " +
+              "config raises.",
+    ),
+    "patch_snapshot": attr.label(
+        allow_single_file = True,
+        doc = "A committed patches.snapshot.json (written by `ocx patch freeze` next to " +
+              "ocx.lock) freezing the digests of the patch companions composed onto this " +
+              "environment. Sets OCX_PATCH_SNAPSHOT. `ocx lock --check` does not cover " +
+              "companions — without a frozen snapshot they resolve at fetch time. With " +
+              "`bins` it is copied into the repository and uploaded as an input with every " +
+              "action — keep credentials out of it.",
+    ),
+}
 
 def make_ocx_env(ctx, host, isolated_home):
     """Assembles the environment for ocx invocations from this repo rule.
@@ -302,11 +457,12 @@ def run_ocx(ctx, binary, args, env, what, is_windows, hints = {}, retries = 0):
         what: short human description used in error messages.
         is_windows: host flag (from host_info()); Windows has no `sleep`.
         hints: {exit_code: extra hint} overriding the sysexits defaults.
-        retries: extra attempts after a failure. Repo rules fetch in
-            parallel, and concurrent `ocx package install` calls of the same
-            package can race on store symlink creation (ocx TOCTOU); the
-            store is idempotent, so a retry converges. A sysexit 75 is
-            retried regardless — it is ocx's own "transient, retry me",
+        retries: extra attempts after a *transient* failure (_RETRYABLE — any
+            other sysexit is settled on the first answer and fails at once).
+            Repo rules fetch in parallel, and concurrent `ocx package install`
+            calls of the same package can race on store symlink creation (ocx
+            TOCTOU); the store is idempotent, so a retry converges. A sysexit
+            75 is retried regardless — it is ocx's own "transient, retry me",
             raised when the registry times out or reports capacity exceeded.
             Attempts are spaced by a linear backoff.
 
@@ -319,6 +475,8 @@ def run_ocx(ctx, binary, args, env, what, is_windows, hints = {}, retries = 0):
         result = ctx.execute([str(binary)] + args, environment = env, timeout = 600)
         if result.return_code == 0:
             return result.stdout
+        if result.return_code not in _RETRYABLE:
+            break
         if attempt >= retries and result.return_code != 75:
             break
 
@@ -326,11 +484,14 @@ def run_ocx(ctx, binary, args, env, what, is_windows, hints = {}, retries = 0):
         # while a registry rate-limit window spans seconds. The right ceiling
         # is a registry-policy question; make the schedule an attribute once a
         # real registry's limits are known. No Batch `sleep`, so Windows keeps
-        # retrying immediately. `sleep` runs through an absolute /bin/sh: a
-        # bare argv resolves against the ambient PATH, which would let anything
-        # named `sleep` execute inside the repository rule.
+        # retrying immediately. `sleep` runs through an absolute /bin/sh, with
+        # an explicit PATH: the bare `sleep` argv would otherwise resolve
+        # against whatever PATH the repository rule inherited (CWE-426).
         if not is_windows and attempt + 1 < attempts:
-            ctx.execute(["/bin/sh", "-c", 'sleep "$0"', str(attempt + 1)])
+            ctx.execute(
+                ["/bin/sh", "-c", 'sleep "$0"', str(attempt + 1)],
+                environment = {"PATH": "/usr/bin:/bin"},
+            )
     hint = hints.get(result.return_code) or SYSEXIT_HINTS.get(result.return_code, "")
     fail("rules_ocx: {} failed (exit {}): ocx {}\n{}{}".format(
         what,
@@ -435,7 +596,13 @@ def list_executables(ctx, directory, is_windows):
         names = []
         for child in path.readdir():
             lower = child.basename.lower()
-            if lower.endswith(".exe") or lower.endswith(".bat") or lower.endswith(".cmd"):
+            if not lower.endswith(".exe") and not lower.endswith(".bat") and not lower.endswith(".cmd"):
+                continue
+
+            # A directory named `foo.exe` is not a tool, and a launcher exec-ing
+            # one dies at action time — the same rejection resolve_bins() makes
+            # on the declared path.
+            if not child.is_dir:
                 names.append(child.basename)
         return names
     result = ctx.execute([
@@ -549,6 +716,12 @@ def discover_bins(ctx, stdout, what, entries, is_windows):
     instead: `scanned` names the packages that forced it, and the caller
     renders it into the repo's env.bzl, where it stays inspectable.
 
+    Both discovery paths converge here, so this is also where names are
+    checked against valid_bin_name() — one guard covering every renderer
+    downstream. A rejected name is dropped rather than fatal: failing the
+    fetch would let one third-party package's metadata break an unrelated
+    consumer's build. It is recorded the same way `scanned` is.
+
     Args:
         ctx: repository_ctx.
         stdout: raw `inspect --closure` JSON.
@@ -560,12 +733,25 @@ def discover_bins(ctx, stdout, what, entries, is_windows):
 
     Returns:
         struct(bins = [struct(name, target)], scanned = identifiers of the
-        packages whose incomplete metadata forced the PATH scan).
+        packages whose incomplete metadata forced the PATH scan, rejected =
+        names dropped as unrenderable).
     """
     surface = declared_bins(closure_packages(stdout, what))
     if not surface.incomplete:
-        return struct(bins = resolve_bins(ctx, surface.names, entries, is_windows), scanned = [])
-    return struct(bins = scan_bins(ctx, entries, is_windows), scanned = surface.incomplete)
+        found = resolve_bins(ctx, surface.names, entries, is_windows)
+        scanned = []
+    else:
+        found = scan_bins(ctx, entries, is_windows)
+        scanned = surface.incomplete
+
+    bins = []
+    rejected = []
+    for b in found:
+        if valid_bin_name(b.name):
+            bins.append(b)
+        else:
+            rejected.append(b.name)
+    return struct(bins = bins, scanned = scanned, rejected = rejected)
 
 def scan_bins(ctx, entries, is_windows):
     """Discovers runnable tools by scanning the composed PATH.
@@ -726,6 +912,12 @@ def render_launcher(entries, target, home, ocx, is_windows):
     replace. OCX_HOME and OCX_BINARY_PIN are baked so ocx entrypoint
     launchers re-enter the pinned ocx against the right store.
 
+    Every value here is publisher-controlled: `ocx env` serializes keys and
+    values straight out of package metadata, and even the exec target is a
+    declared name joined onto a PATH directory that same metadata contributed.
+    So keys are validated and dropped when unusable, and values are quoted —
+    losslessly on POSIX, and on Windows by the one escape `set "K=V"` has.
+
     Args:
         entries: env entries [{"key", "value", "type"}, ...].
         target: absolute path of the executable to exec.
@@ -739,34 +931,44 @@ def render_launcher(entries, target, home, ocx, is_windows):
     path_values = {}  # key -> [values] in declaration order
     constants = []  # (key, value)
     for entry in entries:
+        if not valid_env_key(entry["key"]):
+            continue
         if entry["type"] == "path":
             path_values.setdefault(entry["key"], []).append(entry["value"])
         else:
             constants.append((entry["key"], entry["value"]))
 
     if is_windows:
+        exe = bat_value(target)
+        if exe == None:
+            fail(("rules_ocx: refusing to render a launcher for '{}' — a literal quote in the " +
+                  "path has no escape inside a batch file").format(target))
         lines = ["@echo off", "rem Generated by rules_ocx - do not edit."]
-        lines.append('set "OCX_HOME={}"'.format(home))
-        lines.append('set "OCX_BINARY_PIN={}"'.format(ocx))
-        for key, value in constants:
-            lines.append('set "{}={}"'.format(key, value))
+        for key, value in [("OCX_HOME", home), ("OCX_BINARY_PIN", ocx)] + constants:
+            safe = bat_value(value)
+            if safe != None:
+                lines.append('set "{}={}"'.format(key, safe))
         for key, values in path_values.items():
-            lines.append('set "{}={};%{}%"'.format(key, ";".join(values), key))
-        lines.append('"{}" %*'.format(target))
+            safe = bat_value(";".join(values))
+            if safe != None:
+                lines.append('set "{}={};%{}%"'.format(key, safe, key))
+        lines.append('"{}" %*'.format(exe))
         return "\r\n".join(lines) + "\r\n"
 
     lines = ["#!/usr/bin/env bash", "# Generated by rules_ocx — do not edit.", "set -euo pipefail"]
-    lines.append('export OCX_HOME="{}"'.format(home))
-    lines.append('export OCX_BINARY_PIN="{}"'.format(ocx))
-    for key, value in constants:
-        lines.append('export {}="{}"'.format(key, value))
+    for key, value in [("OCX_HOME", home), ("OCX_BINARY_PIN", ocx)] + constants:
+        lines.append("export {}={}".format(key, sh_quote(value)))
     for key, values in path_values.items():
-        joined = ":".join(values)
-        lines.append('export {key}="{values}${{{key}:+:${{{key}}}}}"'.format(key = key, values = joined))
-    lines.append('exec "{}" "$@"'.format(target))
+        # The value is inert, the `${KEY:+…}` suffix appending the invoking
+        # environment's own value is not — so they are quoted separately.
+        lines.append('export {key}={values}"${{{key}:+:${{{key}}}}}"'.format(
+            key = key,
+            values = sh_quote(":".join(values)),
+        ))
+    lines.append('exec {} "$@"'.format(sh_quote(target)))
     return "\n".join(lines) + "\n"
 
-def render_env_bzl(entries, home, scanned = []):
+def render_env_bzl(entries, home, scanned = [], rejected = []):
     """Renders the generated repo's env.bzl.
 
     JSON round-trip keeps escaping correct for arbitrary values.
@@ -776,11 +978,17 @@ def render_env_bzl(entries, home, scanned = []):
         home: resolved OCX_HOME.
         scanned: identifiers of packages whose incomplete `binaries` metadata
             forced the PATH scan (discover_bins().scanned).
+        rejected: tool names dropped as unrenderable (discover_bins().rejected).
 
     Returns:
         env.bzl content string.
     """
-    payload = json.encode({"entries": entries, "home": home, "scanned": scanned})
+    payload = json.encode({
+        "entries": entries,
+        "home": home,
+        "scanned": scanned,
+        "rejected": rejected,
+    })
     return "\n".join([
         '"""Generated by rules_ocx — composed ocx environment."""',
         "",
@@ -796,6 +1004,10 @@ def render_env_bzl(entries, home, scanned = []):
         "# from scanning PATH, so the target names are unvalidated and include private",
         "# executables. Empty means every target came from declared metadata.",
         'OCX_SCANNED_PACKAGES = _DATA["scanned"]',
+        "",
+        "# Tool names dropped because they cannot be rendered into a BUILD target, a",
+        "# shell launcher and a file name unescaped. Empty means nothing was dropped.",
+        'OCX_REJECTED_BINS = _DATA["rejected"]',
         "",
     ])
 

@@ -8,4 +8,6 @@ versions; rules_ocx therefore pins an exact version and is tested against
 exactly that version. Bump deliberately, together with dist/dist.json.
 """
 
+visibility(["//ocx", "//ocx/tests"])
+
 DEFAULT_OCX_VERSION = "0.5.2"

@@ -11,6 +11,8 @@ setup.ocx.sh installer. Binary-only placement — never runs `ocx self setup`.
 load(":manifest.bzl", "archive_type", "artifact_url", "select_release")
 load(":platforms.bzl", "host_info")
 
+visibility(["//ocx", "//ocx/tests"])
+
 _BUILD = """\
 package(default_visibility = ["//visibility:public"])
 

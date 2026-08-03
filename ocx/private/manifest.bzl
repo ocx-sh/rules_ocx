@@ -8,6 +8,8 @@ Manifest schema (flat rows, schema 1):
         {"version", "channel", "tag", "target", "filename", "sha256", "url"}, ...]}
 """
 
+visibility(["//ocx", "//ocx/tests"])
+
 def select_release(manifest, version, target):
     """Finds the manifest row for an exact version and target triple.
 
