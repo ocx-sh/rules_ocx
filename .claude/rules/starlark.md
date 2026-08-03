@@ -22,3 +22,10 @@
   `update-dist` skill lists it).
 - Errors: map ocx sysexits to fail() with the user-fixable command, e.g.
   exit 65 → "ocx.lock is stale — run `ocx lock` and commit the result".
+- A guard test written with `analysistest`'s `expect_failure` can pass
+  vacuously: a Starlark failure carries a traceback that echoes each
+  frame's *source line*, so an expected fragment which also appears in the
+  test's own call site matches the echo rather than the guard's message.
+  Hold the fragment in a constant the call site cannot spell, and confirm
+  the test fails when the guard is removed — a guard test that has never
+  been seen red is not evidence.

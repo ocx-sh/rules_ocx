@@ -41,3 +41,12 @@ adversary: codex:rescue
   orchestrator only — never a spawn target.
 
 ## Memory
+
+- Stardoc cannot build in a fresh agent worktree on this host — its
+  renderer pulls a C++ toolchain (`cc1plus` is absent), so
+  `bazel run //docs:update` fails there. It succeeds in the main checkout,
+  whose output base already has the renderer built. Have workers edit the
+  `.bzl` docstrings and regenerate `docs/` from the main checkout at merge.
+- `.bazelignore` must list `.agents/worktrees` — Bazel does not read
+  `.gitignore`, so `bazel test //...` otherwise globs into a live worktree's
+  own `examples/` packages and fails to start.
