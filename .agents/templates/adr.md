@@ -2,7 +2,7 @@
 
 <!--
 Architecture Decision Record. Filename and location: this project's
-documented ADR convention; `.agents/adrs/adr_NNNN_[topic].md`
+documented ADR convention; `.agents/adr/adr_NNNN_[topic].md`
 (e.g. adr_0001_database_choice.md) if undocumented.
 Owner: /hex-architect or a human. Handoff to: /hex-execute; the
 reviewer:security perspective covers security implications during

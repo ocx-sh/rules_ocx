@@ -51,9 +51,21 @@ sh_test(
 )
 ```
 
-Every tool declared in `ocx.toml` (default group) appears as a runnable
-target `@tools//:<name>`; every entrypoint of an `ocx.package()` appears as
-`@<name>//:<entrypoint>`.
+Every executable the toolchain's packages declare as their public surface
+(`ocx inspect --closure`, default group) becomes a runnable target
+`@tools//:<name>`; a host-platform `ocx.package()` exposes its own the same
+way at `@<name>//:<bin>` (with `platforms = [...]` the launchers live in the
+per-platform repos — the `@<name>` hub aliases only `//:content`, or the lazy
+`bins` names). A declared name no directory on the composed PATH holds is
+dropped silently — a missing target raises no error, so check
+`bazel query @tools//...` if one you expected is absent.
+
+Private executables stay out of the target list only while every package
+declares a complete `binaries` surface. If one does not, the fetch falls back
+to scanning PATH, which exposes that package's private executables too;
+`//:env.bzl`'s `OCX_SCANNED_PACKAGES` names the packages that forced it.
+`ocx.package()` also symlinks the package's `entrypoints/` next to
+`content/` — a separate ocx list, not targets.
 
 ## How it works
 
@@ -103,10 +115,19 @@ run inside that chain rather than around it: whatever mirrors, registries and
 `[patches]` your host config declares apply to the fetch.
 
 Because Bazel can only invalidate on inputs it knows, **every discovered config
-path is watched** — including the ones that do not exist yet. Creating
+path is watched** (with three exceptions, below) — including the ones that do
+not exist yet. Creating
 `~/.ocx/config.toml`, or letting `ocx config update` refresh the managed
 snapshot, refetches the ocx repos. That is deliberate: a config edit that
 changes what a fetch resolves must not survive as a stale cache entry.
+
+Three exceptions: `/etc/ocx/config.toml` is skipped on Windows (no `/etc`
+there), `isolated_home = True` drops the `$OCX_HOME`-rooted tiers (they sit
+inside the repository being fetched, which Bazel cannot watch), and a lazy
+`ocx.package(bins = …)` watches no tier at all — it never runs ocx at fetch
+time, so its launcher resolves the host config live on first execution
+instead. `ocx.project(bins = …)` is unaffected: it builds — and watches — the
+environment before the lazy branch, because its `ocx lock --check` needs it.
 
 Two attrs on both `ocx.project()` and `ocx.package()` take the host out of the
 loop:
@@ -123,10 +144,16 @@ ocx.project(
 
 `config` sets `OCX_CONFIG` (overriding an ambient one) and is watched;
 `no_config` sets `OCX_NO_CONFIG=1`, dropping the system, user, `$OCX_HOME` and
-managed tiers while keeping an explicit `config`. Together they are the
-hermetic pattern — the build reads exactly the file you committed. Lazy
+managed tiers while keeping an explicit `config`. It also blanks an ambient
+`OCX_CONFIG`, `OCX_PATCHES` and `OCX_PATCH_SNAPSHOT`, which `OCX_NO_CONFIG`
+alone does not prune — so a CI job that exports `OCX_PATCH_SNAPSHOT` and sets
+`no_config = True` loses its patch pinning unless it also passes the
+`patch_snapshot` attr, and nothing diagnoses that. Together the two attrs are
+the hermetic pattern — the build reads exactly the file you committed. Lazy
 launchers (`bins`) carry both into their runfiles, so a deferred
-`ocx run` / `ocx package exec` sees the same configuration the fetch did.
+`ocx run` / `ocx package exec` sees the same configuration the fetch did —
+which also means each file is copied into the repository and uploaded as an
+input with every action: keep credentials out of them.
 
 **Patches** are companion packages a site config composes onto a base package's
 environment (a `[patches]` table; never the project `ocx.toml`). `ocx lock

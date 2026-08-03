@@ -7,9 +7,10 @@ not copies. Team-shared — commit it.
 
 - Verification: `AGENTS.md` › "Workflow" — `task verify` (lint + unit tests
   + examples); `bazel test //...` for the offline subset.
-- Plan / ADR conventions: `AGENTS.md` › "Spec / plan / ADR conventions" —
-  plans `.agents/plans/`, ADRs `.agents/adr/`, research `.agents/research/`;
-  templates in `.agents/templates/`.
+- Spec / plan / ADR conventions: `AGENTS.md` › "Spec / plan / ADR
+  conventions" — specs `.agents/specs/`, plans `.agents/plans/`, ADRs
+  `.agents/adr/`, research `.agents/research/`; templates in
+  `.agents/templates/`.
 - Product knowledge: `AGENTS.md` › "Product".
 - Key rules: `AGENTS.md` › "Invariants — do not violate";
   `.claude/rules/starlark.md`, `.claude/rules/release.md`,
