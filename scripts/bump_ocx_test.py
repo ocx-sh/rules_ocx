@@ -461,6 +461,14 @@ def test_f1_validate_refuses_a_tag_or_filename_that_is_not_one_path_segment():
         ("filename", "../../../../evil.example/x.tar.gz"),
         # Passes ext_of()'s endswith and is still not one path segment.
         ("filename", "a b.tar.gz"),
+        # A dot segment is *inside* the charset, so the fullmatch alone waves
+        # it through. One `..` still walks a level out of the release
+        # directory in the composed mirror url, which is the whole point of
+        # checking these two fields — on_release_host() refuses the same
+        # spelling in the url path for the same reason.
+        ("tag", ".."),
+        ("tag", "."),
+        ("filename", ".."),
     ):
         m = manifest("0.5.2")
         m["releases"][5][field] = bad

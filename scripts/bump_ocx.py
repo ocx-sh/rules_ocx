@@ -219,7 +219,15 @@ def check_row(r, where):
     # dot segment here still walks the path below them.
     for field in ("tag", "filename"):
         value = r.get(field)
-        if not isinstance(value, str) or not SEGMENT_RE.fullmatch(value):
+        # `.` and `..` are inside SEGMENT's charset, so the fullmatch alone
+        # admits them — and one `..` still walks a level out of the release
+        # directory. on_release_host() refuses the same spelling in the url
+        # path for the same reason; this is that check's other half.
+        if (
+            not isinstance(value, str)
+            or not SEGMENT_RE.fullmatch(value)
+            or value in (".", "..")
+        ):
             die(
                 f"{where}: {field} is {value!r}, which is not a single path segment — "
                 f"artifact_url() in ocx/private/manifest.bzl builds the mirror url as "

@@ -9,6 +9,7 @@ load(":platforms.bzl", "host_info", "ocx_platform_constraints", "os_arch", "slug
 load(
     ":repo_utils.bzl",
     "CONFIG_ATTRS",
+    "bat_value",
     "check_bin_names",
     "decode_json",
     "discover_bins",
@@ -49,9 +50,19 @@ def _lazy_package(ctx, host, pkg):
     check_bin_names(ctx.attr.bins)
     staged = stage_lazy_config(ctx, host.is_windows)
     ext = ".bat" if host.is_windows else ".sh"
+
+    # The POSIX arm sh_quote()s this; the Batch arm has to refuse instead,
+    # because a literal quote closes the region with no in-place escape and
+    # cmd.exe then reads `&` as a statement separator. `ocx.package` is not
+    # root-only, so this string reaches us from any module in the graph.
+    safe_pkg = bat_value(pkg) if host.is_windows else None
+    if host.is_windows and safe_pkg == None:
+        fail(("rules_ocx: refusing to render a lazy launcher for package '{}' — a literal " +
+              "quote in the reference has no escape inside a batch file. Use a reference " +
+              "without one.").format(pkg))
     for name in ctx.attr.bins:
         if host.is_windows:
-            command = ['"{}"'.format(ocx_bin(ctx)), "package", "exec", '"{}"'.format(pkg)]
+            command = ['"{}"'.format(ocx_bin(ctx)), "package", "exec", '"{}"'.format(safe_pkg)]
         else:
             command = ['"$(rlocation {})"'.format(rlocation_path(ctx.attr.ocx)), "package", "exec", sh_quote(pkg)]
         command += ["--", name]

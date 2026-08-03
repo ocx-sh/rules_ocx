@@ -11,6 +11,7 @@ load(
     "OCX_PASSTHROUGH_ENV",
     "SYSEXIT_HINTS",
     "ambient_config_paths",
+    "bat_value",
     "check_bin_names",
     "closure_packages",
     "declared_bins",
@@ -931,6 +932,35 @@ def _truthy_test_impl(ctx):
     asserts.false(env, truthy(None), "unset is not truthy")
     return unittest.end(env)
 
+def _bat_value_test_impl(ctx):
+    """The primitive both Batch call sites refuse on.
+
+    A literal quote closes the quoted region with no in-place escape, and
+    once it is closed cmd.exe reads `&` as a statement separator — so an
+    unescaped interpolation into a `.bat` runs the tail as its own command.
+    Dropping the value is the only safe answer; `%` is escapable in place.
+    """
+    env = unittest.begin(ctx)
+
+    # The reference shape a lazy package launcher interpolates.
+    asserts.equals(env, "ocx.sh/jqlang/jq@sha256:" + "0" * 64, bat_value("ocx.sh/jqlang/jq@sha256:" + "0" * 64))
+    asserts.equals(env, "C:/store/aa/content", bat_value("C:/store/aa/content"))
+
+    # `%` opens an expansion; `%%` is its literal spelling in a batch file.
+    asserts.equals(env, "a%%b", bat_value("a%b"))
+    asserts.equals(env, "%%PATH%%", bat_value("%PATH%"))
+
+    # Anything carrying a quote is unrenderable, including the statement
+    # separator that quote would expose.
+    for hostile in [
+        'x" & calc.exe & "@sha256:' + "0" * 64,
+        'a"b',
+        '"',
+        'v1" | whoami & "',
+    ]:
+        asserts.equals(env, None, bat_value(hostile), repr(hostile) + " must be refused")
+    return unittest.end(env)
+
 # W17: every sysexit AGENTS.md documents as reachable from a repository rule.
 _DOCUMENTED_SYSEXITS = [64, 65, 69, 74, 75, 77, 78, 79, 80, 81]
 
@@ -970,6 +1000,7 @@ ambient_config_paths_test = unittest.make(_ambient_config_paths_test_impl)
 is_absolute_path_test = unittest.make(_is_absolute_path_test_impl)
 path_dirs_test = unittest.make(_path_dirs_test_impl)
 truthy_test = unittest.make(_truthy_test_impl)
+bat_value_test = unittest.make(_bat_value_test_impl)
 sysexit_hints_test = unittest.make(_sysexit_hints_test_impl)
 
 def launcher_test_suite(name):
@@ -1026,6 +1057,7 @@ def launcher_test_suite(name):
         is_absolute_path_test,
         path_dirs_test,
         truthy_test,
+        bat_value_test,
         sysexit_hints_test,
         *guards
     )

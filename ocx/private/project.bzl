@@ -10,6 +10,7 @@ load(":platforms.bzl", "host_info")
 load(
     ":repo_utils.bzl",
     "CONFIG_ATTRS",
+    "bat_value",
     "check_bin_names",
     "decode_json",
     "discover_bins",
@@ -46,7 +47,18 @@ def _lazy_project(ctx, host, binary):
     groups = []
     if ctx.attr.groups:
         joined = ",".join(ctx.attr.groups)
-        groups = ["-g", joined if host.is_windows else sh_quote(joined)]
+        if host.is_windows:
+            # Same asymmetry the package tier had: the POSIX arm quotes, so
+            # the Batch arm must refuse rather than interpolate bare. Only the
+            # root module sets `groups`, so this is a footgun, not a
+            # supply-chain path — but it is the same bug either way.
+            safe_groups = bat_value(joined)
+            if safe_groups == None:
+                fail(("rules_ocx: refusing to render a lazy launcher for groups '{}' — a " +
+                      "literal quote has no escape inside a batch file").format(joined))
+            groups = ["-g", '"{}"'.format(safe_groups)]
+        else:
+            groups = ["-g", sh_quote(joined)]
     ext = ".bat" if host.is_windows else ".sh"
     for name in ctx.attr.bins:
         if host.is_windows:
