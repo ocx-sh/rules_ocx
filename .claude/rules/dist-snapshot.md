@@ -47,8 +47,11 @@
   `urlsplit` and four traversals to github.com.
   `tag` and `filename` *are* those two segments — the mirror url is
   `<mirror>/<tag>/<filename>` — so they are validated against the same
-  charset constant by construction, not by coincidence. Before that, an
-  unvalidated `tag` of `../../../..` escaped a mirror's path root. The host is `p.netloc` compared as an exact string, never
+  charset constant by construction, not by coincidence, **and against `.`
+  and `..` separately**, because the charset admits a dot segment and one
+  `..` still walks a level out of the release directory. Before that, an
+  unvalidated `tag` of `../../../..` escaped a mirror's path root.
+  The host is `p.netloc` compared as an exact string, never
   `.hostname`, which would accept `user@github.com` and `github.com:443`. A
   url carrying CR, LF, tab, NUL, a query or a fragment is refused outright.
 - Bumping to a new ocx release (snapshot + pin + CI pins + verification):
