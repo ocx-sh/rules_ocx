@@ -540,6 +540,71 @@ def _sh_launcher_test_impl(ctx):
     asserts.false(env, "OCX_PATCH_SNAPSHOT" in script)
     return unittest.end(env)
 
+def _list_modifier_test_impl(ctx):
+    env = unittest.begin(ctx)
+
+    def sh(entries):
+        return render_launcher(entries, "/store/aa/content/bin/tool", "/home/u/.ocx", "/repo/ocx", False)
+
+    def item(value, separator = None):
+        entry = {"key": "JDK_JAVA_OPTIONS", "value": value, "type": "list"}
+        if separator != None:
+            entry["separator"] = separator
+        return entry
+
+    # A list entry appends BEHIND the invoking value, and yields the bare value
+    # when there is none — so it is a conditional, not the `${K:+…}` one-liner
+    # a path entry gets, which would leave a leading separator on an unset key.
+    # An absent `separator` folds with ocx's default, a space.
+    asserts.true(env, (
+        'if [ -n "${JDK_JAVA_OPTIONS:-}" ]; then export JDK_JAVA_OPTIONS="${JDK_JAVA_OPTIONS}"\' \'\'-ea\'; ' +
+        "else export JDK_JAVA_OPTIONS='-ea'; fi"
+    ) in sh([item("-ea")]))
+
+    # Two contributions to one key fold against each other in DECLARATION
+    # order — forward, unlike a path key, because ocx appends at the back.
+    asserts.true(env, "export JDK_JAVA_OPTIONS=\"${JDK_JAVA_OPTIONS}\"' ''-ea -Xmx1g'" in sh([
+        item("-ea"),
+        item("-Xmx1g"),
+    ]))
+
+    # Re-contributing a value moves it to the back rather than duplicating it
+    # (ocx's append_unique: last applier wins for a last-wins consumer).
+    asserts.true(env, "export JDK_JAVA_OPTIONS=\"${JDK_JAVA_OPTIONS}\"' ''-Xmx1g -ea'" in sh([
+        item("-ea"),
+        item("-Xmx1g"),
+        item("-ea"),
+    ]))
+
+    # An explicit separator is used for both the fold and the ambient join.
+    asserts.true(env, "export GODEBUG=\"${GODEBUG}\"',''gctrace=1,madvdontneed=1'" in sh([
+        {"key": "GODEBUG", "value": "gctrace=1", "type": "list", "separator": ","},
+        {"key": "GODEBUG", "value": "madvdontneed=1", "type": "list", "separator": ","},
+    ]))
+
+    # An empty contribution is a no-op — on an absent key too, where a path
+    # entry would still create one. Appending nothing must not export a key.
+    asserts.false(env, "JDK_JAVA_OPTIONS" in sh([item("")]))
+
+    # Windows: same fold, same append-behind, spelled with `if defined`.
+    bat = render_launcher(
+        [item("-ea"), item("-Xmx1g")],
+        "C:\\store\\tool.exe",
+        "C:\\Users\\u\\.ocx",
+        "C:\\repo\\ocx.exe",
+        True,
+    )
+    asserts.true(env, (
+        'if defined JDK_JAVA_OPTIONS (set "JDK_JAVA_OPTIONS=%JDK_JAVA_OPTIONS% -ea -Xmx1g") ' +
+        'else (set "JDK_JAVA_OPTIONS=-ea -Xmx1g")'
+    ) in bat)
+
+    # A list entry rides alongside the other two kinds without disturbing them.
+    mixed = sh(_ENTRIES + [item("-ea")])
+    asserts.true(env, "export PATH='/store/bb/content:/store/aa/content/bin'\"${PATH:+:${PATH}}\"" in mixed)
+    asserts.true(env, "export JAVA_HOME='/store/cc/content'" in mixed)
+    return unittest.end(env)
+
 def _bat_launcher_test_impl(ctx):
     env = unittest.begin(ctx)
     script = render_launcher(_ENTRIES, "C:\\store\\tool.exe", "C:\\Users\\u\\.ocx", "C:\\repo\\ocx.exe", True)
@@ -881,6 +946,11 @@ _GUARD_CASES = {
     "bad_bins_attr": "cannot be a launcher",
     # F1: a batch file has no escape for a literal quote in the exec target.
     "bat_target_quote": "no escape inside a batch file",
+    # F5: a modifier kind outside ocx's three is shape drift, not a constant.
+    # The fragment is a phrase only UNKNOWN_MODIFIER_MSG spells — the case
+    # below has to name the drifted type, and a traceback echoes that line, so
+    # asserting on the type itself would match the echo and pass vacuously.
+    "unknown_modifier": "reported modifier type",
 }
 
 def _guard_impl(ctx):
@@ -901,6 +971,14 @@ def _guard_impl(ctx):
         check_bin_names(["jq", "$(touch PWNED)"])
     elif case == "bat_target_quote":
         render_launcher([], "C:\\store\\ev\"il\\jq.exe", "C:\\Users\\u\\.ocx", "C:\\repo\\ocx.exe", True)
+    elif case == "unknown_modifier":
+        render_launcher(
+            [{"key": "K", "value": "v", "type": "vector"}],
+            "/store/aa/content/bin/tool",
+            "/home/u/.ocx",
+            "/repo/ocx",
+            False,
+        )
     else:
         fail("test bug: unknown guard case '{}'".format(case))
     return []
@@ -1118,6 +1196,7 @@ def _sysexit_hints_test_impl(ctx):
 
 sh_launcher_test = unittest.make(_sh_launcher_test_impl)
 bat_launcher_test = unittest.make(_bat_launcher_test_impl)
+list_modifier_test = unittest.make(_list_modifier_test_impl)
 bin_name_guard_test = unittest.make(_bin_name_guard_test_impl)
 scan_fallback_test = unittest.make(_scan_fallback_test_impl)
 windows_scan_test = unittest.make(_windows_scan_test_impl)
@@ -1176,6 +1255,7 @@ def launcher_test_suite(name):
         name,
         sh_launcher_test,
         bat_launcher_test,
+        list_modifier_test,
         bin_name_guard_test,
         scan_fallback_test,
         windows_scan_test,

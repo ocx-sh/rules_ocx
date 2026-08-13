@@ -10,4 +10,4 @@ exactly that version. Bump deliberately, together with dist/dist.json.
 
 visibility(["//ocx", "//ocx/tests"])
 
-DEFAULT_OCX_VERSION = "0.5.2"
+DEFAULT_OCX_VERSION = "0.5.8"

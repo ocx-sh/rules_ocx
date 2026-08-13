@@ -56,22 +56,48 @@ in-tree draft ocx-sh/ocx#12.
    Managed config is hint-only — never run `ocx config setup/update` from a
    repo rule.
 
-## Two-tier ocx CLI contract (verified against 0.5.2)
+## Two-tier ocx CLI contract (verified against 0.5.8)
 
-- `ocx --format json env` → `{"entries":[{"key","value","type":"path"|"constant"}],
-  "binaries":[…],"entrypoints":[…]}` (ordered). Parsing `.entries` only stays
-  correct; `entries[].source` appears only with `--show-patches`. A consumer
+- `ocx --format json env` → `{"entries":[{"key","value","type":"path"|"constant"|"list"
+  [,"separator"]}], "binaries":[…],"entrypoints":[…],"integrations":[…],
+  "advisories":[…]}` (ordered). Parsing `.entries` only stays correct — the
+  three sibling arrays are always serialized (empty when there is nothing) and
+  none becomes a target; `entries[].source` appears only with `--show-patches`,
+  as the object `{kind:"patch", rule, companion}`. A consumer
   applies entries by **prepending** each `path` one in list order
   (move-to-front dedup), so effective search precedence per key is the
   *reverse* of the list — ocx pushes the synthetic `<pkg>/entrypoints` PATH
-  entry last precisely so entrypoint launchers shadow `bin/`.
+  entry last precisely so entrypoint launchers shadow `bin/`. A `list` entry
+  instead **appends** at the back with move-to-back dedup, folded on its
+  `separator` (absent ⇒ a space), and an empty value is a no-op that must not
+  bring the key into existence — `append_unique()`/`fold_lists()` replay both.
+  A `type` outside those three is shape drift → fail() naming
+  `DEFAULT_OCX_VERSION`; folding it into a constant would silently *replace* an
+  environment ocx would have extended.
+- **Lazy composition is refused on every eager path** (`EAGER_LAZY_MODE`).
+  `ocx pull` writes a shim tree instead of content when the ladder
+  `--lazy-mode ▸ [package."<id>"] ▸ [group.<g>] ▸ toolchain ▸ OCX_LAZY_MODE ▸
+  never` resolves to `always`, and `env`/`which` then report it — a launcher
+  baked against that fetches its tool inside a Bazel action. Only the CLI tier
+  outranks a project's own ocx.toml, so `OCX_LAZY_MODE` is *not* the lever. The
+  flag is accepted by exactly seven composing commands (`env`, `run`, `pull`,
+  `direnv export`, `package env`, `package exec`, `package which`); `package
+  install`/`select` always materialize and reject it, `inspect --closure` never
+  composes. The `bins` tiers pass it nowhere — deferring at run time is their
+  whole point.
 - `ocx --format json package install <pkg>` → `{"<raw>":{identifier
-  (digest-pinned), metadata, path}}`; `package which` → `{"<raw>":"<store-root>"}`
-  (content at `<root>/content`); `package env` → entries as above.
+  (digest-pinned), metadata, path}}`; `package which` →
+  `{"<raw>":{"path":"<dir>","kind":"package"|"shim"}}` (**0.5.8: an object, not
+  a bare string** — a deferred tool has no package root yet, so ocx reports its
+  shim tree and names which of the two it answered with; `kind != "package"` is
+  a fail(), since only a package root has the `content/` the rule symlinks);
+  `package env` → entries as above. Only
+  `identifier` and the `which` path/kind are read — 0.5.5 replaced the
+  recorded-platform `metadata` field with a build receipt, invisibly here.
 - `ocx --format json [package] inspect --closure` →
   `{"packages":[{identifier, closure:{deps, surface:{interface, private},
   conflicts}}]}`; each surface is `{binaries:[{name, package}], entrypoints,
-  env, binaries_complete}`. Only the entry's `identifier` and
+  env, integrations, binaries_complete}`. Only the entry's `identifier` and
   `closure.surface.interface` (`binaries[].name`, `entrypoints[].name`,
   `binaries_complete`) are read — the command surface is the **union** of the
   two arrays, deduped by name. A name may appear in both; which *file* it
@@ -89,7 +115,9 @@ in-tree draft ocx-sh/ocx#12.
 - Sysexits: 64 usage · 65 data/stale · 69 unavailable · 74 io · 75 transient
   (retried) · 77 permission · 78 config error (missing/unsupported lock **or**
   a required-but-unsynced managed config) · 79 not found (incl. a required
-  patch companion) · 80 auth · 81 blocked by policy · 82 dirty rc.
+  patch companion) · 80 auth · 81 blocked by policy · 82 dirty rc. 0.5.3 moved
+  a registry timeout or rate-limit from 69 to 75; 69 stays reachable (oci
+  client, project resolve, index), so both hints earn their place.
 - Config precedence: system (`/etc/ocx/config.toml`, literal on every OS —
   the repo rules skip watching it on Windows, which has no `/etc`) →
   user config dir → `$OCX_HOME/config.toml` → managed-config snapshot
@@ -98,12 +126,21 @@ in-tree draft ocx-sh/ocx#12.
   Composed companions are invisible in the `package install` JSON report, and
   `lock --check` never covers them; `ocx patch freeze` →
   `patches.snapshot.json` (`OCX_PATCH_SNAPSHOT`) is the only freeze,
-  `ocx patch sync` the only refresh (mutating, offline → 81).
+  `ocx patch sync` the only refresh (mutating, offline → 81). 0.5.6 keys
+  companions by **tag** and bumped the snapshot to V2, dropping V1 — a
+  `patch_snapshot` frozen by an older ocx exits 65, which is why that hint
+  names `ocx patch freeze` alongside `ocx lock`. Companion pins moved out of
+  the shared local index into `$OCX_HOME/state/patch-companions/`, still under
+  the `state/` root `isolated_home` relocates.
 - Env passthrough (getenv-declared, all 14): OCX_MIRRORS,
   OCX_INSECURE_REGISTRIES, OCX_OFFLINE, OCX_FROZEN, OCX_REMOTE, OCX_JOBS,
   OCX_INDEX, OCX_DEFAULT_REGISTRY, OCX_CONFIG, OCX_NO_CONFIG,
   OCX_MANAGED_CONFIG, OCX_ALLOW_YANKED, OCX_PATCHES, OCX_PATCH_SNAPSHOT.
   OCX_HOME is resolved, not forwarded; OCX_NO_CONFIG_REFRESH is pinned to 1.
+  0.5.8 added three more, none forwarded: OCX_LAZY_MODE / OCX_LAZY_REPORT are
+  outranked by the `--lazy-mode never` above, and OCX_ENV is stripped by ocx
+  itself on every compose (its decoder refuses `OCX_*` keys outright), so it
+  needs no entry in the neutralized set either.
 
 ## Workflow
 

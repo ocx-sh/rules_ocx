@@ -10,6 +10,7 @@ load(":platforms.bzl", "host_info")
 load(
     ":repo_utils.bzl",
     "CONFIG_ATTRS",
+    "EAGER_LAZY_MODE",
     "bat_value",
     "check_bin_names",
     "decode_json",
@@ -125,7 +126,7 @@ def _ocx_project_repo_impl(ctx):
             ctx.attr.platform or host.ocx_platform,
         ),
     }
-    pull = project + ["pull"] + target
+    pull = project + ["pull"] + target + EAGER_LAZY_MODE
     if ctx.attr.groups:
         pull += ["-g", ",".join(ctx.attr.groups)]
     run_ocx(
@@ -138,7 +139,7 @@ def _ocx_project_repo_impl(ctx):
         hints = no_leaf,
     )
 
-    env_cmd = ["--format", "json"] + project + ["env"] + target
+    env_cmd = ["--format", "json"] + project + ["env"] + target + EAGER_LAZY_MODE
     if ctx.attr.groups:
         env_cmd += ["-g", ",".join(ctx.attr.groups)]
     stdout = run_ocx(

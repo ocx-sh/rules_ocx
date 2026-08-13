@@ -36,7 +36,33 @@ OCX_PASSTHROUGH_ENV = [
 # exit 0). OCX_PROJECT is a path, and empty is its documented "unset"; the other
 # two are BooleanStrings, which have no empty spelling — "0" neutralizes them
 # without the "invalid boolean value" warning "" logs on every invocation.
+#
+# OCX_ENV — 0.5.8's forwarded entry payload — is deliberately absent: ocx
+# strips an inherited one itself on every compose, and its decoder refuses
+# `OCX_*` keys outright, so there is nothing here left to close.
 _OCX_NEUTRALIZED_ENV = {"OCX_PROJECT": "", "OCX_GLOBAL": "0", "OCX_QUIET": "0"}
+
+# Refuses ocx's own lazy composition on every eager code path. `ocx pull` writes
+# a shim tree instead of content when the lazy ladder resolves to `always`, and
+# a following `env`/`which` then reports that shim directory — so a rendered
+# launcher would exec a script that downloads its tool inside a Bazel action
+# (no declared input, and no network in a sandbox), and the package tier's
+# `<root>/content` symlink would have nothing to point at.
+#
+# The flag, not OCX_LAZY_MODE. The ladder is
+# `--lazy-mode ▸ [package."<id>"] ▸ [group.<g>] ▸ toolchain ▸ OCX_LAZY_MODE ▸
+# never`, so the environment tier sits one rung above a floor that is already
+# `never`: setting it there changes nothing, and a project's own ocx.toml
+# outranks it. Only the CLI tier wins.
+#
+# Accepted by exactly the seven composing commands — `env`, `run`, `pull`,
+# `direnv export`, `package env`, `package exec`, `package which`. `package
+# install` and `package select` always materialize and *reject* it (exit 64),
+# and `inspect --closure` never composes, so none of the three takes it.
+#
+# The lazy `bins` tiers need it nowhere: their launchers re-enter `ocx run` at
+# execution time, which is where deferring content is the whole point.
+EAGER_LAZY_MODE = ["--lazy-mode", "never"]
 
 SYSEXIT_HINTS = {
     64: ("usage error — the pinned ocx CLI and rules_ocx disagree on the command surface; " +
@@ -44,8 +70,13 @@ SYSEXIT_HINTS = {
          "MODULE.bazel, or upgrade rules_ocx"),
     # Tier-neutral: the package tier has no lockfile, so a malformed reference
     # or digest is named first and 'ocx lock' offered as the project-tier case.
+    # The patch_snapshot clause is not hypothetical: ocx 0.5.6 bumped the
+    # snapshot to V2 (companions keyed by tag) and dropped V1 entirely, so a
+    # file frozen by an older ocx and committed lands here — a shape this
+    # rules_ocx's own pin bump is what starts refusing.
     65: ("data error — a malformed reference or digest; in a project, a lockfile out of date " +
-         "with ocx.toml ('ocx lock', then commit)"),
+         "with ocx.toml ('ocx lock', then commit); or a patch_snapshot written by an older " +
+         "ocx ('ocx patch freeze' again, then commit)"),
     69: "a required service or registry is unavailable — check network, OCX_MIRRORS, and registry auth",
     74: ("io error — a local read or write failed (disk full, or a denied filesystem " +
          "operation); check disk space and permissions on OCX_HOME"),
@@ -937,12 +968,118 @@ def render_lazy_launcher(command, is_windows, exports = {}):
     lines.append('exec {} "$@"'.format(" ".join(command)))
     return "\n".join(lines) + "\n"
 
+# Shape drift on the env report's modifier kind, per invariant 4: a `type`
+# outside ocx's three `ModifierKind`s is a disagreement between the pinned CLI
+# and what rules_ocx parses, not a mapped sysexit.
+#
+# Held in a constant so the guard test can assert on it without spelling the
+# text at its own call site: a Starlark failure echoes each frame's source
+# line, so a fragment the call site also spells matches the echo and passes
+# vacuously (.claude/rules/starlark.md).
+UNKNOWN_MODIFIER_MSG = ("rules_ocx: ocx env reported modifier type '{}' for '{}' — the pinned ocx " +
+                        "CLI and rules_ocx disagree on the report shape. Move DEFAULT_OCX_VERSION " +
+                        "(ocx/private/versions.bzl) to an ocx release this rules_ocx parses, or " +
+                        "upgrade rules_ocx.")
+
+# ocx's `package::metadata::env::list::DEFAULT_SEPARATOR`. An entry that
+# reaches the report with no `separator` is one where no contributor to the key
+# declared one (ocx reconciles them at compose time), so the fold falls back to
+# a space rather than guessing over somebody's explicit choice.
+_LIST_DEFAULT_SEPARATOR = " "
+
+def append_unique(existing, value, separator):
+    """`existing` with `value` folded onto the back, deduped on the separator.
+
+    Replays ocx's `utility::list::append_unique`: wrap `existing` in the
+    separator, delete every `separator + value + separator` occurrence to a
+    fixpoint, strip the wrapper, then append `value` at the back. Removing
+    *every* occurrence rather than the first is what keeps the fold idempotent
+    when the value already appears twice.
+
+    An empty `value` is a no-op — on an empty `existing` too, which is where a
+    list entry deliberately differs from a path one: appending nothing must not
+    bring the variable into existence.
+
+    Elements are opaque. Nothing is tokenized or trimmed: list element grammar
+    belongs to the consuming tool, never to ocx and never to rules_ocx.
+
+    Args:
+        existing: the value folded so far; "" when nothing is.
+        value: the contribution to append.
+        separator: the fold separator, never empty.
+
+    Returns:
+        the folded string.
+    """
+    if not value:
+        return existing
+    wrapped = separator + existing + separator
+    occurrence = separator + value + separator
+
+    # Starlark has no `while`, and this is the same fixpoint: every pass that
+    # finds an occurrence removes at least one, so the occurrence count bounds
+    # the passes.
+    for _ in range(len(wrapped)):
+        if occurrence not in wrapped:
+            break
+        wrapped = wrapped.replace(occurrence, separator)
+
+    # Each replacement leaves a separator where a separator-flanked match
+    # stood, so the wrapper survives — except when everything between collapsed
+    # and the two ends fused into the single separator left behind.
+    survivors = ""
+    if wrapped.startswith(separator):
+        inner = wrapped[len(separator):]
+        if inner.endswith(separator):
+            survivors = inner[:len(inner) - len(separator)]
+    if not survivors:
+        return value
+    return survivors + separator + value
+
+def fold_lists(entries):
+    """Folds the `list` entries of one env report into one value per key.
+
+    Args:
+        entries: env entries [{"key", "value", "type", "separator"?}, ...] that
+            already passed valid_env_key(), in declaration order.
+
+    Returns:
+        {key: struct(value, separator)} in first-declaration order, keys whose
+        fold came out empty omitted.
+    """
+    grouped = {}
+    for entry in entries:
+        grouped.setdefault(entry["key"], []).append(entry)
+
+    folded = {}
+    for key, items in grouped.items():
+        # ocx's `reconcile_list_separators` makes every contributor to a key
+        # agree before the report is serialized, so the first entry's
+        # separator is the key's separator.
+        separator = items[0].get("separator") or _LIST_DEFAULT_SEPARATOR
+        value = ""
+        for item in items:
+            value = append_unique(value, item["value"], separator)
+        if value:
+            folded[key] = struct(value = value, separator = separator)
+    return folded
+
 def render_launcher(entries, target, home, ocx, is_windows):
     """Renders a launcher script applying the ocx env and exec-ing a tool.
 
-    `path` entries prepend to the invoking environment; `constant` entries
-    replace. OCX_HOME and OCX_BINARY_PIN are baked so ocx entrypoint
+    `path` entries prepend to the invoking environment, `constant` entries
+    replace, and `list` entries append behind it — the three `ModifierKind`s
+    ocx serializes. An unrecognized `type` is shape drift and fails: folding it
+    into a constant would silently *replace* an environment ocx would have
+    extended. OCX_HOME and OCX_BINARY_PIN are baked so ocx entrypoint
     launchers re-enter the pinned ocx against the right store.
+
+    A `list` key is emitted as a conditional: ocx's fold appends behind the
+    ambient value and yields the bare value when there is none, so a launcher
+    that always joined would leave a leading separator on an unset key. The
+    declared contributions are folded against each other here; the ambient
+    value is not deduped against them, exactly as the `path` line does not
+    dedupe against the invoking `PATH`.
 
     An ocx consumer applies each `path` entry by prepending it with
     move-to-front dedup, so the *last* entry for a key ends up first. The
@@ -959,7 +1096,7 @@ def render_launcher(entries, target, home, ocx, is_windows):
     losslessly on POSIX, and on Windows by the one escape `set "K=V"` has.
 
     Args:
-        entries: env entries [{"key", "value", "type"}, ...].
+        entries: env entries [{"key", "value", "type", "separator"?}, ...].
         target: absolute path of the executable to exec.
         home: resolved OCX_HOME.
         ocx: absolute path of the pinned ocx binary.
@@ -969,14 +1106,20 @@ def render_launcher(entries, target, home, ocx, is_windows):
         script content string.
     """
     declared = {}  # key -> [values] in declaration order
+    listed = []  # `list` entries, in declaration order
     constants = []  # (key, value)
     for entry in entries:
         if not valid_env_key(entry["key"]):
             continue
         if entry["type"] == "path":
             declared.setdefault(entry["key"], []).append(entry["value"])
-        else:
+        elif entry["type"] == "constant":
             constants.append((entry["key"], entry["value"]))
+        elif entry["type"] == "list":
+            listed.append(entry)
+        else:
+            fail(UNKNOWN_MODIFIER_MSG.format(entry["type"], entry["key"]))
+    list_values = fold_lists(listed)
 
     # Reverse + first-wins == ocx's prepend-with-move-to-front, replayed once.
     path_values = {}  # key -> [values] in search-precedence order
@@ -1005,6 +1148,18 @@ def render_launcher(entries, target, home, ocx, is_windows):
             safe = bat_value(";".join(values))
             if safe != None:
                 lines.append('set "{}={};%{}%"'.format(key, safe, key))
+        for key, folded in list_values.items():
+            safe = bat_value(folded.separator + folded.value)
+            bare = bat_value(folded.value)
+            if safe != None and bare != None:
+                # `%KEY%` expands when cmd parses the whole `if`, and in the
+                # taken branch the variable is defined by definition of the
+                # test — so the one-line form needs no delayed expansion.
+                lines.append('if defined {key} (set "{key}=%{key}%{safe}") else (set "{key}={bare}")'.format(
+                    key = key,
+                    safe = safe,
+                    bare = bare,
+                ))
         lines.append('"{}" %*'.format(exe))
         return "\r\n".join(lines) + "\r\n"
 
@@ -1017,6 +1172,16 @@ def render_launcher(entries, target, home, ocx, is_windows):
         lines.append('export {key}={values}"${{{key}:+:${{{key}}}}}"'.format(
             key = key,
             values = sh_quote(":".join(values)),
+        ))
+    for key, folded in list_values.items():
+        # An `if` rather than the `${KEY:+…}` one-liner the path arm uses: both
+        # the separator and the folded value are publisher-controlled, and
+        # neither can be carried into the *word* half of a parameter expansion
+        # without reopening the quoting this whole function exists to close.
+        lines.append('if [ -n "${{{key}:-}}" ]; then export {key}="${{{key}}}"{sep}{value}; else export {key}={value}; fi'.format(
+            key = key,
+            sep = sh_quote(folded.separator),
+            value = sh_quote(folded.value),
         ))
     lines.append('exec {} "$@"'.format(sh_quote(target)))
     return "\n".join(lines) + "\n"

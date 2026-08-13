@@ -9,6 +9,7 @@ load(":platforms.bzl", "host_info", "ocx_platform_constraints", "os_arch", "slug
 load(
     ":repo_utils.bzl",
     "CONFIG_ATTRS",
+    "EAGER_LAZY_MODE",
     "bat_value",
     "check_bin_names",
     "decode_json",
@@ -187,26 +188,43 @@ def _ocx_package_repo_impl(ctx):
     stdout = run_ocx(
         ctx,
         binary,
-        json_pkg + ["which"] + platform_arg + [pkg],
+        json_pkg + ["which"] + platform_arg + EAGER_LAZY_MODE + [pkg],
         ocx_env.env,
         "locating " + pkg,
         host.is_windows,
     )
-    root = decode_json(stdout, "ocx package which").values()[0]
+    answer = decode_json(stdout, "ocx package which").values()[0]
 
-    # Externally sourced like every other string parsed here: checked before it
-    # becomes a symlink target, so a drifted report names the pin to move
-    # instead of tracebacking out of ctx.symlink().
-    if type(root) != "string" or not is_absolute_path(root, host.is_windows):
+    # `{"path", "kind"}`, not a bare string: a deferred tool has no package
+    # directory yet, so ocx reports its shim tree and says which of the two it
+    # answered with. Externally sourced like every other string parsed here and
+    # checked before it becomes a symlink target, so a drifted report names the
+    # pin to move instead of tracebacking out of ctx.symlink().
+    root = answer["path"] if type(answer) == "dict" and type(answer.get("path")) == "string" else None
+    if root == None or not is_absolute_path(root, host.is_windows):
         fail(("rules_ocx: ocx package which reported '{}' for '{}', not an absolute store " +
               "path — the pinned ocx CLI and rules_ocx disagree on the report shape. Move " +
               "DEFAULT_OCX_VERSION (ocx/private/versions.bzl) to an ocx release this " +
-              "rules_ocx parses, or upgrade rules_ocx.").format(root, pkg))
+              "rules_ocx parses, or upgrade rules_ocx.").format(answer, pkg))
+
+    # The whole reason ocx discriminates the two: a `shim` root holds `bin/`
+    # launchers and no `content/`, so symlinking it would dangle. EAGER_LAZY_MODE
+    # already outranks every ladder tier that could ask for one, which makes this
+    # the assertion that the flag did its job — not a case to handle.
+    if answer.get("kind") != "package":
+        fail(("rules_ocx: ocx package which answered '{}' for '{}' with a '{}' directory, not a " +
+              "package one — it holds generated launchers instead of the content/ this rule " +
+              "symlinks. rules_ocx passes '--lazy-mode never' precisely so this cannot happen; " +
+              "report it against rules_ocx with the pinned ocx version.").format(
+            root,
+            pkg,
+            answer.get("kind"),
+        ))
 
     stdout = run_ocx(
         ctx,
         binary,
-        json_pkg + ["env"] + platform_arg + [pkg],
+        json_pkg + ["env"] + platform_arg + EAGER_LAZY_MODE + [pkg],
         ocx_env.env,
         "composing the environment of " + pkg,
         host.is_windows,
