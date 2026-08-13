@@ -409,21 +409,24 @@ def _resolve_bins_order_test_impl(ctx):
     env = unittest.begin(ctx)
 
     # `exists` is true for a directory too, and a launcher exec-ing one dies at
-    # action time with a bare "Permission denied" — so the first candidate here
-    # must be skipped in favour of the second directory's regular file.
+    # action time with a bare "Permission denied" — so the first candidate in
+    # search order (the LAST declared entry) must be skipped in favour of the
+    # other directory's regular file.
     got = discover_bins(
         _fs_ctx(
-            files = ["/store/bb/content/jq"],
-            dirs = ["/store/aa/content/bin/jq"],
+            files = ["/store/aa/content/bin/jq"],
+            dirs = ["/store/bb/content/jq"],
         ),
         json.encode({"packages": [_closure_package("ocx.sh/a/a:1@sha256:aa", ["jq"])]}),
         "ocx inspect --closure",
         _ENTRIES,
         False,
     )
-    asserts.equals(env, ["/store/bb/content/jq"], [b.target for b in got.bins])
+    asserts.equals(env, ["/store/aa/content/bin/jq"], [b.target for b in got.bins])
 
-    # Both real: the first PATH entry wins (ocx PATH semantics).
+    # Both real: the LAST declared PATH entry wins — an ocx consumer prepends
+    # each entry in order, so effective search precedence is the reverse of the
+    # declaration order.
     first = discover_bins(
         _fs_ctx(files = ["/store/aa/content/bin/jq", "/store/bb/content/jq"]),
         json.encode({"packages": [_closure_package("ocx.sh/a/a:1@sha256:aa", ["jq"])]}),
@@ -431,7 +434,7 @@ def _resolve_bins_order_test_impl(ctx):
         _ENTRIES,
         False,
     )
-    asserts.equals(env, ["/store/aa/content/bin/jq"], [b.target for b in first.bins])
+    asserts.equals(env, ["/store/bb/content/jq"], [b.target for b in first.bins])
     return unittest.end(env)
 
 def _sh_launcher_quoting_test_impl(ctx):
@@ -497,8 +500,35 @@ def _sh_launcher_test_impl(ctx):
     asserts.true(env, "export OCX_HOME='/home/u/.ocx'" in script)
     asserts.true(env, "export OCX_BINARY_PIN='/repo/ocx'" in script)
 
-    # Both path values joined in declaration order, existing value appended.
-    asserts.true(env, "export PATH='/store/aa/content/bin:/store/bb/content'\"${PATH:+:${PATH}}\"" in script)
+    # Both path values joined in REVERSE declaration order, existing value
+    # appended: ocx prepends each entry in turn, so the last one ends up first.
+    asserts.true(env, "export PATH='/store/bb/content:/store/aa/content/bin'\"${PATH:+:${PATH}}\"" in script)
+
+    # ocx's prepend is move-to-front, so a repeated value is not duplicated —
+    # it keeps only its last (highest-precedence) declaration.
+    deduped = render_launcher(
+        _ENTRIES + [{"key": "PATH", "value": "/store/aa/content/bin", "type": "path"}],
+        "/store/aa/content/bin/tool",
+        "/home/u/.ocx",
+        "/repo/ocx",
+        False,
+    )
+    asserts.true(env, "export PATH='/store/aa/content/bin:/store/bb/content'\"${PATH:+:${PATH}}\"" in deduped)
+
+    # An empty value never becomes an empty PATH element (the action's CWD);
+    # a key left with nothing is omitted entirely, not exported empty.
+    hardened = render_launcher(
+        _ENTRIES + [
+            {"key": "PATH", "value": "", "type": "path"},
+            {"key": "GOPATH", "value": "", "type": "path"},
+        ],
+        "/store/aa/content/bin/tool",
+        "/home/u/.ocx",
+        "/repo/ocx",
+        False,
+    )
+    asserts.true(env, "export PATH='/store/bb/content:/store/aa/content/bin'\"${PATH:+:${PATH}}\"" in hardened)
+    asserts.false(env, "GOPATH" in hardened)
 
     # Constants replace.
     asserts.true(env, "export JAVA_HOME='/store/cc/content'" in script)
@@ -514,7 +544,9 @@ def _bat_launcher_test_impl(ctx):
     env = unittest.begin(ctx)
     script = render_launcher(_ENTRIES, "C:\\store\\tool.exe", "C:\\Users\\u\\.ocx", "C:\\repo\\ocx.exe", True)
     asserts.true(env, script.startswith("@echo off"))
-    asserts.true(env, 'set "PATH=/store/aa/content/bin;/store/bb/content;%PATH%"' in script)
+
+    # Reverse declaration order here too — same prepend semantics as POSIX.
+    asserts.true(env, 'set "PATH=/store/bb/content;/store/aa/content/bin;%PATH%"' in script)
     asserts.true(env, 'set "JAVA_HOME=/store/cc/content"' in script)
     asserts.true(env, '"C:\\store\\tool.exe" %*' in script)
     return unittest.end(env)
@@ -590,13 +622,20 @@ def _env_bzl_test_impl(ctx):
     ))
     return unittest.end(env)
 
-def _closure_package(identifier, binaries, complete = True):
+def _closure_package(identifier, binaries, complete = True, entrypoints = []):
+    """A well-formed `packages` entry: both surface arrays, always serialized.
+
+    `binaries` and `entrypoints` are parallel BinaryAttribution arrays that
+    may claim the same name, and `SurfaceOut` emits both unconditionally, so
+    every fixture carries both — an absent `entrypoints` is shape drift.
+    """
     return {
         "identifier": identifier,
         "closure": {
             "surface": {
                 "interface": {
                     "binaries": [{"name": n, "package": identifier} for n in binaries],
+                    "entrypoints": [{"name": n, "package": identifier} for n in entrypoints],
                     "binaries_complete": complete,
                 },
             },
@@ -611,12 +650,37 @@ def _declared_bins_test_impl(ctx):
         _closure_package("ocx.sh/b/b:latest@sha256:bb", ["shfmt", "shellcheck"]),
     ])
 
-    # Declaration order, and the first package claiming a name wins (PATH semantics).
+    # Declaration order; the first claim of a name wins the dedup — one target
+    # per name, whichever file it later resolves to.
     asserts.equals(env, ["shellcheck", "shfmt"], surface.names)
     asserts.equals(env, [], surface.incomplete)
 
     # An empty complete claim is a real answer: the package exposes nothing.
     asserts.equals(env, [], declared_bins([_closure_package("ocx.sh/c/c:latest", [])]).names)
+
+    # The command surface is the UNION of both arrays, entrypoints first within
+    # a package — ocx pushes the synthetic `entrypoints/` PATH entry last, so it
+    # ends up at the front of PATH and shadows `bin/`.
+    union = declared_bins([
+        _closure_package(
+            "ocx.sh/a/a:latest@sha256:aa",
+            ["shellcheck", "shfmt"],
+            entrypoints = ["wrapped", "shellcheck"],
+        ),
+    ])
+    asserts.equals(env, ["wrapped", "shellcheck", "shfmt"], union.names)
+
+    # An entrypoints-only package still exposes commands: `binaries_complete`
+    # covers `binaries` alone, and an entrypoint claim is always authoritative.
+    only = declared_bins([_closure_package("ocx.sh/e/e:latest@sha256:ee", [], entrypoints = ["ep"])])
+    asserts.equals(env, ["ep"], only.names)
+    asserts.equals(env, [], only.incomplete)
+
+    # …and an incomplete `binaries` claim still poisons the batch even when the
+    # entrypoints are authoritative: the union is a subset of what is on PATH.
+    asserts.equals(env, ["ocx.sh/f/f:latest@sha256:ff"], declared_bins([
+        _closure_package("ocx.sh/f/f:latest@sha256:ff", [], complete = False, entrypoints = ["ep"]),
+    ]).incomplete)
 
     # One incomplete package poisons the batch — the union is now a subset of PATH.
     mixed = declared_bins([
@@ -625,6 +689,48 @@ def _declared_bins_test_impl(ctx):
     ])
     asserts.equals(env, ["ocx.sh/legacy:latest@sha256:cc"], mixed.incomplete)
 
+    return unittest.end(env)
+
+# The two PATH entries a package with entrypoints contributes, in the order ocx
+# composes them: declared `bin/` first, synthetic `entrypoints/` last.
+_ENTRYPOINT_ENTRIES = [
+    {"key": "PATH", "value": "/store/aa/content/bin", "type": "path"},
+    {"key": "PATH", "value": "/store/aa/entrypoints", "type": "path"},
+]
+
+def _entrypoints_surface_test_impl(ctx):
+    """An entrypoint is a target, and its launcher shadows the same-named bin/."""
+    env = unittest.begin(ctx)
+
+    # (a) Declared path, not the scan fallback: `binaries_complete` is true and
+    # the only claim is an entrypoint.
+    only = discover_bins(
+        _fs_ctx(files = ["/store/aa/entrypoints/ep"]),
+        json.encode({"packages": [
+            _closure_package("ocx.sh/a/a:1@sha256:aa", [], entrypoints = ["ep"]),
+        ]}),
+        "ocx inspect --closure",
+        _ENTRYPOINT_ENTRIES,
+        False,
+    )
+    asserts.equals(env, [], only.scanned)
+    asserts.equals(env, ["ep"], [b.name for b in only.bins])
+    asserts.equals(env, ["/store/aa/entrypoints/ep"], [b.target for b in only.bins])
+
+    # (b) A name in both arrays is one target, and it resolves to the
+    # `entrypoints/` file: that entry is declared last, so ocx prepends it last
+    # and it wins lookup.
+    both = discover_bins(
+        _fs_ctx(files = ["/store/aa/content/bin/tool", "/store/aa/entrypoints/tool"]),
+        json.encode({"packages": [
+            _closure_package("ocx.sh/a/a:1@sha256:aa", ["tool"], entrypoints = ["tool"]),
+        ]}),
+        "ocx inspect --closure",
+        _ENTRYPOINT_ENTRIES,
+        False,
+    )
+    asserts.equals(env, ["tool"], [b.name for b in both.bins])
+    asserts.equals(env, ["/store/aa/entrypoints/tool"], [b.target for b in both.bins])
     return unittest.end(env)
 
 def _closure_packages_test_impl(ctx):
@@ -648,7 +754,7 @@ def _closure_packages_test_impl(ctx):
     return unittest.end(env)
 
 # H5: reports that must be rejected. `packages` is serialized unconditionally,
-# but a per-entry `closure` is absent for every non-closure body — the three
+# but a per-entry `closure` is absent for every non-closure body — the four
 # keys declared_bins() indexes are exactly what drifts.
 _MALFORMED_CLOSURE_REPORTS = {
     "no_closure": [{"identifier": "ocx.sh/a/a:latest@sha256:aa"}],
@@ -658,21 +764,43 @@ _MALFORMED_CLOSURE_REPORTS = {
     }],
     "no_binaries": [{
         "identifier": "ocx.sh/a/a:latest@sha256:aa",
-        "closure": {"surface": {"interface": {"binaries_complete": True}}},
+        "closure": {"surface": {"interface": {"entrypoints": [], "binaries_complete": True}}},
+    }],
+    # `SurfaceOut` serializes `entrypoints` unconditionally, so its absence is
+    # drift — never "this package declares none", which is an empty list.
+    "no_entrypoints": [{
+        "identifier": "ocx.sh/a/a:latest@sha256:aa",
+        "closure": {"surface": {"interface": {"binaries": [], "binaries_complete": True}}},
     }],
     "no_binaries_complete": [{
         "identifier": "ocx.sh/a/a:latest@sha256:aa",
-        "closure": {"surface": {"interface": {"binaries": []}}},
+        "closure": {"surface": {"interface": {"binaries": [], "entrypoints": []}}},
     }],
     # Present but not iterable as declared_bins() iterates it: a key check
     # alone passes this through to a raw traceback.
     "binaries_not_a_list": [{
         "identifier": "ocx.sh/a/a:latest@sha256:aa",
-        "closure": {"surface": {"interface": {"binaries": "oops", "binaries_complete": True}}},
+        "closure": {"surface": {"interface": {
+            "binaries": "oops",
+            "entrypoints": [],
+            "binaries_complete": True,
+        }}},
+    }],
+    "entrypoints_not_a_list": [{
+        "identifier": "ocx.sh/a/a:latest@sha256:aa",
+        "closure": {"surface": {"interface": {
+            "binaries": [],
+            "entrypoints": "oops",
+            "binaries_complete": True,
+        }}},
     }],
     # declared_bins() indexes `identifier` for every incomplete package.
     "no_identifier": [{
-        "closure": {"surface": {"interface": {"binaries": [], "binaries_complete": False}}},
+        "closure": {"surface": {"interface": {
+            "binaries": [],
+            "entrypoints": [],
+            "binaries_complete": False,
+        }}},
     }],
     # EVERY entry is validated, not just the first.
     "second_entry_bad": [
@@ -900,7 +1028,9 @@ def _path_dirs_test_impl(ctx):
     """Only PATH names directories that hold executables."""
     env = unittest.begin(ctx)
 
-    asserts.equals(env, ["/store/aa/content/bin", "/store/bb/content"], path_dirs(_ENTRIES))
+    # Search-precedence order: the reverse of declaration order, because an ocx
+    # consumer prepends each entry as it walks the list.
+    asserts.equals(env, ["/store/bb/content", "/store/aa/content/bin"], path_dirs(_ENTRIES))
 
     # A package contributing other colon-lists uses the same `path` type; those
     # directories hold libraries and man pages, not tools.
@@ -918,6 +1048,13 @@ def _path_dirs_test_impl(ctx):
         {"key": "Path", "value": "/store/aa/content/bin", "type": "path"},
     ]))
     asserts.equals(env, [], path_dirs([]))
+
+    # An empty value is dropped, as ocx's move_to_front drops it — it would
+    # otherwise probe `/<name>` here and land the CWD on a launcher's PATH.
+    asserts.equals(env, ["/store/aa/content/bin"], path_dirs([
+        {"key": "PATH", "value": "", "type": "path"},
+        {"key": "PATH", "value": "/store/aa/content/bin", "type": "path"},
+    ]))
     return unittest.end(env)
 
 def _truthy_test_impl(ctx):
@@ -995,6 +1132,7 @@ sh_lazy_launcher_test = unittest.make(_sh_lazy_launcher_test_impl)
 bat_lazy_launcher_test = unittest.make(_bat_lazy_launcher_test_impl)
 env_bzl_test = unittest.make(_env_bzl_test_impl)
 declared_bins_test = unittest.make(_declared_bins_test_impl)
+entrypoints_surface_test = unittest.make(_entrypoints_surface_test_impl)
 closure_packages_test = unittest.make(_closure_packages_test_impl)
 ambient_config_paths_test = unittest.make(_ambient_config_paths_test_impl)
 is_absolute_path_test = unittest.make(_is_absolute_path_test_impl)
@@ -1052,6 +1190,7 @@ def launcher_test_suite(name):
         bat_lazy_launcher_test,
         env_bzl_test,
         declared_bins_test,
+        entrypoints_surface_test,
         closure_packages_test,
         ambient_config_paths_test,
         is_absolute_path_test,

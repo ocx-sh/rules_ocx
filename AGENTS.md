@@ -60,7 +60,11 @@ in-tree draft ocx-sh/ocx#12.
 
 - `ocx --format json env` → `{"entries":[{"key","value","type":"path"|"constant"}],
   "binaries":[…],"entrypoints":[…]}` (ordered). Parsing `.entries` only stays
-  correct; `entries[].source` appears only with `--show-patches`.
+  correct; `entries[].source` appears only with `--show-patches`. A consumer
+  applies entries by **prepending** each `path` one in list order
+  (move-to-front dedup), so effective search precedence per key is the
+  *reverse* of the list — ocx pushes the synthetic `<pkg>/entrypoints` PATH
+  entry last precisely so entrypoint launchers shadow `bin/`.
 - `ocx --format json package install <pkg>` → `{"<raw>":{identifier
   (digest-pinned), metadata, path}}`; `package which` → `{"<raw>":"<store-root>"}`
   (content at `<root>/content`); `package env` → entries as above.
@@ -68,13 +72,18 @@ in-tree draft ocx-sh/ocx#12.
   `{"packages":[{identifier, closure:{deps, surface:{interface, private},
   conflicts}}]}`; each surface is `{binaries:[{name, package}], entrypoints,
   env, binaries_complete}`. Only the entry's `identifier` and
-  `closure.surface.interface` (`binaries[].name`, `binaries_complete`) are
-  read — `private` is the private-axis projection (which also repeats the
-  public entries) and never becomes a target. `closure` is omitted for an
+  `closure.surface.interface` (`binaries[].name`, `entrypoints[].name`,
+  `binaries_complete`) are read — the command surface is the **union** of the
+  two arrays, deduped by name. A name may appear in both; which *file* it
+  resolves to is composed-PATH precedence (the `entrypoints/` launcher
+  shadows `bin/`), never array order. `private` is the private-axis projection (which also repeats
+  the public entries) and never becomes a target. `closure` is omitted for an
   unresolved binding (a candidate list, or one projected off ocx.lock); that,
-  like any other shape drift, is a fail() naming `DEFAULT_OCX_VERSION`, not a
-  mapped sysexit. `binaries_complete = false` means the claim is possibly
-  incomplete → fall back to scanning PATH.
+  like any other shape drift — including an absent `entrypoints`, which
+  `SurfaceOut` always serializes — is a fail() naming `DEFAULT_OCX_VERSION`,
+  not a mapped sysexit. `binaries_complete = false` means the claim is
+  possibly incomplete → fall back to scanning PATH; it covers `binaries`
+  only, entrypoint claims are always authoritative.
 - `ocx lock --check`: exit 0 current / 65 stale / 78 missing. Offline.
 - Root flags before subcommand: `--format json --project <toml>`.
 - Sysexits: 64 usage · 65 data/stale · 69 unavailable · 74 io · 75 transient

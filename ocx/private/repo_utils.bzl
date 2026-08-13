@@ -533,11 +533,13 @@ def closure_packages(stdout, what):
     `ocx inspect` binding projected straight off ocx.lock with no single
     artifact to walk — carries no `closure` at all. Each entry is therefore
     checked too: it must be an object with an `identifier`, and its
-    `closure.surface.interface` must carry `binaries_complete` and a list
-    `binaries` — every key declared_bins() indexes off a *package* entry, in
-    the type it indexes it as. What is not guarded is `name` inside each
-    `binaries` element: `BinaryAttribution.name` is a non-`Option` `String`,
-    so it is always serialized, and a drift there would still traceback.
+    `closure.surface.interface` must carry `binaries_complete` and the two
+    lists `binaries` and `entrypoints` — every key declared_bins() indexes
+    off a *package* entry, in the type it indexes it as. `SurfaceOut` always
+    serializes both arrays, so a missing `entrypoints` is shape drift, not an
+    empty claim. What is not guarded is `name` inside their elements: both
+    are `BinaryAttribution`, whose `name` is a non-`Option` `String`, so it
+    is always serialized, and a drift there would still traceback.
     The fail() names DEFAULT_OCX_VERSION per invariant 4:
     this is a shape drift between the pinned ocx and what rules_ocx parses,
     not a mapped sysexit.
@@ -567,6 +569,7 @@ def closure_packages(stdout, what):
             break
         interface = _as_dict(_as_dict(_as_dict(pkg.get("closure")).get("surface")).get("interface"))
         if (type(interface.get("binaries")) != "list" or
+            type(interface.get("entrypoints")) != "list" or
             "binaries_complete" not in interface or
             "identifier" not in pkg):
             drift = "'{}' with no closure surface".format(pkg.get("identifier", "<unnamed package>"))
@@ -621,13 +624,27 @@ def declared_bins(packages):
     `interface` is the surface a consumer sees on PATH; `private` holds the
     package's internal executables, which never become targets.
 
+    A package's command surface is the *union* of `entrypoints` and
+    `binaries` — two parallel `BinaryAttribution` arrays that may claim the
+    same name (that overlap is the point: the generated `entrypoints/`
+    launcher shadows the raw `bin/` file). The union is deduped by name;
+    order here only sets target declaration order. *Which file* a name
+    resolves to is decided entirely by path_dirs()' search precedence in
+    resolve_bins() — the closure-wide surface flattens every admitted node,
+    so no concatenation order could mirror the composed PATH anyway.
+
+    `incomplete` is driven by `binaries_complete` alone: the flag covers only
+    `binaries`, and there is no entrypoints equivalent because the entrypoint
+    map keys are always authoritative.
+
     Args:
         packages: the `packages` list of an `ocx [package] inspect --closure`
             report.
 
     Returns:
-        struct(names, incomplete): `names` in declaration order with the first
-        occurrence of a name winning (ocx PATH semantics), `incomplete` the
+        struct(names, incomplete): `names` in declaration order, deduped on
+        first occurrence (a name is one target however many surface entries
+        claim it — this picks a name string, not a PATH slot), `incomplete` the
         identifiers of packages whose `binaries` claim is not complete. A
         non-empty `incomplete` makes `names` a subset of what is really on
         PATH, so the caller must fall back to scan_bins().
@@ -639,7 +656,7 @@ def declared_bins(packages):
         interface = pkg["closure"]["surface"]["interface"]
         if not interface["binaries_complete"]:
             incomplete.append(pkg["identifier"])
-        for binary in interface["binaries"]:
+        for binary in interface["entrypoints"] + interface["binaries"]:
             if binary["name"] in seen:
                 continue
             seen[binary["name"]] = True
@@ -659,13 +676,25 @@ def path_dirs(entries):
     package metadata, and a package declaring `Path` would otherwise
     contribute nothing and silently yield zero discovered bins.
 
+    The result is **reversed**: an ocx consumer applies entries by prepending
+    each one in list order (move-to-front), so the last declared PATH entry
+    ends up first in the resolved PATH. Reversing here, combined with the
+    first-hit-wins scans in resolve_bins()/scan_bins(), reproduces
+    move-to-front exactly. Forward order would let `bin/` shadow the
+    `entrypoints/` entry ocx deliberately pushes last.
+
+    An empty value is dropped, as ocx's move_to_front drops it — joined
+    verbatim it would probe `"/" + name` here and put an empty PATH element
+    (the action's CWD) into launchers.
+
     Args:
         entries: env entries [{"key", "value", "type"}, ...] from `ocx env`.
 
     Returns:
-        list of directory path strings, in declaration order.
+        list of directory path strings, in search-precedence order (the
+        reverse of declaration order).
     """
-    return [e["value"] for e in entries if e["type"] == "path" and e["key"].upper() == "PATH"]
+    return reversed([e["value"] for e in entries if e["type"] == "path" and e["key"].upper() == "PATH" and e["value"]])
 
 def resolve_bins(ctx, names, entries, is_windows):
     """Locates each declared executable on the composed PATH.
@@ -677,7 +706,8 @@ def resolve_bins(ctx, names, entries, is_windows):
 
     Args:
         ctx: repository_ctx.
-        names: declared executable names, in PATH-precedence order.
+        names: declared executable names; order only orders the result —
+            resolution precedence comes from path_dirs().
         entries: env entries [{"key", "value", "type"}, ...] from `ocx env`.
         is_windows: host flag; Windows executables carry an extension.
 
@@ -757,8 +787,10 @@ def scan_bins(ctx, entries, is_windows):
     """Discovers runnable tools by scanning the composed PATH.
 
     The fallback for packages that declare no complete `binaries` metadata.
-    Mirrors ocx PATH semantics: entries in declaration order, first name
-    wins. Windows binaries are keyed by their extension-less name.
+    Mirrors ocx PATH semantics: path_dirs() hands back search-precedence
+    order (declaration order reversed, because ocx prepends each entry), and
+    the first name found wins. Windows binaries are keyed by their
+    extension-less name.
 
     Args:
         ctx: repository_ctx.
@@ -912,6 +944,14 @@ def render_launcher(entries, target, home, ocx, is_windows):
     replace. OCX_HOME and OCX_BINARY_PIN are baked so ocx entrypoint
     launchers re-enter the pinned ocx against the right store.
 
+    An ocx consumer applies each `path` entry by prepending it with
+    move-to-front dedup, so the *last* entry for a key ends up first. The
+    single value baked here is therefore the reverse of declaration order,
+    deduped keeping the first occurrence in that reversed order, empty
+    values dropped — the same string move-to-front produces for the
+    one-directory-per-entry values ocx emits (an empty value joined verbatim
+    would be an empty PATH element: the action's CWD).
+
     Every value here is publisher-controlled: `ocx env` serializes keys and
     values straight out of package metadata, and even the exec target is a
     declared name joined onto a PATH directory that same metadata contributed.
@@ -928,15 +968,28 @@ def render_launcher(entries, target, home, ocx, is_windows):
     Returns:
         script content string.
     """
-    path_values = {}  # key -> [values] in declaration order
+    declared = {}  # key -> [values] in declaration order
     constants = []  # (key, value)
     for entry in entries:
         if not valid_env_key(entry["key"]):
             continue
         if entry["type"] == "path":
-            path_values.setdefault(entry["key"], []).append(entry["value"])
+            declared.setdefault(entry["key"], []).append(entry["value"])
         else:
             constants.append((entry["key"], entry["value"]))
+
+    # Reverse + first-wins == ocx's prepend-with-move-to-front, replayed once.
+    path_values = {}  # key -> [values] in search-precedence order
+    for key, values in declared.items():
+        seen = {}
+        ordered = []
+        for value in reversed(values):
+            if not value or value in seen:
+                continue
+            seen[value] = True
+            ordered.append(value)
+        if ordered:
+            path_values[key] = ordered
 
     if is_windows:
         exe = bat_value(target)
