@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-09-02
+
+### Added
+
+- Adopt ocx 0.6.0 with a root-only policy tag and classified env passthrough *(ocx)* **BREAKING**
+
 ## [0.3.0] - 2026-08-13
 
 ### Added
@@ -84,6 +90,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Neutralize leaked OCX_PROJECT and retry racy package installs
 - Unbreak Windows — LF scripts, runfiles tree, no stardoc under MSVC *(ci)*
+[0.4.0]: https://github.com/ocx-sh/ocx/compare/v0.3.0..v0.4.0
 [0.3.0]: https://github.com/ocx-sh/ocx/compare/v0.2.0..v0.3.0
 [0.2.0]: https://github.com/ocx-sh/ocx/compare/v0.1.3..v0.2.0
 [0.1.3]: https://github.com/ocx-sh/ocx/compare/v0.1.2..v0.1.3
