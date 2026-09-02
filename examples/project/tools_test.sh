@@ -4,7 +4,7 @@ set -euo pipefail
 "$SHELLCHECK_BIN" --version | grep -q "version:"
 "$SHFMT_BIN" --version >/dev/null
 
-# Lazy launcher: materializes via `ocx run` on first execution.
+# Lazy launcher: materializes via `ocx exec` on first execution.
 "$SHELLCHECK_LAZY_BIN" --version | grep -q "version:"
 
 # The report contains shellcheck's complaint about the unquoted variable.

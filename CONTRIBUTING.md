@@ -23,6 +23,8 @@ Thanks for helping out! Ground rules:
 
 ## Toolchain
 
-The dev toolchain is provisioned by OCX itself (dogfooding): `ocx pull` or
-`direnv allow` gives you bazelisk, actionlint, git-cliff, and friends from
-the committed `ocx.toml`/`ocx.lock`.
+The dev toolchain is provisioned by OCX itself (dogfooding): `direnv allow`,
+or 0.6.0's prompt hook (`ocx self setup --hook` once, then `ocx shell allow` in
+this checkout — the hook stays inert until the project has a consent stamp),
+gives you bazelisk, actionlint, git-cliff, and friends from the committed
+`ocx.toml`/`ocx.lock`; or prefix a command with `ocx exec --`.

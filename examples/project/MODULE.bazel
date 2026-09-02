@@ -19,7 +19,7 @@ ocx.project(
 )
 
 # Lazy variant: nothing is pulled at fetch time — each bin is a launcher
-# re-entering `ocx run`, materializing the toolchain on first execution.
+# re-entering `ocx exec`, materializing the toolchain on first execution.
 # Fully remote-cached builds download no tool content at all.
 ocx.project(
     name = "tools_lazy",

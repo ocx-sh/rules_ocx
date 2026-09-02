@@ -12,6 +12,10 @@ local_path_override(
 
 ocx = use_extension("@rules_ocx//ocx:extensions.bzl", "ocx")
 
+# The build's weakening posture, at its defaults: a no-op that exercises the
+# tag class end to end. Root module only; at most one.
+ocx.policy()
+
 # Floating tag: resolves at fetch time; the fetch log prints the digest to pin.
 ocx.package(
     name = "jq",

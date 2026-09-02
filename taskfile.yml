@@ -5,7 +5,7 @@ includes:
   release: ./taskfiles/release.taskfile.yml
 
 vars:
-  BAZEL: ocx run -- bazelisk
+  BAZEL: ocx exec -- bazelisk
   EXAMPLES: examples/project examples/package examples/cross_platform
 
 tasks:
@@ -23,9 +23,9 @@ tasks:
     desc: buildifier + actionlint + license headers + links + dist snapshot + guards
     cmds:
       - "{{.BAZEL}} run //:buildifier.check"
-      - ocx run -- actionlint
-      - ocx run -- hawkeye check
-      - ocx run -- lychee --no-progress README.md CONTRIBUTING.md SECURITY.md
+      - ocx exec -- actionlint
+      - ocx exec -- hawkeye check
+      - ocx exec -- lychee --no-progress README.md CONTRIBUTING.md SECURITY.md
       # Guards the pin/snapshot lockstep invariant on every PR — the scheduled
       # update-dist.yml only checks it when it refreshes the snapshot itself.
       - task: dist:check
@@ -37,7 +37,7 @@ tasks:
     desc: Apply buildifier formatting
     cmds:
       - "{{.BAZEL}} run //:buildifier.fix"
-      - ocx run -- hawkeye format
+      - ocx exec -- hawkeye format
 
   test:
     desc: Unit tests + docs freshness (no network)
@@ -48,7 +48,7 @@ tasks:
     desc: Example workspaces — integration tests against live ocx.sh
     cmds:
       - for: { var: EXAMPLES }
-        cmd: cd {{.ITEM}} && ocx --project ../../ocx.toml run -- bazelisk test //...
+        cmd: cd {{.ITEM}} && ocx --project ../../ocx.toml exec -- bazelisk test //...
 
   docs:update:
     desc: Regenerate stardoc API docs

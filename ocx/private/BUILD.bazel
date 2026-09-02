@@ -8,4 +8,5 @@ package(default_visibility = ["//visibility:public"])
 bzl_library(
     name = "private",
     srcs = glob(["*.bzl"]),
+    deps = ["@bazel_skylib//lib:versions"],
 )

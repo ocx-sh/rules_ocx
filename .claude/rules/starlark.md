@@ -11,15 +11,24 @@
   for every env var consulted (Bazel tracks invalidation), `watch()` labels
   they read. Module extension impls stay pure: no os, no env, no downloads.
 - Parse only documented ocx `--format json` shapes. Never parse plain-text
-  output, never read OCX_HOME layout directly. Two exceptions: execing
-  rendered absolute paths returned by the CLI, and the config tiers
+  output, never read OCX_HOME layout directly. Three exceptions: execing
+  rendered absolute paths returned by the CLI; the config tiers
   `ambient_config_paths()` hand-constructs to watch
   (`$OCX_HOME/config.toml`, `state/managed-config/snapshot.json`,
-  `state/managed-config/config.toml`). ocx has no read-only command that
-  reports those paths, so they are unavoidably hard-coded — and the watch
-  fails *open*: relocate the directory upstream and it silently covers
+  `state/managed-config/config.toml`); and the sigstore trusted-root rung
+  `sigstore_trust_root_path()` hand-constructs the same way
+  (`$OCX_HOME/sigstore/trusted-root.json`). ocx has no read-only command that
+  reports any of those paths, so they are unavoidably hard-coded — and the
+  watch fails *open*: relocate the directory upstream and it silently covers
   nothing, with no error. Re-verify the layout on every ocx bump (the
   `update-dist` skill lists it).
+- One more hard-coded upstream convention, outside the CLI entirely:
+  `manifest_sha256()` reads the digest out of a `dist/<sha256>.json` manifest
+  name — the self-verifying form www-setup publishes (`dist_pin_digest` in
+  its `src/install.sh`). It is the *last path segment* that must be
+  `<64 lowercase hex>.json`; no `dist/` parent is required, so a mirror may
+  serve it from any directory. It fails open too: any other name downloads
+  unverified, exactly as today. Same re-verify list.
 - Errors: map ocx sysexits to fail() with the user-fixable command, e.g.
   exit 65 → "ocx.lock is stale — run `ocx lock` and commit the result".
 - A guard test written with `analysistest`'s `expect_failure` can pass
