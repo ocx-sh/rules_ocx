@@ -10,6 +10,7 @@ load(
     ":repo_utils.bzl",
     "CONFIG_ATTRS",
     "EAGER_LAZY_MODE",
+    "POLICY_ATTRS",
     "bat_value",
     "check_bin_names",
     "decode_json",
@@ -28,6 +29,27 @@ load(
 )
 
 visibility(["//ocx", "//ocx/tests"])
+
+def install_args(json_pkg, platform_arg, allow_unverified, pkg):
+    """The argv for `ocx package install` (pure).
+
+    The one command rules_ocx runs that takes `--no-verify`, and the flag
+    outranks OCX_NO_VERIFY in ocx's own ladder — so a loosened policy says it
+    twice, in the environment and on the argv. It sits after the platform
+    selector and before the reference: a flag placed after the positional
+    would be read as part of it.
+
+    Args:
+        json_pkg: `root_flags + ["--format", "json", "package"]`.
+        platform_arg: `["-p", <platform>]`, or `[]` for the host.
+        allow_unverified: resolved ocx.policy() `allow_unverified`.
+        pkg: the (possibly pinned) package reference to install.
+
+    Returns:
+        argv list, after the ocx binary.
+    """
+    verify = ["--no-verify"] if allow_unverified else []
+    return json_pkg + ["install"] + platform_arg + verify + [pkg]
 
 def _lazy_package(ctx, host, pkg):
     """Renders text-only launchers deferring `ocx package install` to first use.
@@ -167,7 +189,7 @@ def _ocx_package_repo_impl(ctx):
     stdout = run_ocx(
         ctx,
         binary,
-        json_pkg + ["install"] + platform_arg + [pkg],
+        install_args(json_pkg, platform_arg, ctx.attr.allow_unverified, pkg),
         ocx_env.env,
         "installing " + pkg,
         host.is_windows,
@@ -203,9 +225,9 @@ def _ocx_package_repo_impl(ctx):
     root = answer["path"] if type(answer) == "dict" and type(answer.get("path")) == "string" else None
     if root == None or not is_absolute_path(root, host.is_windows):
         fail(("rules_ocx: ocx package which reported '{}' for '{}', not an absolute store " +
-              "path — the pinned ocx CLI and rules_ocx disagree on the report shape. Move " +
-              "DEFAULT_OCX_VERSION (ocx/private/versions.bzl) to an ocx release this " +
-              "rules_ocx parses, or upgrade rules_ocx.").format(answer, pkg))
+              "path — the pinned ocx CLI and rules_ocx disagree on the report shape. Upgrade " +
+              "rules_ocx (it pins the ocx version), or pin an ocx release this rules_ocx " +
+              "parses with ocx.download(version = '…') in MODULE.bazel.").format(answer, pkg))
 
     # The whole reason ocx discriminates the two: a `shim` root holds `bin/`
     # launchers and no `content/`, so symlinking it would dangle. EAGER_LAZY_MODE
@@ -296,7 +318,7 @@ With `bins`, provisioning is lazy: nothing is installed at fetch time, and
 each named executable becomes a launcher re-entering `ocx package exec` —
 content materializes on first execution and never becomes a Bazel action
 input (`//:content` is not available in lazy mode).""",
-    attrs = CONFIG_ATTRS | {
+    attrs = CONFIG_ATTRS | POLICY_ATTRS | {
         "bins": attr.string_list(
             doc = "Lazy provisioning: names of the executables to expose (not " +
                   "validated at fetch time). When set, nothing is installed during " +
@@ -313,7 +335,12 @@ input (`//:content` is not available in lazy mode).""",
         ),
         "isolated_home": attr.bool(
             default = False,
-            doc = "Keep the ocx store inside this repository instead of the shared user OCX_HOME.",
+            doc = "Keep the ocx store inside this repository instead of the shared user " +
+                  "OCX_HOME. It also relocates OCX_HOME, so ocx's " +
+                  "`~/.ocx/sigstore/trusted-root.json` rung is not found there — with a " +
+                  "trust policy configured, trusted-root resolution falls through to the " +
+                  "Rekor trust-root cache and then a live TUF fetch; offline it stops at the " +
+                  "cache and fails outright, as ocx ships no embedded root.",
         ),
         "ocx": attr.label(
             default = "@ocx_tool//:ocx",

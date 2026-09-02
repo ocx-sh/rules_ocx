@@ -10,6 +10,8 @@ Manifest schema (flat rows, schema 1):
 
 visibility(["//ocx", "//ocx/tests"])
 
+_HEX_DIGITS = "0123456789abcdef"
+
 def select_release(manifest, version, target):
     """Finds the manifest row for an exact version and target triple.
 
@@ -46,6 +48,34 @@ def archive_type(filename):
     if filename.endswith(".tar.gz"):
         return "tar.gz"
     return "tar.xz"
+
+def manifest_sha256(url):
+    """Extracts a self-verifying sha256 from a dist.json manifest URL.
+
+    A manifest whose name carries its own digest can be enforced on the
+    fetch itself instead of trusting the transport; the official www-setup
+    installers write that name as `dist/<sha256>.json` (mirrors
+    `dist_pin_digest`). Only the URL's last path segment is read, after a
+    `#` fragment and a `?` query are cut: it must be 64 lowercase hex
+    characters followed by ".json". Any other name is not a parse error —
+    it means the manifest isn't self-verifying, so the caller falls back to
+    an unverified fetch.
+
+    Args:
+        url: value of OCX_INSTALL_DIST_URL.
+
+    Returns:
+        The 64-character lowercase-hex digest, or "" when the URL's last
+        segment is not a <sha256>.json manifest name.
+    """
+    segment = url.split("#")[0].split("?")[0].split("/")[-1]
+    if len(segment) != 69 or not segment.endswith(".json"):
+        return ""
+    digest = segment[:64]
+    for char in digest.elems():
+        if char not in _HEX_DIGITS:
+            return ""
+    return digest
 
 def artifact_url(row, mirror_url):
     """Resolves the download URL for a release row, honoring a mirror.

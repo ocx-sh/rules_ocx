@@ -8,8 +8,9 @@ Downloads the release archive listed in the vendored dist.json snapshot
 setup.ocx.sh installer. Binary-only placement — never runs `ocx self setup`.
 """
 
-load(":manifest.bzl", "archive_type", "artifact_url", "select_release")
+load(":manifest.bzl", "archive_type", "artifact_url", "manifest_sha256", "select_release")
 load(":platforms.bzl", "host_info")
+load(":versions.bzl", "MIN_OCX_VERSION", "min_version_error")
 
 visibility(["//ocx", "//ocx/tests"])
 
@@ -25,12 +26,16 @@ filegroup(
 """
 
 def _ocx_download_impl(ctx):
+    err = min_version_error(ctx.attr.version)
+    if err:
+        fail(err)
+
     host = host_info(ctx.os.name, ctx.os.arch)
     triple = ctx.attr.triple or host.triple
 
     dist_url = ctx.getenv("OCX_INSTALL_DIST_URL")
     if dist_url:
-        ctx.download(dist_url, "dist.json")
+        ctx.download(dist_url, "dist.json", sha256 = manifest_sha256(dist_url))
         manifest = json.decode(ctx.read("dist.json"))
     else:
         manifest = json.decode(ctx.read(ctx.attr.dist_manifest))
@@ -61,7 +66,17 @@ The release row (URL + sha256) comes from the vendored `dist.json` snapshot
 of `https://setup.ocx.sh/dist.json`. Corporate mirrors: set
 `OCX_INSTALL_DIST_URL` to fetch a mirrored manifest instead, and/or
 `OCX_INSTALL_MIRROR_URL` to rewrite the artifact download to
-`<mirror>/<tag>/<filename>`. The manifest sha256 is enforced either way.""",
+`<mirror>/<tag>/<filename>`. The artifact sha256 is enforced either way.
+
+A mirrored manifest is itself verified when it is named `<sha256>.json`
+(the form the official setup.ocx.sh installers write, as
+`dist/<sha256>.json`) — the name carries the manifest's own digest, which
+is then enforced on the fetch. Any other manifest name is fetched
+unverified: the transport to the mirror is then all that stands behind the
+rows it serves, sha256 included.
+
+`version` must be {} or newer: rules_ocx drives `ocx exec` and
+`--no-verify`, neither of which exists on older releases.""".format(MIN_OCX_VERSION),
     attrs = {
         "dist_manifest": attr.label(
             default = "//dist:dist.json",
@@ -75,7 +90,8 @@ of `https://setup.ocx.sh/dist.json`. Corporate mirrors: set
         ),
         "version": attr.string(
             mandatory = True,
-            doc = "Exact ocx version to download, e.g. '0.3.10'.",
+            doc = "Exact ocx version to download, e.g. '0.6.0'. Must be " +
+                  "{} or newer.".format(MIN_OCX_VERSION),
         ),
     },
 )

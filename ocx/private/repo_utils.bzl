@@ -9,38 +9,91 @@ env-file rendering) is one, so tests/ can cover it without a repository_ctx.
 
 visibility(["//ocx", "//ocx/tests"])
 
-# Env vars forwarded verbatim to every ocx invocation. getenv() registers
-# them with Bazel, so changing one invalidates the fetched repos.
-# OCX_AUTH_<REGISTRY>_* cannot be enumerated here — document `bazel fetch
-# --force` after credential changes.
-OCX_PASSTHROUGH_ENV = [
-    "OCX_MIRRORS",
-    "OCX_INSECURE_REGISTRIES",
-    "OCX_OFFLINE",
-    "OCX_FROZEN",
-    "OCX_REMOTE",
-    "OCX_JOBS",
-    "OCX_INDEX",
-    "OCX_DEFAULT_REGISTRY",
-    "OCX_CONFIG",
-    "OCX_NO_CONFIG",
-    "OCX_MANAGED_CONFIG",
-    "OCX_ALLOW_YANKED",
-    "OCX_PATCHES",
-    "OCX_PATCH_SNAPSHOT",
-]
+def _env(cls, attr = "", path = False, value = "", hermetic = False, file_url = False):
+    """One row of OCX_ENV_CLASSES.
 
-# Ambient values that would break an invocation rather than steer it: --global
-# refuses to combine with the explicit --project every call here passes, and
-# --quiet suppresses the very JSON report the parse surface reads (empty stdout,
-# exit 0). OCX_PROJECT is a path, and empty is its documented "unset"; the other
-# two are BooleanStrings, which have no empty spelling — "0" neutralizes them
-# without the "invalid boolean value" warning "" logs on every invocation.
+    Args:
+        cls: "site" (ambient, forwarded verbatim) | "translucent" (ambient,
+            overridable by `attr`) | "explicit" (never ambient — only ever
+            set from a resolved ocx.policy() attr) | "pinned" (fixed `value`
+            on every invocation, never read from the ambient environment).
+        attr: the CONFIG_ATTRS/POLICY_ATTRS name that overrides this key, if any.
+        path: whether the row is a filesystem path — only a "translucent" row
+            may set this, and it is what tells make_ocx_env() to ctx.watch() it.
+        value: the fixed value of a "pinned" row.
+        hermetic: whether no_config blanks this key when its ambient value
+            would otherwise survive.
+        file_url: whether ocx parses this row's value as a file reference, so a
+            `file://` spelling is a path to it — only a `path` row may set this.
+
+    Returns:
+        struct(cls, attr, path, value, hermetic, file_url).
+    """
+    return struct(cls = cls, attr = attr, path = path, value = value, hermetic = hermetic, file_url = file_url)
+
+# The classified env-var table (C-001): every OCX_* key any repository rule
+# here ever sets or forwards, one row each, in insertion order. make_ocx_env(),
+# stage_lazy_config() and render_lazy_launcher() all read it, so a new ocx
+# variable is one row plus its class rather than three places that can
+# disagree. One exception: stage_lazy_config() still hand-writes the staged
+# filename of each `path` row, so a fourth staged file is two edits.
 #
-# OCX_ENV — 0.5.8's forwarded entry payload — is deliberately absent: ocx
-# strips an inherited one itself on every compose, and its decoder refuses
-# `OCX_*` keys outright, so there is nothing here left to close.
-_OCX_NEUTRALIZED_ENV = {"OCX_PROJECT": "", "OCX_GLOBAL": "0", "OCX_QUIET": "0"}
+# OCX_ENV — ocx's forwarded entry payload — is deliberately absent: ocx strips
+# an inherited one itself on every compose, and its decoder refuses `OCX_*`
+# keys outright, so there is nothing here left to close. OCX_HOME is likewise
+# absent: it is resolved from the host and `isolated_home`, never forwarded.
+OCX_ENV_CLASSES = {
+    # site: forwarded verbatim from the ambient environment. getenv() is what
+    # registers them with Bazel, so changing one invalidates the fetched repos.
+    # OCX_AUTH_<REGISTRY>_* cannot be enumerated here — document `bazel fetch
+    # --force` after credential changes.
+    "OCX_MIRRORS": _env("site"),
+    "OCX_INSECURE_REGISTRIES": _env("site"),
+    "OCX_OFFLINE": _env("site"),
+    "OCX_FROZEN": _env("site"),
+    "OCX_REMOTE": _env("site"),
+    "OCX_JOBS": _env("site"),
+    "OCX_INDEX": _env("site"),
+    "OCX_DEFAULT_REGISTRY": _env("site"),
+    "OCX_MANAGED_CONFIG": _env("site"),
+    "OCX_PATCHES": _env("site", hermetic = True),
+    # translucent: ambient value forwarded, but a rule attr overrides it and
+    # no_config blanks the hermetic ones.
+    "OCX_CONFIG": _env("translucent", attr = "config", path = True, hermetic = True),
+    "OCX_PATCH_SNAPSHOT": _env("translucent", attr = "patch_snapshot", path = True, hermetic = True),
+    "OCX_SIGSTORE_TRUSTED_ROOT": _env("translucent", attr = "sigstore_trusted_root", path = True, file_url = True),
+    "OCX_NO_CONFIG": _env("translucent", attr = "no_config"),
+    # explicit: the build's weakening posture — never read from the ambient
+    # environment (an inherited OCX_NO_VERIFY/OCX_ALLOW_YANKED must not
+    # silently weaken a build), only ever set from a resolved ocx.policy() tag.
+    "OCX_NO_VERIFY": _env("explicit", attr = "allow_unverified"),
+    "OCX_ALLOW_YANKED": _env("explicit", attr = "allow_yanked"),
+    # pinned: a fixed value on every invocation. --global refuses to combine
+    # with the explicit --project every call here passes, and --quiet
+    # suppresses the very JSON report the parse surface reads (empty stdout,
+    # exit 0). OCX_PROJECT is a path, and empty is its documented "unset"; the
+    # BooleanStrings have no empty spelling — "0"/"1" neutralize them without
+    # the "invalid boolean value" warning "" logs on every invocation.
+    "OCX_PROJECT": _env("pinned", value = ""),
+    "OCX_GLOBAL": _env("pinned", value = "0"),
+    "OCX_QUIET": _env("pinned", value = "0"),
+    "OCX_NO_PROJECT": _env("pinned", value = "1"),
+    "OCX_NO_CONFIG_REFRESH": _env("pinned", value = "1"),
+}
+
+# The one pinned row a lazy launcher does not re-export (C-011).
+_LAZY_UNPINNED = "OCX_QUIET"
+
+def _rows(cls):
+    """The env keys of one OCX_ENV_CLASSES class, in table order.
+
+    Args:
+        cls: the class name ("site", "translucent", "explicit", "pinned").
+
+    Returns:
+        list of env var names.
+    """
+    return [key for key, row in OCX_ENV_CLASSES.items() if row.cls == cls]
 
 # Refuses ocx's own lazy composition on every eager code path. `ocx pull` writes
 # a shim tree instead of content when the lazy ladder resolves to `always`, and
@@ -55,13 +108,14 @@ _OCX_NEUTRALIZED_ENV = {"OCX_PROJECT": "", "OCX_GLOBAL": "0", "OCX_QUIET": "0"}
 # `never`: setting it there changes nothing, and a project's own ocx.toml
 # outranks it. Only the CLI tier wins.
 #
-# Accepted by exactly the seven composing commands — `env`, `run`, `pull`,
+# Accepted by exactly the seven composing commands — `env`, `exec`, `pull`,
 # `direnv export`, `package env`, `package exec`, `package which`. `package
 # install` and `package select` always materialize and *reject* it (exit 64),
 # and `inspect --closure` never composes, so none of the three takes it.
 #
-# The lazy `bins` tiers need it nowhere: their launchers re-enter `ocx run` at
-# execution time, which is where deferring content is the whole point.
+# The lazy `bins` tiers need it nowhere: their launchers re-enter `ocx exec` /
+# `ocx package exec` at execution time, which is where deferring content is
+# the whole point.
 EAGER_LAZY_MODE = ["--lazy-mode", "never"]
 
 SYSEXIT_HINTS = {
@@ -99,6 +153,35 @@ SYSEXIT_HINTS = {
     # `ocx self setup` refusing to overwrite a hand-edited managed shell block,
     # and no repository rule ever runs either command — a hint here would be
     # dead code.
+    #
+    # 83/85 (0.6.0): raised only inside `maybe_auto_verify`, the gate an
+    # operator [[trust.policy]] attaches to a materializing fetch. Its one
+    # production caller is `setup_impl` (ocx pull.rs), so of the eight commands
+    # these rules run it is reachable from the project tier's `pull` and `env`
+    # and from `package install` and `package env` — never from `lock --check`,
+    # `package which` or either `inspect --closure`, none of which materializes.
+    #
+    # 84 is mapped for the contract, not because 0.6.0 can raise it here: the
+    # verify path folds ClientError::ReferrersUnsupported into
+    # NoSignaturesFound (79) and ocx's own comment calls 84 "write-path only",
+    # which no repo rule reaches. Kept so a future ocx that classifies it on a
+    # read fails with a route rather than a bare exit code.
+    #
+    # None of the three is retried — a transparency log that is down stays down
+    # for longer than three registry round-trips (S-006), and 85 is
+    # deterministic; revisit after the first flaky-CI report.
+    83: ("the transparency log is unreachable — a signature could not be verified against " +
+         "Rekor; retry once it is back, check network access to the log, or accept " +
+         "unverified content with ocx.policy(allow_unverified = True) in MODULE.bazel"),
+    84: ("the registry does not support the OCI Referrers API, so ocx cannot discover the " +
+         "signatures the operator's [[trust.policy]] requires — publish through a registry " +
+         "that implements it, route around it with OCX_MIRRORS, or opt out with " +
+         "ocx.policy(allow_unverified = True) in MODULE.bazel"),
+    85: ("unsupported signing key backend — the key reference in the operator's [trust] " +
+         "configuration names a backend this ocx recognizes but does not implement " +
+         "(awskms:// and the like); it never clears on retry — point that configuration at " +
+         "a backend this ocx implements, or upgrade rules_ocx (it pins the ocx version) to " +
+         "one pinning an ocx that implements it"),
 }
 
 # Extra attempts granted to a sysexit 75 even when the caller asked for none.
@@ -143,7 +226,7 @@ def valid_bin_name(name):
     The name reaches three sinks unescaped — `native_binary(name = "…")` in a
     generated BUILD file, a launcher's shell text, and the `launchers/<name>`
     path written for it — so one charset covers all three. A leading `-` is
-    refused because the name is also passed as an argv word (`ocx run -- …`),
+    refused because the name is also passed as an argv word (`ocx exec -- …`),
     and `.`/`..` because it is a path component, though both are made of
     admitted characters.
 
@@ -239,10 +322,10 @@ def truthy(value):
     false. An unrecognized value (neither the truthy set nor one of ocx's
     falsy strings) is not an error on this path: `env::flag()` logs "has
     invalid boolean value" and falls back to the flag's default, which is
-    false for every flag read here — the same warning `_OCX_NEUTRALIZED_ENV`
-    above avoids by passing "0" rather than "". Returning False therefore
-    matches what ocx itself does with the value, which still reaches the real
-    invocation. (`InvalidBooleanString` (exit 65) is the config-file path,
+    false for every flag read here — the same warning the pinned rows of
+    OCX_ENV_CLASSES avoid by carrying "0" rather than "". Returning False
+    therefore matches what ocx itself does with the value, which still reaches
+    the real invocation. (`InvalidBooleanString` (exit 65) is the config-file path,
     not the env one.)
 
     Args:
@@ -304,9 +387,12 @@ def ambient_config_paths(is_windows, is_macos, env, home):
     sep = "\\" if is_windows else "/"
     paths = []
     if not is_windows:
-        # ponytail: ocx reads the literal /etc/ocx/config.toml on every OS, but
-        # a Windows host has no /etc — skip the tier instead of watching a path
-        # that can never exist there.
+        # ponytail: ocx reads the literal /etc/ocx/config.toml on every OS —
+        # Rust resolves it drive-relative on Windows, so C:\etc\ocx\config.toml
+        # is a real (system-locked, non-overridable) tier there. It is skipped
+        # anyway: "/etc/..." is not absolute for a Windows host, so ctx.watch()
+        # cannot take it as spelled, and the drive it lands on is not knowable
+        # here. Documented gap — on Windows, editing that file does not refetch.
         paths.append("/etc/ocx/config.toml")
 
     config_home = ""
@@ -367,6 +453,153 @@ CONFIG_ATTRS = {
     ),
 }
 
+# The resolved-policy attr schema (C-004): splatted next to CONFIG_ATTRS by
+# every ocx_project_repo/ocx_package_repo, and by the ocx.policy() tag class in
+# extensions.bzl so one wording serves both. Normally threaded from that single
+# root-only tag via resolve_policy() + policy_kwargs(); set directly on the
+# public rules it bypasses the root-only guard, which governs the tag alone.
+POLICY_ATTRS = {
+    "allow_unverified": attr.bool(
+        default = False,
+        doc = "When true, sets OCX_NO_VERIFY=1 for every invocation and passes `--no-verify` " +
+              "to `ocx package install`. When false, OCX_NO_VERIFY=0 is written anyway, so an " +
+              "ambient value cannot switch verification off. It cannot switch verification " +
+              "*on*: ocx attaches that only under an operator-configured `[[trust.policy]]`, " +
+              "so this attr can only decline to disable it — and `no_config = True` prunes " +
+              "the discovered tiers that policy lives in, so there is then nothing to " +
+              "decline and verification is off either way.",
+    ),
+    "allow_yanked": attr.bool(
+        default = False,
+        doc = "Whether resolution may fall back to a yanked release — sets " +
+              "OCX_ALLOW_YANKED for every invocation.",
+    ),
+    "sigstore_trusted_root": attr.label(
+        allow_single_file = True,
+        doc = "A sigstore trusted-root.json pinned in-tree. Sets OCX_SIGSTORE_TRUSTED_ROOT " +
+              "for every invocation, overriding the ambient " +
+              "`<OCX_HOME>/sigstore/trusted-root.json` rung, and the file is watched. Under " +
+              "lazy provisioning (`bins` on `ocx.project`/`ocx.package`) it is copied into " +
+              "the repository and uploaded as an input with every action.",
+    ),
+}
+
+# resolve_policy() errors (C-005). Held in constants so a guard test can
+# assert on the fragment without spelling it at its own call site
+# (.claude/rules/starlark.md).
+POLICY_NON_ROOT_MSG = "rules_ocx: ocx.policy() may only be used by the root module (used by '{}')"
+POLICY_DUPLICATE_MSG = "rules_ocx: at most one ocx.policy() tag is allowed"
+
+# What every resolve_policy() answer carries when no tag decided it: the
+# no-tag case and both error cases. Spelled once so a fourth policy attr is
+# one edit rather than three that can disagree.
+_NO_POLICY = {"allow_unverified": False, "allow_yanked": False, "sigstore_trusted_root": None}
+
+def resolve_policy(instances):
+    """Reduces every ocx.policy() tag instance in the module graph to one triple.
+
+    Root-only and at most one: a dependency that loosened the graph's trust
+    posture would decide what the *workspace* installs, and a second tag is two
+    answers to a one-answer question. Both are reported rather than silently
+    dropped — the ecosystem majority ignores a non-root customization tag, but
+    for a security surface a loud stop beats a quiet drop (ADR 0001), and it
+    matches the sibling `download`/`project` tags in this same extension.
+
+    Pure, like resolve_platforms(): the error is returned, not raised, so the
+    extension impl fail()s at one place before declaring any repository.
+
+    Args:
+        instances: list of struct(module, is_root, allow_unverified, allow_yanked,
+            sigstore_trusted_root) — one per `ocx.policy()` tag over every module.
+
+    Returns:
+        struct(error, allow_unverified, allow_yanked, sigstore_trusted_root).
+        A non-empty `error` (POLICY_NON_ROOT_MSG or POLICY_DUPLICATE_MSG) means
+        the caller must fail() before declaring any repo.
+    """
+    resolved = struct(error = "", **_NO_POLICY)
+    for i, tag in enumerate(instances):
+        if not tag.is_root:
+            return struct(error = POLICY_NON_ROOT_MSG.format(tag.module), **_NO_POLICY)
+        if i > 0:
+            return struct(error = POLICY_DUPLICATE_MSG, **_NO_POLICY)
+        resolved = struct(
+            error = "",
+            allow_unverified = tag.allow_unverified,
+            allow_yanked = tag.allow_yanked,
+            sigstore_trusted_root = tag.sigstore_trusted_root,
+        )
+    return resolved
+
+def policy_kwargs(policy):
+    """The resolved policy as the POLICY_ATTRS kwargs a repo rule declares.
+
+    Splatted at every ocx_project_repo/ocx_package_repo call site, so a fourth
+    policy attr is one row in POLICY_ATTRS plus one field here rather than
+    three hand-written kwarg lists that can disagree — and a dropped kwarg
+    would fall back to the same `False` the default carries, i.e. be invisible.
+
+    Args:
+        policy: the resolve_policy() struct.
+
+    Returns:
+        {POLICY_ATTRS key: resolved value}.
+    """
+    return {key: getattr(policy, key) for key in POLICY_ATTRS}
+
+def policy_exports(allow_unverified, allow_yanked):
+    """The OCX_NO_VERIFY/OCX_ALLOW_YANKED pair a resolved policy exports.
+
+    Both keys are always present, and that presence is the neutralization: the
+    two variables are `explicit` rows, never read from the ambient environment,
+    so writing "0" is what shadows an OCX_NO_VERIFY exported three layers up in
+    a CI image.
+
+    Args:
+        allow_unverified: resolved ocx.policy() `allow_unverified`.
+        allow_yanked: resolved ocx.policy() `allow_yanked`.
+
+    Returns:
+        {"OCX_NO_VERIFY": "0"|"1", "OCX_ALLOW_YANKED": "0"|"1"} — both keys
+        always present, which is the neutralization of any ambient value.
+    """
+    return {
+        "OCX_NO_VERIFY": "1" if allow_unverified else "0",
+        "OCX_ALLOW_YANKED": "1" if allow_yanked else "0",
+    }
+
+def sigstore_trust_root_path(home, is_windows):
+    """The ambient sigstore trusted-root path under a resolved OCX_HOME.
+
+    ocx's rung-4 convention in its trusted-root ladder, watched so that
+    dropping a root in (or editing one) refetches the repos that verified
+    against it. Hand-constructed like ambient_config_paths(): ocx has no
+    read-only command reporting the path, so the layout is hard-coded and the
+    watch fails *open* — relocate the directory upstream and it silently covers
+    nothing. Re-verified on every ocx bump (the `update-dist` skill).
+
+    Args:
+        home: the resolved OCX_HOME, or "" (isolated_home drops this tier).
+        is_windows: host flag (path separator).
+
+    Returns:
+        the absolute path string, or None when `home` is falsy.
+    """
+    if not home:
+        return None
+    return ("\\" if is_windows else "/").join([home, "sigstore", "trusted-root.json"])
+
+# A translucent `path` row names a file ocx opens *and* Bazel has to watch, and
+# ctx.watch() takes absolute paths only. A relative ambient value would be
+# forwarded and silently left unwatched, so it is refused rather than
+# half-honoured — same reasoning as the OCX_HOME guard below. The message names
+# the row's own attr: OCX_SIGSTORE_TRUSTED_ROOT's lives on ocx.policy(), not on
+# the ocx.project()/ocx.package() tag the other two belong to.
+RELATIVE_ENV_PATH_MSG = ("rules_ocx: {} must be an absolute path, got '{}' — a repository rule runs " +
+                         "from Bazel's own working directory, so a relative value names a different " +
+                         "file than it does in your shell and Bazel cannot watch it. Export an " +
+                         "absolute path, or set the `{}` attr.")
+
 def make_ocx_env(ctx, host, isolated_home):
     """Assembles the environment for ocx invocations from this repo rule.
 
@@ -374,8 +607,15 @@ def make_ocx_env(ctx, host, isolated_home):
     site config edit — including an `ocx config update` refreshing the managed
     snapshot — refetches the repos that consumed it.
 
+    Every key comes from OCX_ENV_CLASSES: `pinned` rows are written first,
+    `site` and `translucent` rows are read with ctx.getenv() (which is what
+    registers them with Bazel), `translucent` rows are then overridden by their
+    attr, and the `explicit` pair is written last from the resolved
+    ocx.policy(). The weakening knobs are never read from the environment at
+    all — an exported OCX_NO_VERIFY must not decide what this build verifies.
+
     Args:
-        ctx: repository_ctx with `config`, `no_config` and `patch_snapshot` attrs.
+        ctx: repository_ctx with the CONFIG_ATTRS and POLICY_ATTRS attrs.
         host: host_info() struct.
         isolated_home: if True, keep the ocx store inside this repository
             instead of the shared user OCX_HOME.
@@ -402,7 +642,7 @@ def make_ocx_env(ctx, host, isolated_home):
               "store. Export an expanded path (OCX_HOME=\"$HOME/.ocx\", not OCX_HOME='~/.ocx'), " +
               "or set isolated_home = True to keep the store inside the repository.").format(home))
 
-    # `ocx run` exports OCX_PROJECT (possibly relative) into child processes;
+    # `ocx exec` exports OCX_PROJECT (possibly relative) into child processes;
     # a bazel invoked that way would leak it into every repo-rule ocx call,
     # which runs from a different cwd. Project context only ever comes from
     # explicit --project flags here, so neutralize it — along with the other
@@ -411,41 +651,72 @@ def make_ocx_env(ctx, host, isolated_home):
     # OCX_NO_CONFIG_REFRESH: the background managed-config refresh wants a TTY
     # no repo rule ever has. Pinned off explicitly rather than trusting ocx's
     # TTY probe — the CLI is version-unstable (invariant 2).
-    env = {"OCX_HOME": home, "OCX_NO_CONFIG_REFRESH": "1"}
-    env.update(_OCX_NEUTRALIZED_ENV)
-    for key in OCX_PASSTHROUGH_ENV:
+    env = {"OCX_HOME": home}
+    for key in _rows("pinned"):
+        env[key] = OCX_ENV_CLASSES[key].value
+    for key in _rows("site") + _rows("translucent"):
         value = ctx.getenv(key)
         if value != None:
             env[key] = value
 
-    # These name files ocx reads that Bazel would otherwise never see, so
-    # editing an ambient site config would not refetch. Watched only where the
-    # ambient value survives: an attr override replaces it (and ctx.path()
-    # registers that file below), and no_config blanks both. OCX_PATCHES is
-    # deliberately absent: it carries a JSON `[patches]` envelope, not a path.
-    for key, override in [("OCX_CONFIG", ctx.attr.config), ("OCX_PATCH_SNAPSHOT", ctx.attr.patch_snapshot)]:
-        value = env.get(key, "")
-        if override or ctx.attr.no_config or not value:
-            continue
-        if is_absolute_path(value, host.is_windows):
-            ctx.watch(value)
-
-    # Attrs beat the ambient environment.
+    # OCX_NO_CONFIG only prunes the *discovered* tiers: ocx loads an explicit
+    # OCX_CONFIG regardless, and with the config tier gone an ambient
+    # OCX_PATCHES becomes the *only* patch source — attacker-chosen companions
+    # composed into a build that asked for hermeticity. Empty is ocx's
+    # documented "treat as unset" for all three; the attrs below then reinstate
+    # whatever the caller did ask for. A trusted root is not a config tier, so
+    # it carries no `hermetic` flag and survives.
     if ctx.attr.no_config:
-        env["OCX_NO_CONFIG"] = "1"
+        for key, row in OCX_ENV_CLASSES.items():
+            if row.hermetic:
+                env[key] = ""
 
-        # OCX_NO_CONFIG only prunes the *discovered* tiers: ocx loads an
-        # explicit OCX_CONFIG regardless, and with the config tier gone an
-        # ambient OCX_PATCHES becomes the *only* patch source — attacker-chosen
-        # companions composed into a build that asked for hermeticity. Empty is
-        # ocx's documented "treat as unset" for all three; the attrs below then
-        # reinstate whatever the caller did ask for.
-        for key in ["OCX_CONFIG", "OCX_PATCHES", "OCX_PATCH_SNAPSHOT"]:
-            env[key] = ""
-    if ctx.attr.config:
-        env["OCX_CONFIG"] = str(ctx.path(ctx.attr.config))
-    if ctx.attr.patch_snapshot:
-        env["OCX_PATCH_SNAPSHOT"] = str(ctx.path(ctx.attr.patch_snapshot))
+    # Attrs beat the ambient environment: a bool row is only ever turned on
+    # (its "off" is the ambient answer), a path row becomes the resolved file,
+    # and ctx.path() is what registers that file with Bazel. A surviving
+    # ambient path row is watched instead — it names a file ocx reads that
+    # Bazel would otherwise never see, so editing an ambient site config would
+    # not refetch, and a relative one that cannot be watched is refused rather
+    # than forwarded unwatched. A row the block above blanked is "" and is
+    # skipped by the emptiness test, which is the whole of the no_config case.
+    # OCX_PATCHES is deliberately not a path row: it carries a JSON
+    # `[patches]` envelope, not a filename.
+    for key in _rows("translucent"):
+        row = OCX_ENV_CLASSES[key]
+        override = getattr(ctx.attr, row.attr)
+        if override:
+            env[key] = str(ctx.path(override)) if row.path else "1"
+        elif row.path and env.get(key, ""):
+            # A `file://` value on a `file_url` row is not a path to test or
+            # watch: ocx reads OCX_SIGSTORE_TRUSTED_ROOT through
+            # FileReference::parse, which consumes a case-insensitive `file://`
+            # prefix at exactly this door (ocx-sh/ocx#379). Forwarded verbatim
+            # and left unwatched — the watch fails open there, which beats
+            # refusing a value ocx honours. Scoped to that row and that scheme
+            # because nothing else has the grammar: the other two `path` rows
+            # are a plain PathBuf::from, and every other scheme (`https://`, a
+            # bare `foo://`) is a literal relative filename to ocx — those keep
+            # the refusal below and fail closed. A relative `file://x` is the
+            # one value still forwarded unwatched; ocx reads it as `x` and
+            # errors loudly (exit 74) when it is not there.
+            if not (row.file_url and env[key].lower().startswith("file://")):
+                if not is_absolute_path(env[key], host.is_windows):
+                    fail(RELATIVE_ENV_PATH_MSG.format(key, env[key], row.attr))
+                ctx.watch(env[key])
+
+    # The weakening pair, written last and unconditionally: these two rows are
+    # never read from the environment, so this is the only thing that decides
+    # them — and their presence shadows whatever the CI image exported.
+    env.update(policy_exports(ctx.attr.allow_unverified, ctx.attr.allow_yanked))
+
+    # Outside the no_config gate: with no_config plus a `config` label carrying
+    # [[trust.policy]], ocx still reads the OCX_HOME trusted-root rung, so
+    # Bazel has to invalidate on it. isolated_home drops the tier the same way
+    # it drops the OCX_HOME config tiers — the store lives inside the
+    # repository being fetched, which cannot be watched.
+    trust_root = sigstore_trust_root_path("" if isolated_home else home, host.is_windows)
+    if trust_root:
+        ctx.watch(trust_root)
 
     if not ctx.attr.no_config and not truthy(ctx.getenv("OCX_NO_CONFIG")):
         for path in ambient_config_paths(
@@ -571,9 +842,11 @@ def closure_packages(stdout, what):
     empty claim. What is not guarded is `name` inside their elements: both
     are `BinaryAttribution`, whose `name` is a non-`Option` `String`, so it
     is always serialized, and a drift there would still traceback.
-    The fail() names DEFAULT_OCX_VERSION per invariant 4:
-    this is a shape drift between the pinned ocx and what rules_ocx parses,
-    not a mapped sysexit.
+    The fail() names the pin to move per invariant 4: this is a shape drift
+    between the pinned ocx and what rules_ocx parses, not a mapped sysexit.
+    It says so in the consumer's terms — rules_ocx is what pins ocx, so a
+    consumer upgrades the ruleset or pins ocx.download(version = …), never the
+    private DEFAULT_OCX_VERSION.
 
     `install`/`which` reports never reach this function — their top-level
     shape is `{"<raw>": {...}}`, not this report's `{"packages": [...],
@@ -601,14 +874,15 @@ def closure_packages(stdout, what):
         interface = _as_dict(_as_dict(_as_dict(pkg.get("closure")).get("surface")).get("interface"))
         if (type(interface.get("binaries")) != "list" or
             type(interface.get("entrypoints")) != "list" or
-            "binaries_complete" not in interface or
+            type(interface.get("binaries_complete")) != "bool" or
             "identifier" not in pkg):
             drift = "'{}' with no closure surface".format(pkg.get("identifier", "<unnamed package>"))
             break
     if drift:
         fail(("rules_ocx: {} reported {} — the pinned ocx CLI and rules_ocx disagree on the " +
-              "report shape. Move DEFAULT_OCX_VERSION (ocx/private/versions.bzl) to an ocx " +
-              "release this rules_ocx parses, or upgrade rules_ocx.").format(what, drift))
+              "report shape. Upgrade rules_ocx (it pins the ocx version), or pin an ocx " +
+              "release this rules_ocx parses with ocx.download(version = '…') in " +
+              "MODULE.bazel.").format(what, drift))
     return packages
 
 def list_executables(ctx, directory, is_windows):
@@ -865,8 +1139,16 @@ def stage_lazy_config(ctx, is_windows):
     into the repo makes them runfiles — action inputs, so an edit re-keys the
     actions — and `ctx.read` registers the watch that refetches the repo.
 
+    The weakening pair is exported unconditionally: the action environment is
+    the executor's, so an OCX_NO_VERIFY set there would otherwise decide what
+    the deferred fetch verifies — the same hole the fetch path closes, one
+    process later. A *translucent* row with no attr is deliberately not
+    exported, so the executor's own site environment stays authoritative;
+    baking this machine's ambient answer into every action key would be the
+    opposite of what host-authoritative config means.
+
     Args:
-        ctx: repository_ctx with `config`, `no_config` and `patch_snapshot` attrs.
+        ctx: repository_ctx with the CONFIG_ATTRS and POLICY_ATTRS attrs.
         is_windows: host flag; Windows launchers bake absolute paths, POSIX
             ones resolve through runfiles.
 
@@ -874,21 +1156,24 @@ def stage_lazy_config(ctx, is_windows):
         struct(exports = {env var: value} for render_lazy_launcher,
         data = label strings to attach to every launcher).
     """
-    exports = {}
+    exports = policy_exports(ctx.attr.allow_unverified, ctx.attr.allow_yanked)
     data = []
     if ctx.attr.no_config:
         exports["OCX_NO_CONFIG"] = "1"
 
         # OCX_NO_CONFIG prunes only the discovered tiers — the same ambient
-        # OCX_CONFIG / OCX_PATCHES / OCX_PATCH_SNAPSHOT that make_ocx_env()
-        # blanks at fetch time would otherwise be inherited from the action's
-        # environment here. Empty is ocx's "treat as unset"; a set attr
-        # overwrites the entry below.
-        for var in ["OCX_CONFIG", "OCX_PATCHES", "OCX_PATCH_SNAPSHOT"]:
-            exports[var] = ""
+        # hermetic rows that make_ocx_env() blanks at fetch time would
+        # otherwise be inherited from the action's environment here. Empty is
+        # ocx's "treat as unset"; a set attr overwrites the entry below. The
+        # trusted root carries no `hermetic` flag and is not blanked: it is
+        # not a config tier.
+        for var, row in OCX_ENV_CLASSES.items():
+            if row.hermetic:
+                exports[var] = ""
     for label, name, var in [
         (ctx.attr.config, "config.toml", "OCX_CONFIG"),
         (ctx.attr.patch_snapshot, "patches.snapshot.json", "OCX_PATCH_SNAPSHOT"),
+        (ctx.attr.sigstore_trusted_root, "trusted-root.json", "OCX_SIGSTORE_TRUSTED_ROOT"),
     ]:
         if not label:
             continue
@@ -896,7 +1181,7 @@ def stage_lazy_config(ctx, is_windows):
         # Not executable: it lands 0644 in the output base — Bazel has no API
         # to write a repo file 0600, so a config the operator set 0600 becomes
         # world-readable there, and being a runfile it is uploaded as an action
-        # input with every action. Both attr docs say so.
+        # input with every action. Every one of the three attr docs says so.
         ctx.file(name, ctx.read(label), executable = False)
         exports[var] = str(ctx.path(name)) if is_windows else "$(rlocation {}/{})".format(ctx.name, name)
         data.append(":" + name)
@@ -915,6 +1200,21 @@ source "${RUNFILES_DIR:-/dev/null}/$f" 2>/dev/null || \\
   { echo>&2 "ERROR: cannot find $f"; exit 1; }; f=; set -e
 # --- end runfiles.bash initialization v3 ---"""
 
+# rlocation's exit status is not a miss detector. runfiles.bash carries its own
+# FIXME on this: "If the runfiles lookup fails, the exit code of this function
+# is 0 if and only if the runfiles manifest exists" — a manifest-only execution
+# (the common sandboxed and remote case) answers a miss with exit 0 and empty
+# output, and only a lookup with neither manifest nor runfiles directory
+# returns 1. So the split assignment below covers the second case under
+# `set -e` and this guard covers the first: an empty OCX_CONFIG or
+# OCX_PATCH_SNAPSHOT is ocx's documented "treat as unset", which would drop the
+# staged file silently and leave a green build with less configuration than it
+# asked for. 74 is the io sysexit SYSEXIT_HINTS already maps.
+#
+# `${k}` is a Starlark format field inside a shell `$`, not a `${…}` brace
+# expansion: it renders as `"$OCX_CONFIG"`.
+_RLOCATION_GUARD = '[ -n "${k}" ] || {{ echo "rules_ocx: {k} runfile missing" >&2; exit 74; }}'
+
 def render_lazy_launcher(command, is_windows, exports = {}):
     """Renders a lazy launcher: ocx is re-entered at execution time.
 
@@ -924,13 +1224,24 @@ def render_lazy_launcher(command, is_windows, exports = {}):
     inputs through the runfiles library, keeping the text identical across
     machines (portable remote-cache keys).
 
-    OCX_PROJECT and OCX_GLOBAL are neutralized first: every command rendered
-    here passes an explicit `--project` (or a digest-pinned reference), and
-    ocx refuses to combine either ambient value with one — so an inherited
-    OCX_GLOBAL would fail the action with a raw ocx usage error. The fetch
-    path neutralizes the same pair via _OCX_NEUTRALIZED_ENV, with the same
-    values: OCX_GLOBAL is a BooleanString, so "0" and not "" (which ocx logs
-    as an invalid boolean on every launcher-run tool).
+    Every `pinned` row of OCX_ENV_CLASSES except OCX_QUIET is re-exported
+    first, in table order, ahead of the caller's own exports. They are pinned
+    for the same reasons the fetch path pins them: each rendered command
+    passes an explicit `--project` (or a digest-pinned reference) and ocx
+    refuses to combine an ambient OCX_PROJECT/OCX_GLOBAL with one, and
+    OCX_NO_PROJECT closes the CWD walk an action would otherwise run from its
+    execroot. OCX_GLOBAL is a BooleanString, so "0" and not "" (which ocx logs
+    as an invalid boolean on every launcher-run tool). OCX_QUIET is the one
+    skip: no JSON report is parsed at action time, so a launcher-run tool's
+    verbosity stays the user's to set.
+
+    Every POSIX row is assigned and *then* exported, never
+    `export K="$(rlocation …)"`: a command substitution inside a declaration
+    builtin does not propagate its exit status, so `set -e` would not fire on
+    a failed lookup. A value resolved through runfiles carries
+    _RLOCATION_GUARD as well, for the miss that answers 0 with an empty
+    string. Windows values go through bat_value() like every other rendered
+    Batch value, and an unrenderable one is dropped rather than mangled.
 
     Args:
         command: pre-quoted argv fragments; POSIX fragments may use
@@ -945,26 +1256,27 @@ def render_lazy_launcher(command, is_windows, exports = {}):
     Returns:
         script content string.
     """
+    pinned = [(key, OCX_ENV_CLASSES[key].value) for key in _rows("pinned") if key != _LAZY_UNPINNED]
     if is_windows:
         # ponytail: absolute paths — portable keys need a Batch runfiles
         # lookup; add one if Windows remote caching ever matters.
-        lines = [
-            "@echo off",
-            "rem Generated by rules_ocx - do not edit.",
-            'set "OCX_PROJECT="',
-            'set "OCX_GLOBAL=0"',
-        ]
-        lines += ['set "{}={}"'.format(key, value) for key, value in exports.items()]
+        lines = ["@echo off", "rem Generated by rules_ocx - do not edit."]
+        for key, value in pinned + exports.items():
+            safe = bat_value(value)
+            if safe != None:
+                lines.append('set "{}={}"'.format(key, safe))
         lines.append("{} %*".format(" ".join(command)))
         return "\r\n".join(lines) + "\r\n"
     lines = [
         "#!/usr/bin/env bash",
         "# Generated by rules_ocx — do not edit.",
         _RUNFILES_PREAMBLE,
-        'export OCX_PROJECT=""',
-        'export OCX_GLOBAL="0"',
     ]
-    lines += ['export {}="{}"'.format(key, value) for key, value in exports.items()]
+    for key, value in pinned + exports.items():
+        lines.append('{}="{}"'.format(key, value))
+        lines.append("export " + key)
+        if "$(rlocation " in value:
+            lines.append(_RLOCATION_GUARD.format(k = key))
     lines.append('exec {} "$@"'.format(" ".join(command)))
     return "\n".join(lines) + "\n"
 
@@ -977,9 +1289,9 @@ def render_lazy_launcher(command, is_windows, exports = {}):
 # line, so a fragment the call site also spells matches the echo and passes
 # vacuously (.claude/rules/starlark.md).
 UNKNOWN_MODIFIER_MSG = ("rules_ocx: ocx env reported modifier type '{}' for '{}' — the pinned ocx " +
-                        "CLI and rules_ocx disagree on the report shape. Move DEFAULT_OCX_VERSION " +
-                        "(ocx/private/versions.bzl) to an ocx release this rules_ocx parses, or " +
-                        "upgrade rules_ocx.")
+                        "CLI and rules_ocx disagree on the report shape. Upgrade rules_ocx (it " +
+                        "pins the ocx version), or pin an ocx release this rules_ocx parses with " +
+                        "ocx.download(version = '…') in MODULE.bazel.")
 
 # ocx's `package::metadata::env::list::DEFAULT_SEPARATOR`. An entry that
 # reaches the report with no `separator` is one where no contributor to the key

@@ -13,7 +13,8 @@ MODULE.bazel.lock.
 load("//ocx/private:download.bzl", "ocx_download")
 load("//ocx/private:package.bzl", "ocx_package_hub", "ocx_package_repo", "resolve_platforms")
 load("//ocx/private:project.bzl", "ocx_project_repo")
-load("//ocx/private:versions.bzl", "DEFAULT_OCX_VERSION")
+load("//ocx/private:repo_utils.bzl", "POLICY_ATTRS", "policy_kwargs", "resolve_policy")
+load("//ocx/private:versions.bzl", "DEFAULT_OCX_VERSION", "MIN_OCX_VERSION")
 
 _download = tag_class(
     doc = "Overrides the ocx CLI bootstrap. Root module only; at most one.",
@@ -26,7 +27,10 @@ _download = tag_class(
             doc = "Exact release target triple, overriding host detection.",
         ),
         "version": attr.string(
-            doc = "Exact ocx version (default: the version pinned with this rules_ocx release).",
+            doc = "Exact ocx version (default: the version pinned with this rules_ocx " +
+                  "release). Must be " + MIN_OCX_VERSION + " or newer — rules_ocx drives " +
+                  "`ocx exec` and `package install --no-verify`, and the floor is checked " +
+                  "before any download.",
         ),
     },
 )
@@ -41,7 +45,7 @@ _project = tag_class(
         "bins": attr.string_list(
             doc = "Lazy provisioning: names of the executables to expose. When set, " +
                   "nothing is pulled at fetch time — each name becomes a launcher " +
-                  "re-entering `ocx run`, materializing the toolchain on first " +
+                  "re-entering `ocx exec`, materializing the toolchain on first " +
                   "execution. Actions key on the lockfile, so fully remote-cached " +
                   "builds download no tool content.",
         ),
@@ -63,8 +67,12 @@ _project = tag_class(
                   "store: uses a repository-local ocx store instead of the shared user " +
                   "OCX_HOME, at the cost of a full per-repository download (nothing shared " +
                   "with your shell, direnv, other repos or CI) and the $OCX_HOME-rooted config " +
-                  "tiers no longer being watched. Incompatible with bins: a lazy launcher must " +
-                  "resolve the store on whatever machine executes it.",
+                  "tiers no longer being watched — including ocx's " +
+                  "`~/.ocx/sigstore/trusted-root.json` rung, so with a trust policy configured " +
+                  "trusted-root resolution falls through to the Rekor trust-root cache and " +
+                  "then a live TUF fetch; offline it stops at the cache and fails outright, " +
+                  "as ocx ships no embedded root. Incompatible with bins: a lazy launcher " +
+                  "must resolve the store on whatever machine executes it.",
         ),
         "no_config": attr.bool(
             default = False,
@@ -99,6 +107,16 @@ _project = tag_class(
                   "Incompatible with bins.",
         ),
     },
+)
+
+_policy = tag_class(
+    doc = "Sets the build's weakening posture — unverified installs, yanked releases, a " +
+          "pinned sigstore trusted root — as a function of MODULE.bazel alone. Root module " +
+          "only; at most one.",
+    # The same schema the repository rules declare: one wording, one default,
+    # and a fourth policy attr is one row there rather than two that can
+    # disagree.
+    attrs = POLICY_ATTRS,
 )
 
 _package = tag_class(
@@ -137,8 +155,12 @@ _package = tag_class(
                   "store: uses a repository-local ocx store instead of the shared user " +
                   "OCX_HOME, at the cost of a full per-repository download (nothing shared " +
                   "with your shell, direnv, other repos or CI) and the $OCX_HOME-rooted config " +
-                  "tiers no longer being watched. Incompatible with bins: a lazy launcher must " +
-                  "resolve the store on whatever machine executes it.",
+                  "tiers no longer being watched — including ocx's " +
+                  "`~/.ocx/sigstore/trusted-root.json` rung, so with a trust policy configured " +
+                  "trusted-root resolution falls through to the Rekor trust-root cache and " +
+                  "then a live TUF fetch; offline it stops at the cache and fails outright, " +
+                  "as ocx ships no embedded root. Incompatible with bins: a lazy launcher " +
+                  "must resolve the store on whatever machine executes it.",
         ),
         "no_config": attr.bool(
             default = False,
@@ -194,11 +216,29 @@ def _ocx_impl(module_ctx):
     triple = ""
     seen = {}
 
+    # Resolved before any repository is declared: a non-root or duplicate
+    # ocx.policy() tag must fail() the module resolution outright, not leave
+    # a partially-declared repo graph behind.
+    policy_instances = [
+        struct(
+            module = mod.name,
+            is_root = mod.is_root,
+            allow_unverified = tag.allow_unverified,
+            allow_yanked = tag.allow_yanked,
+            sigstore_trusted_root = tag.sigstore_trusted_root,
+        )
+        for mod in module_ctx.modules
+        for tag in mod.tags.policy
+    ]
+    policy = resolve_policy(policy_instances)
+    if policy.error:
+        fail(policy.error)
+
     download_tags = 0
     for mod in module_ctx.modules:
         for tag in mod.tags.download:
             if not mod.is_root:
-                fail("rules_ocx: ocx.download() may only be used by the root module")
+                fail("rules_ocx: ocx.download() may only be used by the root module (used by '{}')".format(mod.name))
             download_tags += 1
             if download_tags > 1:
                 fail("rules_ocx: at most one ocx.download() tag is allowed")
@@ -216,7 +256,7 @@ def _ocx_impl(module_ctx):
     for mod in module_ctx.modules:
         for tag in mod.tags.project:
             if not mod.is_root:
-                fail("rules_ocx: ocx.project() may only be used by the root module")
+                fail("rules_ocx: ocx.project() may only be used by the root module (used by '{}')".format(mod.name))
             if tag.name in seen:
                 fail("rules_ocx: duplicate repository name '{}'".format(tag.name))
             seen[tag.name] = True
@@ -231,6 +271,7 @@ def _ocx_impl(module_ctx):
                 config = tag.config,
                 no_config = tag.no_config,
                 patch_snapshot = tag.patch_snapshot,
+                **policy_kwargs(policy)
             )
 
         for tag in mod.tags.package:
@@ -262,6 +303,7 @@ def _ocx_impl(module_ctx):
                         config = tag.config,
                         no_config = tag.no_config,
                         patch_snapshot = tag.patch_snapshot,
+                        **policy_kwargs(policy)
                     )
                 ocx_package_hub(
                     name = tag.name,
@@ -280,6 +322,7 @@ def _ocx_impl(module_ctx):
                     config = tag.config,
                     no_config = tag.no_config,
                     patch_snapshot = tag.patch_snapshot,
+                    **policy_kwargs(policy)
                 )
 
     # No use_repo validation (root_module_direct_deps): the same extension is
@@ -293,10 +336,12 @@ ocx = module_extension(
 
 Always creates `@ocx_tool` (the pinned ocx CLI). `ocx.project()` provisions
 a workspace toolchain from ocx.toml/ocx.lock; `ocx.package()` provisions
-individual OCI packages. See the tag class docs for details.""",
+individual OCI packages; `ocx.policy()` sets the build's weakening posture
+(root module only). See the tag class docs for details.""",
     tag_classes = {
         "download": _download,
         "package": _package,
+        "policy": _policy,
         "project": _project,
     },
 )

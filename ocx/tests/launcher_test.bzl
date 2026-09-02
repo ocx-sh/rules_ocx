@@ -6,9 +6,10 @@
 load("@bazel_skylib//lib:partial.bzl", "partial")
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
 load("//ocx/private:platforms.bzl", "host_info")
+load("//ocx/private:project.bzl", "lazy_project_command")
 load(
     "//ocx/private:repo_utils.bzl",
-    "OCX_PASSTHROUGH_ENV",
+    "OCX_ENV_CLASSES",
     "SYSEXIT_HINTS",
     "ambient_config_paths",
     "bat_value",
@@ -25,6 +26,7 @@ load(
     "render_launchers_build",
     "render_lazy_launcher",
     "run_ocx",
+    "sigstore_trust_root_path",
     "stage_lazy_config",
     "truthy",
 )
@@ -108,30 +110,47 @@ def _replay_ctx(codes, calls, sleeps = None):
 
     return struct(execute = execute)
 
-def _env_ctx(env = {}, no_config = False, config = None, patch_snapshot = None):
+def _env_ctx(
+        env = {},
+        no_config = False,
+        config = None,
+        patch_snapshot = None,
+        allow_unverified = False,
+        allow_yanked = False,
+        sigstore_trusted_root = None):
     """A repository_ctx stand-in for make_ocx_env() / stage_lazy_config().
 
-    `path` returns the string it was given: these two only ever str() the
-    result, and the fetched-file semantics play no part in what is asserted.
+    `path` returns the string it was given, resolved against a fixed repo root
+    when it is a bare name (which is what `isolated_home` relies on): these two
+    only ever str() the result, and the fetched-file semantics play no part in
+    what is asserted. Every ctx.watch() lands in the returned struct's
+    `watched` list — the watch set is a contract of its own, since Bazel
+    cannot invalidate on a file no rule ever declared reading.
 
     Args:
         env: the ambient environment ctx.getenv() reads.
         no_config: the `no_config` attr.
         config: the `config` attr (a path string stands in for the label).
         patch_snapshot: the `patch_snapshot` attr.
+        allow_unverified: the POLICY_ATTRS `allow_unverified` attr.
+        allow_yanked: the POLICY_ATTRS `allow_yanked` attr.
+        sigstore_trusted_root: the POLICY_ATTRS `sigstore_trusted_root` attr
+            (a path string stands in for the label).
 
     Returns:
         the fake ctx struct.
     """
 
+    watched = []
+
     def getenv(key):
         return env.get(key)
 
     def path(p):
-        return p
+        return p if is_absolute_path(p, False) else "/repo/" + p
 
-    # buildifier: disable=unused-variable
     def watch(p):
+        watched.append(p)
         return None
 
     def read(label):
@@ -145,20 +164,35 @@ def _env_ctx(env = {}, no_config = False, config = None, patch_snapshot = None):
         getenv = getenv,
         path = path,
         watch = watch,
+        watched = watched,
         read = read,
         file = file,
         name = "test_repo",
-        attr = struct(no_config = no_config, config = config, patch_snapshot = patch_snapshot),
+        attr = struct(
+            no_config = no_config,
+            config = config,
+            patch_snapshot = patch_snapshot,
+            allow_unverified = allow_unverified,
+            allow_yanked = allow_yanked,
+            sigstore_trusted_root = sigstore_trusted_root,
+        ),
     )
 
 # The ambient environment the config tests steer: every channel `no_config`
-# has to close, plus one it must leave alone.
+# has to close, plus one it must leave alone — and the hostile CI image an
+# ocx.policy() build has to be immune to (S-005).
 _AMBIENT = {
     "OCX_HOME": "/home/u/.ocx",
     "OCX_CONFIG": "/site/config.toml",
     "OCX_PATCHES": "{\"patches\":{\"ocx.sh/evil\":\"latest\"}}",
     "OCX_PATCH_SNAPSHOT": "/site/patches.snapshot.json",
     "OCX_MIRRORS": "https://mirror.example",
+    "OCX_SIGSTORE_TRUSTED_ROOT": "/site/trusted-root.json",
+    # The two weakening knobs, exported three layers up in a CI image, and the
+    # project-walk selector a parent `ocx exec` leaks into its children.
+    "OCX_NO_VERIFY": "1",
+    "OCX_ALLOW_YANKED": "1",
+    "OCX_NO_PROJECT": "0",
 }
 
 def _make_ocx_env_test_impl(ctx):
@@ -179,13 +213,50 @@ def _make_ocx_env_test_impl(ctx):
     asserts.equals(env, "0", ambient["OCX_QUIET"])
     asserts.equals(env, "1", ambient["OCX_NO_CONFIG_REFRESH"])
 
+    # OCX_NO_PROJECT is pinned on, closing the CWD walk the package tier would
+    # otherwise run from the fetch directory. An ambient "0" reopens it.
+    asserts.equals(env, "1", ambient["OCX_NO_PROJECT"])
+
+    # S-005: the weakening knobs are explicit-only. An OCX_NO_VERIFY exported
+    # by whatever shell or CI image started Bazel must not decide what this
+    # build verifies — with no ocx.policy() tag both read "0", and their
+    # presence is what shadows the inherited "1".
+    asserts.equals(env, "0", ambient.get("OCX_NO_VERIFY", "<absent>"))
+    asserts.equals(env, "0", ambient.get("OCX_ALLOW_YANKED", "<absent>"))
+
+    # S-002: the resolved policy is the only thing that can loosen either.
+    loose = make_ocx_env(
+        _env_ctx(env = _AMBIENT, allow_unverified = True, allow_yanked = True),
+        host,
+        False,
+    ).env
+    asserts.equals(env, "1", loose.get("OCX_NO_VERIFY", "<absent>"))
+    asserts.equals(env, "1", loose.get("OCX_ALLOW_YANKED", "<absent>"))
+
     # no_config: OCX_NO_CONFIG prunes only the *discovered* tiers. Without
     # these three blanks an ambient OCX_PATCHES becomes the only patch source
     # left in a build that asked for hermeticity.
-    blanked = make_ocx_env(_env_ctx(env = _AMBIENT, no_config = True), host, False).env
+    hermetic = _env_ctx(env = _AMBIENT, no_config = True)
+    blanked = make_ocx_env(hermetic, host, False).env
     asserts.equals(env, "1", blanked["OCX_NO_CONFIG"])
     for key in ["OCX_CONFIG", "OCX_PATCHES", "OCX_PATCH_SNAPSHOT"]:
         asserts.equals(env, "", blanked[key], key + " survived no_config")
+
+    # C-003/C-009: a trust root is not a config tier, so no_config leaves it
+    # alone — with no_config plus a `config` label carrying [[trust.policy]],
+    # ocx still reads the env rung and then the OCX_HOME one. Both are watched
+    # outside the gate, or an edit to either would not refetch.
+    asserts.equals(env, "/site/trusted-root.json", blanked.get("OCX_SIGSTORE_TRUSTED_ROOT", "<absent>"))
+    asserts.true(
+        env,
+        "/site/trusted-root.json" in hermetic.watched,
+        "the surviving ambient trust root is not watched",
+    )
+    asserts.true(
+        env,
+        "/home/u/.ocx/sigstore/trusted-root.json" in hermetic.watched,
+        "the OCX_HOME trust-root rung is watched outside the no_config gate",
+    )
 
     # The attrs are what the caller did ask for, so they are reinstated over
     # the blanks — but OCX_PATCHES has no attr and stays closed.
@@ -202,6 +273,56 @@ def _make_ocx_env_test_impl(ctx):
     asserts.equals(env, "/w/cfg.toml", attrs["OCX_CONFIG"])
     asserts.equals(env, "/w/snap.json", attrs["OCX_PATCH_SNAPSHOT"])
     asserts.equals(env, "", attrs["OCX_PATCHES"])
+
+    # A translucent label attr replaces the ambient value and is watched
+    # through ctx.path(); the shadowed ambient file is not, since nothing
+    # reads it any more.
+    pinned = _env_ctx(env = _AMBIENT, sigstore_trusted_root = "/w/trusted-root.json")
+    asserts.equals(
+        env,
+        "/w/trusted-root.json",
+        make_ocx_env(pinned, host, False).env.get("OCX_SIGSTORE_TRUSTED_ROOT", "<absent>"),
+    )
+    asserts.false(
+        env,
+        "/site/trusted-root.json" in pinned.watched,
+        "the shadowed ambient trust root is still watched",
+    )
+
+    # A `file://` trust root is a spelling ocx accepts at exactly this door
+    # (FileReference::parse, ocx-sh/ocx#379), so it is forwarded verbatim
+    # instead of being refused as a relative path — and left unwatched, since
+    # ctx.watch() has no path to take. The watch fails open there. Case-
+    # insensitive, matching the prefix ocx consumes; the guard cases pin the
+    # other half — no other row and no other scheme takes this branch.
+    url = _env_ctx(env = dict(_AMBIENT, OCX_SIGSTORE_TRUSTED_ROOT = "FILE:///opt/trusted-root.json"))
+    asserts.equals(
+        env,
+        "FILE:///opt/trusted-root.json",
+        make_ocx_env(url, host, False).env.get("OCX_SIGSTORE_TRUSTED_ROOT", "<absent>"),
+    )
+    url = _env_ctx(env = dict(_AMBIENT, OCX_SIGSTORE_TRUSTED_ROOT = "file:///opt/trusted-root.json"))
+    asserts.equals(
+        env,
+        "file:///opt/trusted-root.json",
+        make_ocx_env(url, host, False).env.get("OCX_SIGSTORE_TRUSTED_ROOT", "<absent>"),
+    )
+    asserts.false(
+        env,
+        "file:///opt/trusted-root.json" in url.watched,
+        "a file:// trust root was handed to ctx.watch()",
+    )
+
+    # isolated_home moves the store inside the repository being fetched, which
+    # cannot be watched — so ocx's ~/.ocx rung is dropped rather than pointed
+    # at a path that will not exist on the next machine.
+    isolated = _env_ctx(env = _AMBIENT)
+    asserts.equals(env, "/repo/.ocx_home", make_ocx_env(isolated, host, True).env["OCX_HOME"])
+    asserts.false(
+        env,
+        "/repo/.ocx_home/sigstore/trusted-root.json" in isolated.watched,
+        "isolated_home still watches an in-repository trust root",
+    )
     return unittest.end(env)
 
 def _stage_lazy_config_test_impl(ctx):
@@ -215,8 +336,20 @@ def _stage_lazy_config_test_impl(ctx):
     for key in ["OCX_CONFIG", "OCX_PATCHES", "OCX_PATCH_SNAPSHOT"]:
         asserts.equals(env, "", exports.get(key, "<not exported>"), key + " survived no_config")
 
-    # Nothing configured, nothing to re-export.
-    asserts.equals(env, {}, stage_lazy_config(_env_ctx(), False).exports)
+    # C-010: nothing configured still exports the weakening pair. The action
+    # environment is the executor's, so an ambient OCX_NO_VERIFY there would
+    # otherwise decide what the deferred fetch verifies — the same hole the
+    # fetch path closes, one process later.
+    asserts.equals(
+        env,
+        {"OCX_NO_VERIFY": "0", "OCX_ALLOW_YANKED": "0"},
+        stage_lazy_config(_env_ctx(), False).exports,
+    )
+    asserts.equals(
+        env,
+        {"OCX_NO_VERIFY": "1", "OCX_ALLOW_YANKED": "1"},
+        stage_lazy_config(_env_ctx(allow_unverified = True, allow_yanked = True), False).exports,
+    )
 
     # A staged file travels as a runfile and is resolved through runfiles, not
     # as the fetch-time absolute path.
@@ -224,11 +357,37 @@ def _stage_lazy_config_test_impl(ctx):
     asserts.equals(env, "$(rlocation test_repo/config.toml)", staged.exports["OCX_CONFIG"])
     asserts.equals(env, "", staged.exports["OCX_PATCH_SNAPSHOT"])
     asserts.equals(env, [":config.toml"], staged.data)
+
+    # S-010: a remote executor has no OCX_HOME, so a committed trusted root
+    # only reaches ocx as a runfile. no_config does not blank it — a trust
+    # root is not a config tier.
+    root = stage_lazy_config(
+        _env_ctx(no_config = True, sigstore_trusted_root = "//w:trusted-root.json"),
+        False,
+    )
+    asserts.equals(
+        env,
+        "$(rlocation test_repo/trusted-root.json)",
+        root.exports.get("OCX_SIGSTORE_TRUSTED_ROOT", "<absent>"),
+    )
+    asserts.true(env, ":trusted-root.json" in root.data, "the trusted root is not attached as a runfile")
+
+    # Translucent in lazy mode: with no attr the key is deliberately absent,
+    # so the executor's own site environment stays authoritative. Exporting a
+    # fetch-time ambient value here would bake one machine's answer into every
+    # action key.
+    site = stage_lazy_config(_env_ctx(env = _AMBIENT), False)
+    asserts.false(
+        env,
+        "OCX_SIGSTORE_TRUSTED_ROOT" in site.exports,
+        "an unset translucent attr must not be exported into the action environment",
+    )
     return unittest.end(env)
 
-# W17/F5: the env vars AGENTS.md pins as forwarded to every ocx invocation.
-# getenv() is what registers them with Bazel, so dropping one silently stops
-# a build from re-fetching when it changes.
+# W17/F5: the env vars AGENTS.md pins as forwarded to every ocx invocation —
+# the site and translucent rows of OCX_ENV_CLASSES, in table order. getenv()
+# is what registers them with Bazel, so dropping one silently stops a build
+# from re-fetching when it changes.
 _PASSTHROUGH_ENV = [
     "OCX_MIRRORS",
     "OCX_INSECURE_REGISTRIES",
@@ -238,23 +397,32 @@ _PASSTHROUGH_ENV = [
     "OCX_JOBS",
     "OCX_INDEX",
     "OCX_DEFAULT_REGISTRY",
-    "OCX_CONFIG",
-    "OCX_NO_CONFIG",
     "OCX_MANAGED_CONFIG",
-    "OCX_ALLOW_YANKED",
     "OCX_PATCHES",
+    "OCX_CONFIG",
     "OCX_PATCH_SNAPSHOT",
+    "OCX_SIGSTORE_TRUSTED_ROOT",
+    "OCX_NO_CONFIG",
 ]
 
 def _passthrough_env_test_impl(ctx):
     """W17/F5: all 14 forwarded env vars, and nothing else."""
     env = unittest.begin(ctx)
-    asserts.equals(env, _PASSTHROUGH_ENV, OCX_PASSTHROUGH_ENV)
-    asserts.equals(env, 14, len(OCX_PASSTHROUGH_ENV))
+    forwarded = [key for key, row in OCX_ENV_CLASSES.items() if row.cls in ["site", "translucent"]]
+    asserts.equals(env, _PASSTHROUGH_ENV, forwarded)
+    asserts.equals(env, 14, len(forwarded))
 
-    # Resolved or neutralized, never forwarded verbatim.
-    for key in ["OCX_HOME", "OCX_NO_CONFIG_REFRESH", "OCX_PROJECT", "OCX_GLOBAL", "OCX_QUIET"]:
-        asserts.false(env, key in OCX_PASSTHROUGH_ENV, key + " is not a passthrough")
+    # The weakening pair is explicit-only: reading either with getenv() puts
+    # an ambient value back in charge of what the build verifies and accepts,
+    # which is the whole point of ocx.policy(). Tracked-and-wrong is still
+    # wrong — invalidation records that the answer changed, never that it was
+    # weakened.
+    for key in ["OCX_NO_VERIFY", "OCX_ALLOW_YANKED"]:
+        asserts.false(env, key in forwarded, key + " must never be read from the environment")
+
+    # Resolved or pinned, never forwarded verbatim.
+    for key in ["OCX_HOME", "OCX_NO_CONFIG_REFRESH", "OCX_PROJECT", "OCX_GLOBAL", "OCX_QUIET", "OCX_NO_PROJECT"]:
+        asserts.false(env, key in forwarded, key + " is not a passthrough")
     return unittest.end(env)
 
 # F1: names ocx's own `BinaryName` grammar admits
@@ -616,6 +784,31 @@ def _bat_launcher_test_impl(ctx):
     asserts.true(env, '"C:\\store\\tool.exe" %*' in script)
     return unittest.end(env)
 
+# C-011: every pinned OCX_ENV_CLASSES row except OCX_QUIET, in table order,
+# as one contiguous block — order and adjacency together are what a single
+# `in` check can prove. Held as a block so the per-line count assertions below
+# stay the only place that could pass on a duplicated export.
+# Assigned then exported, never `export K="$(…)"`: a command substitution in a
+# declaration builtin does not propagate its exit status, so `set -e` would not
+# fire on a failed rlocation.
+_PINNED_EXPORTS_SH = "\n".join([
+    'OCX_PROJECT=""',
+    "export OCX_PROJECT",
+    'OCX_GLOBAL="0"',
+    "export OCX_GLOBAL",
+    'OCX_NO_PROJECT="1"',
+    "export OCX_NO_PROJECT",
+    'OCX_NO_CONFIG_REFRESH="1"',
+    "export OCX_NO_CONFIG_REFRESH",
+])
+
+_PINNED_EXPORTS_BAT = "\r\n".join([
+    'set "OCX_PROJECT="',
+    'set "OCX_GLOBAL=0"',
+    'set "OCX_NO_PROJECT=1"',
+    'set "OCX_NO_CONFIG_REFRESH=1"',
+])
+
 def _sh_lazy_launcher_test_impl(ctx):
     env = unittest.begin(ctx)
     script = render_lazy_launcher(
@@ -632,10 +825,18 @@ def _sh_lazy_launcher_test_impl(ctx):
     asserts.true(env, "runfiles.bash initialization" in script)
     asserts.false(env, "OCX_HOME" in script)
 
-    # Both selectors neutralized. OCX_GLOBAL is a BooleanString: "0" is falsy,
-    # "" is invalid and makes ocx log a warning on every launcher-run tool.
-    asserts.true(env, 'export OCX_PROJECT=""' in script)
-    asserts.true(env, 'export OCX_GLOBAL="0"' in script)
+    # C-011: the pinned rows, in table order, each exactly once, before the
+    # caller's own exports. OCX_GLOBAL is a BooleanString: "0" is falsy, ""
+    # is invalid and makes ocx log a warning on every launcher-run tool.
+    pinned_at = script.find(_PINNED_EXPORTS_SH)
+    asserts.true(env, pinned_at >= 0, "the pinned rows are missing or out of table order")
+    for line in _PINNED_EXPORTS_SH.split("\n"):
+        asserts.equals(env, 1, script.count(line), line + " is not emitted exactly once")
+    asserts.true(
+        env,
+        pinned_at >= 0 and pinned_at < script.find('OCX_NO_CONFIG="1"'),
+        "the pinned rows must precede the caller's own exports",
+    )
 
     # OCX_QUIET is absent by design, though the fetch-time environment
     # neutralizes it: no JSON report is parsed at action time, so a
@@ -643,10 +844,23 @@ def _sh_lazy_launcher_test_impl(ctx):
     asserts.false(env, "OCX_QUIET" in script)
 
     # Staged config travels with the launcher, resolved through runfiles.
-    asserts.true(env, 'export OCX_NO_CONFIG="1"' in script)
-    asserts.true(env, 'export OCX_CONFIG="$(rlocation repo+pkg/config.toml)"' in script)
-    asserts.false(env, 'export OCX_CONFIG="/' in script)
-    asserts.true(env, script.index("export OCX_CONFIG=") < script.index("\nexec "))
+    asserts.true(env, 'OCX_NO_CONFIG="1"' in script)
+    asserts.true(env, "\nexport OCX_NO_CONFIG\n" in script)
+    asserts.true(env, 'OCX_CONFIG="$(rlocation repo+pkg/config.toml)"' in script)
+    asserts.true(env, "\nexport OCX_CONFIG\n" in script)
+    asserts.false(env, 'OCX_CONFIG="/' in script)
+    asserts.true(env, script.index('OCX_CONFIG="$(rlocation') < script.index("\nexec "))
+
+    # A runfiles miss is not detectable from rlocation's exit status: with a
+    # runfiles *manifest* present it answers 0 and an empty string, and an
+    # empty OCX_CONFIG is ocx's documented "treat as unset" — the staged site
+    # config would vanish into a green build. Only rlocation rows carry it.
+    asserts.true(
+        env,
+        '[ -n "$OCX_CONFIG" ] || { echo "rules_ocx: OCX_CONFIG runfile missing" >&2; exit 74; }' in script,
+        "the staged runfiles row is not guarded against an empty rlocation",
+    )
+    asserts.false(env, '[ -n "$OCX_PROJECT" ]' in script, "a pinned row must not carry a runfiles guard")
     asserts.true(env, script.endswith(
         "exec \"$(rlocation repo+ocx_tool/ocx)\" package exec 'ocx.sh/jq@sha256:abc' -- jq \"$@\"\n",
     ))
@@ -654,16 +868,35 @@ def _sh_lazy_launcher_test_impl(ctx):
 
 def _bat_lazy_launcher_test_impl(ctx):
     env = unittest.begin(ctx)
+
+    # C-015: the argv comes from the builder, so the launcher and the tests
+    # cannot disagree about which ocx verb the Windows arm re-enters.
     script = render_lazy_launcher(
-        ['"C:\\repo\\ocx.exe"', "--project", '"C:\\repo\\ocx.toml"', "run", "--", "shellcheck"],
+        lazy_project_command('"C:\\repo\\ocx.exe"', '"C:\\repo\\ocx.toml"', [], "shellcheck"),
         True,
         exports = {"OCX_CONFIG": "C:\\repo\\config.toml"},
     )
     asserts.true(env, script.startswith("@echo off"))
-    asserts.true(env, 'set "OCX_PROJECT="' in script)
-    asserts.true(env, 'set "OCX_GLOBAL=0"' in script)
+    asserts.true(env, _PINNED_EXPORTS_BAT in script, "the pinned rows are missing or out of table order")
+    for line in _PINNED_EXPORTS_BAT.split("\r\n"):
+        asserts.equals(env, 1, script.count(line), line + " is not emitted exactly once")
+    asserts.false(env, "OCX_QUIET" in script)
     asserts.true(env, 'set "OCX_CONFIG=C:\\repo\\config.toml"' in script)
-    asserts.true(env, '"C:\\repo\\ocx.exe" --project "C:\\repo\\ocx.toml" run -- shellcheck %*' in script)
+    asserts.true(
+        env,
+        '"C:\\repo\\ocx.exe" --project "C:\\repo\\ocx.toml" exec -- shellcheck %*' in script,
+        "the rendered Windows launcher does not re-enter `ocx exec`",
+    )
+
+    # Every Batch value goes through bat_value(), like every other rendered
+    # Batch value: a `%` in the output-base path a staged file resolves to
+    # would otherwise open a variable expansion and mangle it.
+    escaped = render_lazy_launcher(
+        lazy_project_command('"C:\\ocx.exe"', '"C:\\t.toml"', [], "jq"),
+        True,
+        exports = {"OCX_CONFIG": "C:\\out%1\\config.toml"},
+    )
+    asserts.true(env, 'set "OCX_CONFIG=C:\\out%%1\\config.toml"' in escaped)
     return unittest.end(env)
 
 def _env_bzl_test_impl(ctx):
@@ -841,6 +1074,18 @@ _MALFORMED_CLOSURE_REPORTS = {
         "identifier": "ocx.sh/a/a:latest@sha256:aa",
         "closure": {"surface": {"interface": {"binaries": [], "entrypoints": []}}},
     }],
+    # Present but not a bool: declared_bins() evaluates `not "false"` to False
+    # in Starlark, so a stringified flag would record no `incomplete` and the
+    # caller would skip the PATH scan the flag exists to trigger — a silent
+    # partial surface. A presence check alone does not catch it.
+    "binaries_complete_not_a_bool": [{
+        "identifier": "ocx.sh/a/a:latest@sha256:aa",
+        "closure": {"surface": {"interface": {
+            "binaries": [],
+            "entrypoints": [],
+            "binaries_complete": "false",
+        }}},
+    }],
     # Present but not iterable as declared_bins() iterates it: a key check
     # alone passes this through to a raw traceback.
     "binaries_not_a_list": [{
@@ -904,10 +1149,20 @@ _bad_closure_report = rule(
     attrs = {"report": attr.string()},
 )
 
+# A Starlark failure echoes each frame's source line, so a fragment written
+# literally into the assert below would match the echo whatever the code did.
+# Held in a constant the call site cannot spell (.claude/rules/starlark.md).
+_DRIFT_HINT = "it pins the ocx version"
+
 def _closure_packages_guard_test_impl(ctx):
-    """H5: a malformed report fails, naming the pin that has to move."""
+    """H5: a malformed report fails, naming the pin that has to move.
+
+    The fragment is a phrase only the drift message spells — neither
+    _bad_closure_report_impl nor closure_packages' own call site has it, so the
+    traceback's source-line echo cannot satisfy it (.claude/rules/starlark.md).
+    """
     env = analysistest.begin(ctx)
-    asserts.expect_failure(env, "DEFAULT_OCX_VERSION")
+    asserts.expect_failure(env, _DRIFT_HINT)
     return analysistest.end(env)
 
 closure_packages_guard_test = analysistest.make(
@@ -942,6 +1197,15 @@ _GUARD_CASES = {
     "decode_garbage": "unexpected character",
     # F5: a relative OCX_HOME is caught before ctx.watch() tracebacks on it.
     "relative_home": "OCX_HOME must be absolute",
+    # C-003: a relative ambient translucent `path` row is forwarded to ocx but
+    # unwatchable, so it is refused rather than silently left unwatched. The
+    # `file://` carve-out is scoped to the one row ocx parses as a file
+    # reference and to that one scheme: on any other row (`OCX_CONFIG`, whose
+    # value is a plain PathBuf::from) and under any other scheme the string is
+    # a relative path to ocx, so the same refusal stands.
+    "relative_translucent_path": "must be an absolute path",
+    "file_url_wrong_row": "must be an absolute path",
+    "url_wrong_scheme": "must be an absolute path",
     # F1: an explicitly declared bins entry is an error, not a silent drop.
     "bad_bins_attr": "cannot be a launcher",
     # F1: a batch file has no escape for a literal quote in the exec target.
@@ -951,13 +1215,22 @@ _GUARD_CASES = {
     # below has to name the drifted type, and a traceback echoes that line, so
     # asserting on the type itself would match the echo and pass vacuously.
     "unknown_modifier": "reported modifier type",
+    # C-008: the three sysexits 0.6.0's verifying fetch path made reachable.
+    # Each case scripts a trailing 0 that is reached only on a retry, so the
+    # same target proves the hint text *and* that _RETRYABLE did not grow —
+    # S-006 rules out auto-retrying 83, which would cost three round-trips on
+    # a settled transparency-log outage.
+    "sysexit_83": "transparency log is unreachable",
+    "sysexit_84": "does not support the OCI Referrers API",
+    "sysexit_85": "signing key backend",
 }
 
 def _guard_impl(ctx):
     case = ctx.attr.case
-    if case.startswith("retry_"):
+    if case.startswith("retry_") or case.startswith("sysexit_"):
         # The trailing 0 is reached only when the leading code was retried.
-        _run_ocx(_replay_ctx([int(case[len("retry_"):]), 0], []), retries = 2)
+        code = case.split("_")[1]
+        _run_ocx(_replay_ctx([int(code), 0], []), retries = 2)
     elif case == "hint_precedence":
         # 65 has a shared hint too, so only precedence decides which is shown.
         _run_ocx(_replay_ctx([65], []), hints = {65: _CALLSITE_HINT})
@@ -967,6 +1240,27 @@ def _guard_impl(ctx):
         decode_json("oops", "ocx package env")
     elif case == "relative_home":
         make_ocx_env(_env_ctx(env = {"OCX_HOME": "relative/.ocx"}), host_info("linux", "amd64"), False)
+    elif case == "relative_translucent_path":
+        make_ocx_env(
+            _env_ctx(env = {"OCX_HOME": "/home/u/.ocx", "OCX_CONFIG": "./site.toml"}),
+            host_info("linux", "amd64"),
+            False,
+        )
+    elif case == "file_url_wrong_row":
+        make_ocx_env(
+            _env_ctx(env = {"OCX_HOME": "/home/u/.ocx", "OCX_CONFIG": "file:///etc/ocx/config.toml"}),
+            host_info("linux", "amd64"),
+            False,
+        )
+    elif case == "url_wrong_scheme":
+        make_ocx_env(
+            _env_ctx(env = {
+                "OCX_HOME": "/home/u/.ocx",
+                "OCX_SIGSTORE_TRUSTED_ROOT": "https://corp/trusted-root.json",
+            }),
+            host_info("linux", "amd64"),
+            False,
+        )
     elif case == "bad_bins_attr":
         check_bin_names(["jq", "$(touch PWNED)"])
     elif case == "bat_target_quote":
@@ -1066,6 +1360,31 @@ def _ambient_config_paths_test_impl(ctx):
 
     # Nothing to discover: no home (isolated_home) and no env at all.
     asserts.equals(env, ["/etc/ocx/config.toml"], ambient_config_paths(False, False, {}, ""))
+    return unittest.end(env)
+
+def _sigstore_trust_root_path_test_impl(ctx):
+    """C-009: ocx's rung-4 trusted-root convention path, hand-constructed.
+
+    ocx has no read-only command reporting it, so the layout is hard-coded and
+    the watch fails open — relocate the directory upstream and it silently
+    covers nothing. Re-verified on every ocx bump (the update-dist skill).
+    """
+    env = unittest.begin(ctx)
+    asserts.equals(
+        env,
+        "/home/u/.ocx/sigstore/trusted-root.json",
+        sigstore_trust_root_path("/home/u/.ocx", False),
+    )
+    asserts.equals(
+        env,
+        "C:\\Users\\u\\.ocx\\sigstore\\trusted-root.json",
+        sigstore_trust_root_path("C:\\Users\\u\\.ocx", True),
+    )
+
+    # isolated_home passes "" to drop the tier: the store lives inside the
+    # repository being fetched, which cannot be watched.
+    asserts.equals(env, None, sigstore_trust_root_path("", False))
+    asserts.equals(env, None, sigstore_trust_root_path("", True))
     return unittest.end(env)
 
 def _is_absolute_path_test_impl(ctx):
@@ -1177,7 +1496,9 @@ def _bat_value_test_impl(ctx):
     return unittest.end(env)
 
 # W17: every sysexit AGENTS.md documents as reachable from a repository rule.
-_DOCUMENTED_SYSEXITS = [64, 65, 69, 74, 75, 77, 78, 79, 80, 81]
+# 83/84/85 joined in 0.6.0, when signature verification attached to the fetch
+# path (C-008).
+_DOCUMENTED_SYSEXITS = [64, 65, 69, 74, 75, 77, 78, 79, 80, 81, 83, 84, 85]
 
 def _sysexit_hints_test_impl(ctx):
     """W17: the hint table covers the documented sysexits, and nothing else."""
@@ -1214,6 +1535,7 @@ declared_bins_test = unittest.make(_declared_bins_test_impl)
 entrypoints_surface_test = unittest.make(_entrypoints_surface_test_impl)
 closure_packages_test = unittest.make(_closure_packages_test_impl)
 ambient_config_paths_test = unittest.make(_ambient_config_paths_test_impl)
+sigstore_trust_root_path_test = unittest.make(_sigstore_trust_root_path_test_impl)
 is_absolute_path_test = unittest.make(_is_absolute_path_test_impl)
 path_dirs_test = unittest.make(_path_dirs_test_impl)
 truthy_test = unittest.make(_truthy_test_impl)
@@ -1273,6 +1595,7 @@ def launcher_test_suite(name):
         entrypoints_surface_test,
         closure_packages_test,
         ambient_config_paths_test,
+        sigstore_trust_root_path_test,
         is_absolute_path_test,
         path_dirs_test,
         truthy_test,

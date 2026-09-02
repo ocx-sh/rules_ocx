@@ -6,6 +6,7 @@ load(":launcher_test.bzl", "launcher_test_suite")
 load(":manifest_test.bzl", "manifest_test_suite")
 load(":package_test.bzl", "package_test_suite")
 load(":platforms_test.bzl", "platforms_test_suite")
+load(":policy_test.bzl", "policy_test_suite")
 
 platforms_test_suite(name = "platforms_tests")
 
@@ -14,6 +15,8 @@ manifest_test_suite(name = "manifest_tests")
 launcher_test_suite(name = "launcher_tests")
 
 package_test_suite(name = "package_tests")
+
+policy_test_suite(name = "policy_tests")
 
 # Dogfooding smoke tests: the bootstrapped ocx binary and the project-tier
 # repo generated from this repo's own ocx.toml.

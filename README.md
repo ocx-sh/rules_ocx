@@ -91,21 +91,77 @@ honored by the repository rules:
 
 | Env var | Effect |
 | --- | --- |
-| `OCX_INSTALL_DIST_URL` | Fetch the release manifest from your mirror instead of the vendored snapshot. |
-| `OCX_INSTALL_MIRROR_URL` | Rewrite the ocx binary download to `<mirror>/<tag>/<filename>`. The manifest sha256 is still enforced — a mirror can move bytes, not change them. |
+| `OCX_INSTALL_DIST_URL` | Fetch the release manifest from your mirror instead of the vendored snapshot. The mirrored manifest is itself verified when it is named `<sha256>.json` (the form the setup.ocx.sh installers write); any other name is fetched unverified. |
+| `OCX_INSTALL_MIRROR_URL` | Rewrite the ocx binary download to `<mirror>/<tag>/<filename>`. The artifact sha256 is enforced either way — a mirror can move bytes, not change them. |
 | `OCX_MIRRORS` | JSON map `{"ocx.sh": "https://mirror.corp/ocx"}` — package pulls go to the mirror; `ocx.lock` digests stay keyed to the upstream host, so lockfiles are portable. |
 | `OCX_INSECURE_REGISTRIES` | Allow plain-HTTP mirrors (comma list). |
 | `OCX_AUTH_<REGISTRY>_{TYPE,USER,TOKEN}` | Registry credentials (also: docker config). Not enumerable by Bazel — run `bazel fetch --force` after changing auth. |
 
-Passed through to repo rules as well: `OCX_HOME`, `OCX_INDEX`, `OCX_OFFLINE`,
+Passed through to repo rules as well: `OCX_INDEX`, `OCX_OFFLINE`,
 `OCX_FROZEN`, `OCX_REMOTE`, `OCX_JOBS`, `OCX_DEFAULT_REGISTRY`, `OCX_CONFIG`,
-`OCX_NO_CONFIG`, `OCX_MANAGED_CONFIG`, `OCX_ALLOW_YANKED`, `OCX_PATCHES`,
-`OCX_PATCH_SNAPSHOT`.
+`OCX_NO_CONFIG`, `OCX_MANAGED_CONFIG`, `OCX_PATCHES`, `OCX_PATCH_SNAPSHOT`,
+`OCX_SIGSTORE_TRUSTED_ROOT` — together with `OCX_MIRRORS` and `OCX_INSECURE_REGISTRIES` above, that is
+the whole forwarded set. `OCX_HOME` is resolved rather than forwarded: it
+selects the store the rules point ocx at.
 
-`OCX_PROJECT`, `OCX_GLOBAL` and `OCX_QUIET` are deliberately *not* passed
-through — they are cleared for every invocation. Project context comes from the
-explicit `--project` flag (which `--global` refuses to combine with), and
-`--quiet` would suppress the JSON reports the rules parse.
+The three path-valued ones (`OCX_CONFIG`, `OCX_PATCH_SNAPSHOT`,
+`OCX_SIGSTORE_TRUSTED_ROOT`) must be **absolute**: a repository rule runs from
+Bazel's own working directory, so a relative value names a different file than
+it does in your shell and Bazel cannot watch it — it is refused rather than
+forwarded unwatched. `file://` on the trusted root is the one exception (ocx
+parses that one as a file reference and accepts the spelling): it is forwarded
+verbatim and left unwatched, so edits to it do not refetch. Any other scheme,
+and `file://` on the other two, are refused like any relative value.
+
+`OCX_NO_VERIFY` and `OCX_ALLOW_YANKED` are **not** among them: those two knobs
+are never read from the environment and are written on every invocation, so an
+exported value cannot switch verification off or let a yanked package through.
+Ask for either explicitly with `ocx.policy(...)` below.
+
+**Migrating**: `OCX_ALLOW_YANKED` used to be forwarded. A CI job that exported
+it now resolves as if it had not — silently, with no error. (`OCX_NO_VERIFY` is
+new with ocx 0.6.0 and was never forwarded.) Move the intent into MODULE.bazel:
+
+```starlark
+# before: OCX_ALLOW_YANKED=1 in the CI environment
+ocx.policy(allow_yanked = True)   # after
+```
+
+That is the explicit pair, not the whole surface. `OCX_SIGSTORE_TRUSTED_ROOT`
+is site-authoritative: with no `sigstore_trusted_root` attr set, an exported
+value replaces the trust anchor signatures are checked against, and
+`OCX_MIRRORS`/`OCX_INSECURE_REGISTRIES` redirect the transport. Set
+`sigstore_trusted_root` and pin digests (`pins`, or an `@sha256:` reference) to
+close both.
+
+`OCX_PROJECT`, `OCX_GLOBAL`, `OCX_QUIET`, `OCX_NO_PROJECT` and
+`OCX_NO_CONFIG_REFRESH` are deliberately *not* passed through — each carries a
+fixed value on every invocation. Project context comes from the explicit
+`--project` flag (which `--global` refuses to combine with), `--quiet` would
+suppress the JSON reports the rules parse, `OCX_NO_PROJECT` closes the
+directory walk a fetch would otherwise run from Bazel's own working directory,
+and the managed-config refresh wants a TTY no repo rule has.
+
+## Weakening posture: `ocx.policy`
+
+```starlark
+# MODULE.bazel — root module only, at most one tag; every attr defaults off.
+ocx.policy(
+    allow_unverified = True,       # OCX_NO_VERIFY=1, and `package install --no-verify`
+    allow_yanked = True,           # OCX_ALLOW_YANKED=1
+    sigstore_trusted_root = "//:trusted-root.json",
+)
+```
+
+With no tag the defaults apply and nothing is loosened. The tag cannot *enable*
+verification: ocx attaches that only under an operator-configured
+`[[trust.policy]]`, so these attrs can only decline to switch it off. A
+non-root or duplicate tag fails the build before any repository is declared.
+
+Root-only governs the **tag**. The same three attrs also sit on the public
+`ocx_project_repo` / `ocx_package_repo` rules in `//ocx:defs.bzl`, so a module
+that declares one of those directly — instead of going through this extension —
+sets its own posture, and nothing stops it.
 
 ## Managed config & patches
 
@@ -121,8 +177,10 @@ not exist yet. Creating
 snapshot, refetches the ocx repos. That is deliberate: a config edit that
 changes what a fetch resolves must not survive as a stale cache entry.
 
-Three exceptions: `/etc/ocx/config.toml` is skipped on Windows (no `/etc`
-there), `isolated_home = True` drops the `$OCX_HOME`-rooted tiers (they sit
+Three exceptions: `/etc/ocx/config.toml` is skipped on Windows (ocx still
+reads that literal path there, drive-relative, but it is not an absolute
+Windows path and cannot be watched as spelled — a documented gap),
+`isolated_home = True` drops the `$OCX_HOME`-rooted tiers (they sit
 inside the repository being fetched, which Bazel cannot watch), and a lazy
 `ocx.package(bins = …)` watches no tier at all — it never runs ocx at fetch
 time, so its launcher resolves the host config live on first execution
@@ -151,7 +209,7 @@ alone does not prune — so a CI job that exports `OCX_PATCH_SNAPSHOT` and sets
 `patch_snapshot` attr, and nothing diagnoses that. Together the two attrs are
 the hermetic pattern — the build reads exactly the file you committed. Lazy
 launchers (`bins`) carry both into their runfiles, so a deferred
-`ocx run` / `ocx package exec` sees the same configuration the fetch did —
+`ocx exec` / `ocx package exec` sees the same configuration the fetch did —
 which also means each file is copied into the repository and uploaded as an
 input with every action: keep credentials out of them.
 
@@ -180,7 +238,21 @@ repository rule has.
 ## Reproducibility
 
 - **Project tier** is fully pinned by your committed `ocx.lock` (per-platform
-  sha256 digests). A stale lock fails the fetch with instructions.
+  sha256 digests). A stale lock fails the fetch with instructions. In ocx 0.6.0
+  both `ocx pull` and `ocx exec` record a shell-activation consent stamp under
+  `$OCX_HOME/state/projects/`, keyed on the project directory they were pointed
+  at; it only matters once you install the ocx shell hook, and `ocx shell
+  revoke` clears it. The eager `ocx.project` fetch stamps **your checkout**
+  (`isolated_home = True` keeps that stamp inside the repository instead). A
+  lazy `ocx.project(bins = …)` launcher stamps on every `ocx exec`, i.e. at
+  action time on every machine that runs the tool — but it points ocx at the
+  fetched repository's own copy of `ocx.toml`, so the stamp keys on an
+  output-base directory you never `cd` into and that can activate nothing.
+  `bazel clean --expunge` removes that directory; the stamp itself lives in
+  the shared `$OCX_HOME`, and `ocx shell revoke` is what removes it.
+  `isolated_home` is not the escape there: it is incompatible with `bins`,
+  since a lazy launcher must resolve the store on whatever machine executes
+  it.
 - **Package tier**, pick one:
   - `index = "//:index"` — commit an index snapshot
     (`ocx --index index index update ocx.sh/jqlang/jq`); tags resolve frozen from it,
@@ -200,7 +272,7 @@ repository rule has.
 
 Add `bins = [...]` to `ocx.project()` or `ocx.package()` and nothing is
 pulled at fetch time: each name becomes a launcher that re-enters
-`ocx run` / `ocx package exec`, materializing content on its first
+`ocx exec` / `ocx package exec`, materializing content on its first
 execution. Tool content never becomes a Bazel action input — actions key on
 the lockfile (project) or the digest-pinned reference (package, so `pins`
 or `@sha256:` is required) — and the POSIX launchers resolve everything

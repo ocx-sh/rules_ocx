@@ -19,7 +19,7 @@ jobs:
       - name: Setup OCX
         uses: ocx-sh/setup-ocx@v1
         with:
-          version: "0.5.8"
+          version: "0.6.0"
       - name: Verify tag matches MODULE.bazel version
         run: |
           tag="${GITHUB_REF_NAME#v}"
@@ -37,7 +37,7 @@ jobs:
           integrity="sha256-$(openssl dgst -sha256 -binary "$archive" | openssl base64 -A)"
           echo "integrity: $integrity" | tee integrity.txt
       - name: Generate release notes
-        run: ocx run -- git-cliff --latest --strip header -o notes.md
+        run: ocx exec -- git-cliff --latest --strip header -o notes.md
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}

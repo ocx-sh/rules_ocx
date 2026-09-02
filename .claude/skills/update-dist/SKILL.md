@@ -101,7 +101,7 @@ row.
    download. Force a real fetch:
 
    ```sh
-   ocx run -- bazelisk --output_base=/tmp/ocx-fresh \
+   ocx exec -- bazelisk --output_base=/tmp/ocx-fresh \
      test //ocx/tests:ocx_tool_test --repository_cache=/tmp/ocx-emptycache \
      --test_output=all
    ```
@@ -162,6 +162,16 @@ locally.
     state/managed-config/config.toml}`. ocx reports none of them through a
     read-only command, so if a release relocates one the watch covers nothing
     and nothing errors — a site config edit stops refetching.
+  - `sigstore_trust_root_path()` in `ocx/private/repo_utils.bzl`, which
+    hard-codes ocx's rung-4 trusted-root convention
+    `$OCX_HOME/sigstore/trusted-root.json`. Same failure mode: relocate the
+    directory upstream and the watch covers nothing, so editing or dropping in
+    a trusted root stops refetching the repos that verified against it.
+  - The self-verifying manifest convention `manifest_sha256()` parses —
+    `dist/<sha256>.json`, a 64-lowercase-hex name published alongside
+    `dist.json`. It mirrors www-setup's `dist_pin_digest` (`src/install.sh`);
+    if the installers change the name shape, the manifest silently downloads
+    unverified, exactly as an unrecognized name does today.
   - `_TRUTHY` in `ocx/private/repo_utils.bzl`, which re-implements ocx's
     `BooleanString` set. A spelling ocx starts accepting that this list omits
     is silently read as false.

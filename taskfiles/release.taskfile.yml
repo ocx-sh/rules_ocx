@@ -36,9 +36,9 @@ tasks:
           if [ -n "{{.VERSION}}" ]; then
             printf 'v%s' "{{.VERSION | default "" | trimPrefix "v"}}"
           elif [ "{{.BUMP}}" = "auto" ]; then
-            ocx run -- git-cliff --bumped-version
+            ocx exec -- git-cliff --bumped-version
           else
-            ocx run -- git-cliff --bumped-version --bump "{{.BUMP}}"
+            ocx exec -- git-cliff --bumped-version --bump "{{.BUMP}}"
           fi
     cmds:
       - echo "Next version:{{.NEXT_VERSION}}"
@@ -52,7 +52,7 @@ tasks:
           exit 1
         fi
         sed -i 's/^\([[:space:]]*version = "\)[^"]*\(",\)$/\1{{.NEXT_VERSION | trimPrefix "v"}}\2/' MODULE.bazel
-      - ocx run -- git-cliff --tag "{{.NEXT_VERSION}}" -o CHANGELOG.md
+      - ocx exec -- git-cliff --tag "{{.NEXT_VERSION}}" -o CHANGELOG.md
       - task verify
       - |
         echo ""
