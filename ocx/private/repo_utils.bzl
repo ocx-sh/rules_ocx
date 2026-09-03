@@ -688,22 +688,24 @@ def make_ocx_env(ctx, host, isolated_home):
         if override:
             env[key] = str(ctx.path(override)) if row.path else "1"
         elif row.path and env.get(key, ""):
-            # A `file://` value on a `file_url` row is not a path to test or
-            # watch: ocx reads OCX_SIGSTORE_TRUSTED_ROOT through
-            # FileReference::parse, which consumes a case-insensitive `file://`
-            # prefix at exactly this door (ocx-sh/ocx#379). Forwarded verbatim
-            # and left unwatched — the watch fails open there, which beats
-            # refusing a value ocx honours. Scoped to that row and that scheme
-            # because nothing else has the grammar: the other two `path` rows
-            # are a plain PathBuf::from, and every other scheme (`https://`, a
-            # bare `foo://`) is a literal relative filename to ocx — those keep
-            # the refusal below and fail closed. A relative `file://x` is the
-            # one value still forwarded unwatched; ocx reads it as `x` and
-            # errors loudly (exit 74) when it is not there.
-            if not (row.file_url and env[key].lower().startswith("file://")):
-                if not is_absolute_path(env[key], host.is_windows):
-                    fail(RELATIVE_ENV_PATH_MSG.format(key, env[key], row.attr))
-                ctx.watch(env[key])
+            # A `file://` value on a `file_url` row still names a file: ocx
+            # reads OCX_SIGSTORE_TRUSTED_ROOT through FileReference::parse,
+            # which consumes a case-insensitive `file://` prefix at exactly
+            # this door (ocx-sh/ocx#379). Strip the prefix to get the path
+            # Bazel watches, and forward the value ocx was given verbatim.
+            # Scoped to that row and that scheme because nothing else has the
+            # grammar: the other two `path` rows are a plain PathBuf::from, and
+            # every other scheme (`https://`, a bare `foo://`) is a literal
+            # relative filename to ocx. The absoluteness test then covers both
+            # spellings — a `file://x` whose remainder is relative is refused
+            # like any other relative value, since ocx reads it as `x` from a
+            # working directory that is not the caller's.
+            watched = env[key]
+            if row.file_url and watched.lower().startswith("file://"):
+                watched = watched[len("file://"):]
+            if not is_absolute_path(watched, host.is_windows):
+                fail(RELATIVE_ENV_PATH_MSG.format(key, env[key], row.attr))
+            ctx.watch(watched)
 
     # The weakening pair, written last and unconditionally: these two rows are
     # never read from the environment, so this is the only thing that decides
