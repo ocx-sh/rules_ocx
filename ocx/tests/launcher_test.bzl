@@ -290,28 +290,29 @@ def _make_ocx_env_test_impl(ctx):
     )
 
     # A `file://` trust root is a spelling ocx accepts at exactly this door
-    # (FileReference::parse, ocx-sh/ocx#379), so it is forwarded verbatim
-    # instead of being refused as a relative path — and left unwatched, since
-    # ctx.watch() has no path to take. The watch fails open there. Case-
-    # insensitive, matching the prefix ocx consumes; the guard cases pin the
-    # other half — no other row and no other scheme takes this branch.
-    url = _env_ctx(env = dict(_AMBIENT, OCX_SIGSTORE_TRUSTED_ROOT = "FILE:///opt/trusted-root.json"))
-    asserts.equals(
-        env,
-        "FILE:///opt/trusted-root.json",
-        make_ocx_env(url, host, False).env.get("OCX_SIGSTORE_TRUSTED_ROOT", "<absent>"),
-    )
-    url = _env_ctx(env = dict(_AMBIENT, OCX_SIGSTORE_TRUSTED_ROOT = "file:///opt/trusted-root.json"))
-    asserts.equals(
-        env,
-        "file:///opt/trusted-root.json",
-        make_ocx_env(url, host, False).env.get("OCX_SIGSTORE_TRUSTED_ROOT", "<absent>"),
-    )
-    asserts.false(
-        env,
-        "file:///opt/trusted-root.json" in url.watched,
-        "a file:// trust root was handed to ctx.watch()",
-    )
+    # (FileReference::parse, ocx-sh/ocx#379), so it is forwarded verbatim —
+    # and watched at the path behind the prefix, so editing the trust anchor
+    # refetches. Case-insensitive, matching the prefix ocx consumes; the guard
+    # cases pin the other half — no other row and no other scheme takes this
+    # branch, and a `file://` whose remainder is relative is refused like any
+    # other relative value.
+    for spelling in ["FILE:///opt/trusted-root.json", "file:///opt/trusted-root.json"]:
+        url = _env_ctx(env = dict(_AMBIENT, OCX_SIGSTORE_TRUSTED_ROOT = spelling))
+        asserts.equals(
+            env,
+            spelling,
+            make_ocx_env(url, host, False).env.get("OCX_SIGSTORE_TRUSTED_ROOT", "<absent>"),
+        )
+        asserts.true(
+            env,
+            "/opt/trusted-root.json" in url.watched,
+            spelling + " was not watched at the path behind the prefix",
+        )
+        asserts.false(
+            env,
+            spelling in url.watched,
+            "the URL spelling itself was handed to ctx.watch()",
+        )
 
     # isolated_home moves the store inside the repository being fetched, which
     # cannot be watched — so ocx's ~/.ocx rung is dropped rather than pointed
@@ -1202,9 +1203,11 @@ _GUARD_CASES = {
     # `file://` carve-out is scoped to the one row ocx parses as a file
     # reference and to that one scheme: on any other row (`OCX_CONFIG`, whose
     # value is a plain PathBuf::from) and under any other scheme the string is
-    # a relative path to ocx, so the same refusal stands.
+    # a relative path to ocx, so the same refusal stands — and so does it on
+    # that row when the path behind the prefix is itself relative.
     "relative_translucent_path": "must be an absolute path",
     "file_url_wrong_row": "must be an absolute path",
+    "file_url_relative": "must be an absolute path",
     "url_wrong_scheme": "must be an absolute path",
     # F1: an explicitly declared bins entry is an error, not a silent drop.
     "bad_bins_attr": "cannot be a launcher",
@@ -1249,6 +1252,15 @@ def _guard_impl(ctx):
     elif case == "file_url_wrong_row":
         make_ocx_env(
             _env_ctx(env = {"OCX_HOME": "/home/u/.ocx", "OCX_CONFIG": "file:///etc/ocx/config.toml"}),
+            host_info("linux", "amd64"),
+            False,
+        )
+    elif case == "file_url_relative":
+        make_ocx_env(
+            _env_ctx(env = {
+                "OCX_HOME": "/home/u/.ocx",
+                "OCX_SIGSTORE_TRUSTED_ROOT": "file://trusted-root.json",
+            }),
             host_info("linux", "amd64"),
             False,
         )

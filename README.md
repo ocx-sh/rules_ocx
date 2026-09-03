@@ -108,10 +108,11 @@ The three path-valued ones (`OCX_CONFIG`, `OCX_PATCH_SNAPSHOT`,
 `OCX_SIGSTORE_TRUSTED_ROOT`) must be **absolute**: a repository rule runs from
 Bazel's own working directory, so a relative value names a different file than
 it does in your shell and Bazel cannot watch it — it is refused rather than
-forwarded unwatched. `file://` on the trusted root is the one exception (ocx
-parses that one as a file reference and accepts the spelling): it is forwarded
-verbatim and left unwatched, so edits to it do not refetch. Any other scheme,
-and `file://` on the other two, are refused like any relative value.
+forwarded unwatched. `file://` on the trusted root is the one accepted
+spelling (ocx parses that one as a file reference): it is forwarded verbatim
+and watched at the path behind the prefix, which must itself be absolute. Any
+other scheme, and `file://` on the other two, are refused like any relative
+value.
 
 `OCX_NO_VERIFY` and `OCX_ALLOW_YANKED` are **not** among them: those two knobs
 are never read from the environment and are written on every invocation, so an
