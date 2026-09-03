@@ -30,26 +30,23 @@ load(
 
 visibility(["//ocx", "//ocx/tests"])
 
-def install_args(json_pkg, platform_arg, allow_unverified, pkg):
+def install_args(json_pkg, platform_arg, pkg):
     """The argv for `ocx package install` (pure).
 
-    The one command rules_ocx runs that takes `--no-verify`, and the flag
-    outranks OCX_NO_VERIFY in ocx's own ladder — so a loosened policy says it
-    twice, in the environment and on the argv. It sits after the platform
-    selector and before the reference: a flag placed after the positional
-    would be read as part of it.
+    Carries no verify flag: `make_ocx_env()` writes OCX_NO_VERIFY — ocx's own
+    documented equivalent of `--no-verify` — on every invocation, so the
+    posture is already settled before the argv is built. The platform selector
+    stays ahead of the reference, which is the trailing positional.
 
     Args:
         json_pkg: `root_flags + ["--format", "json", "package"]`.
         platform_arg: `["-p", <platform>]`, or `[]` for the host.
-        allow_unverified: resolved ocx.policy() `allow_unverified`.
         pkg: the (possibly pinned) package reference to install.
 
     Returns:
         argv list, after the ocx binary.
     """
-    verify = ["--no-verify"] if allow_unverified else []
-    return json_pkg + ["install"] + platform_arg + verify + [pkg]
+    return json_pkg + ["install"] + platform_arg + [pkg]
 
 def _lazy_package(ctx, host, pkg):
     """Renders text-only launchers deferring `ocx package install` to first use.
@@ -189,7 +186,7 @@ def _ocx_package_repo_impl(ctx):
     stdout = run_ocx(
         ctx,
         binary,
-        install_args(json_pkg, platform_arg, ctx.attr.allow_unverified, pkg),
+        install_args(json_pkg, platform_arg, pkg),
         ocx_env.env,
         "installing " + pkg,
         host.is_windows,

@@ -44,7 +44,7 @@ Overrides the ocx CLI bootstrap. Root module only; at most one.
 | :------------- | :------------- | :------------- | :------------- | :------------- |
 | <a id="ocx.download-dist_manifest"></a>dist_manifest |  dist.json release manifest snapshot to resolve the download from.   | <a href="https://bazel.build/concepts/labels">Label</a> | optional |  `"@rules_ocx//dist:dist.json"`  |
 | <a id="ocx.download-triple"></a>triple |  Exact release target triple, overriding host detection.   | String | optional |  `""`  |
-| <a id="ocx.download-version"></a>version |  Exact ocx version (default: the version pinned with this rules_ocx release). Must be 0.6.0 or newer — rules_ocx drives `ocx exec` and `package install --no-verify`, and the floor is checked before any download.   | String | optional |  `""`  |
+| <a id="ocx.download-version"></a>version |  Exact ocx version (default: the version pinned with this rules_ocx release). Must be 0.6.0 or newer — rules_ocx drives `ocx exec` and pins `OCX_NO_VERIFY`, and the floor is checked before any download.   | String | optional |  `""`  |
 
 <a id="ocx.package"></a>
 
@@ -78,7 +78,7 @@ Sets the build's weakening posture — unverified installs, yanked releases, a p
 
 | Name  | Description | Type | Mandatory | Default |
 | :------------- | :------------- | :------------- | :------------- | :------------- |
-| <a id="ocx.policy-allow_unverified"></a>allow_unverified |  When true, sets OCX_NO_VERIFY=1 for every invocation and passes `--no-verify` to `ocx package install`. When false, OCX_NO_VERIFY=0 is written anyway, so an ambient value cannot switch verification off. It cannot switch verification *on*: ocx attaches that only under an operator-configured `[[trust.policy]]`, so this attr can only decline to disable it — and `no_config = True` prunes the discovered tiers that policy lives in, so there is then nothing to decline and verification is off either way.   | Boolean | optional |  `False`  |
+| <a id="ocx.policy-allow_unverified"></a>allow_unverified |  When true, sets OCX_NO_VERIFY=1 for every invocation — ocx's own documented equivalent of `--no-verify`, so no verify flag is ever put on an argv. When false, OCX_NO_VERIFY=0 is written anyway, so an ambient value cannot switch verification off. It cannot switch verification *on*: ocx attaches that only under an operator-configured `[[trust.policy]]`, so this attr can only decline to disable it — and `no_config = True` prunes the discovered tiers that policy lives in, so there is then nothing to decline and verification is off either way.   | Boolean | optional |  `False`  |
 | <a id="ocx.policy-allow_yanked"></a>allow_yanked |  Whether resolution may fall back to a yanked release — sets OCX_ALLOW_YANKED for every invocation.   | Boolean | optional |  `False`  |
 | <a id="ocx.policy-sigstore_trusted_root"></a>sigstore_trusted_root |  A sigstore trusted-root.json pinned in-tree. Sets OCX_SIGSTORE_TRUSTED_ROOT for every invocation, overriding the ambient `<OCX_HOME>/sigstore/trusted-root.json` rung, and the file is watched. Under lazy provisioning (`bins` on `ocx.project`/`ocx.package`) it is copied into the repository and uploaded as an input with every action.   | <a href="https://bazel.build/concepts/labels">Label</a> | optional |  `None`  |
 

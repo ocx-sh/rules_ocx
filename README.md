@@ -147,7 +147,7 @@ and the managed-config refresh wants a TTY no repo rule has.
 ```starlark
 # MODULE.bazel — root module only, at most one tag; every attr defaults off.
 ocx.policy(
-    allow_unverified = True,       # OCX_NO_VERIFY=1, and `package install --no-verify`
+    allow_unverified = True,       # OCX_NO_VERIFY=1 on every ocx call
     allow_yanked = True,           # OCX_ALLOW_YANKED=1
     sigstore_trusted_root = "//:trusted-root.json",
 )

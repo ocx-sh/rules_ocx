@@ -379,3 +379,4 @@ live in the plan (`.agents/plans/plan_ocx-0-6-0-adoption.md`).
 |------|--------|--------|
 | 2026-09-02 | architect | Initial draft, accepted |
 | 2026-09-02 | hex-plan review | `verify` → `allow_unverified`; `--no-verify` only on `package install`; mirror attrs dropped (env-only site knobs); `OCX_NO_PROJECT` pinned `1`, `OCX_CEILING_PATH` row dropped; trust root watched outside the `no_config` gate via a separate helper; questions resolved |
+| 2026-09-03 | post-release fix | Amendment: `--no-verify` dropped from the `package install` argv — ocx documents `OCX_NO_VERIFY` as the flag's equivalent and `make_ocx_env()` already writes it on every call, so the flag was a second version-unstable surface with no behavioural gain. Decision 3 is unchanged in intent; only its mechanism is now env-only. |
