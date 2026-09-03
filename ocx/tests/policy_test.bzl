@@ -193,34 +193,32 @@ _JSON_PKG = ["--format", "json", "package"]
 _PKG = "ocx.sh/jqlang/jq:latest@sha256:" + "a" * 64
 
 def _install_args_test_impl(ctx):
-    """C-007: --no-verify reaches `package install`, and only there."""
+    """C-007: `ocx package install` carries no verify flag, under any policy.
+
+    The posture rides on OCX_NO_VERIFY, which `make_ocx_env()` writes on every
+    invocation — ocx's own documented equivalent of `--no-verify`.
+    """
     env = unittest.begin(ctx)
 
-    # Default: the flag is absent, so ocx applies whatever the operator's
-    # [[trust.policy]] asked for.
+    # The platform selector sits before the reference: anything placed after
+    # the positional would be read as part of it.
     asserts.equals(
         env,
         _JSON_PKG + ["install", _PKG],
-        install_args(_JSON_PKG, [], False, _PKG),
+        install_args(_JSON_PKG, [], _PKG),
     )
     asserts.equals(
         env,
         _JSON_PKG + ["install", "-p", "linux/amd64", _PKG],
-        install_args(_JSON_PKG, ["-p", "linux/amd64"], False, _PKG),
+        install_args(_JSON_PKG, ["-p", "linux/amd64"], _PKG),
     )
 
-    # Loosened: the flag sits after the platform selector and before the
-    # reference — a positional after `install` would be read as the package.
-    asserts.equals(
-        env,
-        _JSON_PKG + ["install", "--no-verify", _PKG],
-        install_args(_JSON_PKG, [], True, _PKG),
-    )
-    asserts.equals(
-        env,
-        _JSON_PKG + ["install", "-p", "linux/amd64", "--no-verify", _PKG],
-        install_args(_JSON_PKG, ["-p", "linux/amd64"], True, _PKG),
-    )
+    # Neither spelling of the flag ever appears — the exact-argv assertions
+    # above already pin that, but this fails loudly if the builder grows one.
+    for platform_arg in [[], ["-p", "linux/amd64"]]:
+        argv = install_args(_JSON_PKG, platform_arg, _PKG)
+        asserts.false(env, "--no-verify" in argv, "install argv carries --no-verify")
+        asserts.false(env, "--verify" in argv, "install argv carries --verify")
     return unittest.end(env)
 
 def _pull_args_test_impl(ctx):

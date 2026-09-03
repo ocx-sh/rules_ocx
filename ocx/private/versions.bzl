@@ -20,7 +20,7 @@ MIN_OCX_VERSION = "0.6.0"
 MIN_OCX_VERSION_MSG = (
     "rules_ocx: ocx.download(version = \"{version}\") " +
     "requires ocx {min} or newer" +
-    " — rules_ocx drives `ocx exec` and `package install --no-verify`, " +
+    " — rules_ocx drives `ocx exec` and pins `OCX_NO_VERIFY`, " +
     "neither of which exists on {version}. Fix: version = \"{min}\" or newer " +
     "(rules_ocx 0.3.0 is the last release supporting ocx 0.5.8)."
 )

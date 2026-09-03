@@ -461,8 +461,9 @@ CONFIG_ATTRS = {
 POLICY_ATTRS = {
     "allow_unverified": attr.bool(
         default = False,
-        doc = "When true, sets OCX_NO_VERIFY=1 for every invocation and passes `--no-verify` " +
-              "to `ocx package install`. When false, OCX_NO_VERIFY=0 is written anyway, so an " +
+        doc = "When true, sets OCX_NO_VERIFY=1 for every invocation — ocx's own documented " +
+              "equivalent of `--no-verify`, so no verify flag is ever put on an argv. " +
+              "When false, OCX_NO_VERIFY=0 is written anyway, so an " +
               "ambient value cannot switch verification off. It cannot switch verification " +
               "*on*: ocx attaches that only under an operator-configured `[[trust.policy]]`, " +
               "so this attr can only decline to disable it — and `no_config = True` prunes " +

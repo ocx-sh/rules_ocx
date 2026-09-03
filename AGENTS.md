@@ -14,8 +14,8 @@ in-tree draft ocx-sh/ocx#12.
   `dist/dist.json` (snapshot of https://setup.ocx.sh/dist.json),
   sha256-enforced. **Floor: ocx ≥ 0.6.0** (`MIN_OCX_VERSION`), because the
   lazy project launcher re-enters `ocx exec` (`ocx run` is
-  hidden-and-warning in 0.6, deleted in 0.7) and `package install` takes
-  `--no-verify` — `ocx.download(version = …)` below it fails before any
+  hidden-and-warning in 0.6, deleted in 0.7) and `OCX_NO_VERIFY` is new in
+  0.6.0 — `ocx.download(version = …)` below it fails before any
   download. Mirror knobs (site settings, env-only — no attrs):
   `OCX_INSTALL_DIST_URL` (manifest), `OCX_INSTALL_MIRROR_URL` (artifact host,
   `<mirror>/<tag>/<filename>`). A manifest URL whose last path segment is
@@ -39,8 +39,8 @@ in-tree draft ocx-sh/ocx#12.
   the config-ambience one.
 - **Policy tier** (`ocx.policy`, root-only, at most one): the build's
   *signature and yank* posture is a function of `MODULE.bazel` alone.
-  `allow_unverified` (→ `OCX_NO_VERIFY` plus `--no-verify` on `package
-  install`) and `allow_yanked` (→ `OCX_ALLOW_YANKED`) are **explicit-only** —
+  `allow_unverified` (→ `OCX_NO_VERIFY`, ocx's own documented equivalent of
+  `--no-verify`) and `allow_yanked` (→ `OCX_ALLOW_YANKED`) are **explicit-only** —
   never read from the ambient environment, always written, so an exported CI
   variable cannot decide what a build verifies or accepts. A non-root or
   duplicate tag `fail()`s before any repo is declared — root-only governs the
