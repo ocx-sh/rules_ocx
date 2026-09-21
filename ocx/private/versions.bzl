@@ -12,7 +12,7 @@ load("@bazel_skylib//lib:versions.bzl", "versions")
 
 visibility(["//ocx", "//ocx/tests"])
 
-DEFAULT_OCX_VERSION = "0.6.0"
+DEFAULT_OCX_VERSION = "0.6.2"
 
 # Floor checked by _ocx_download_impl before any download (min_version_error).
 MIN_OCX_VERSION = "0.6.0"
