@@ -274,15 +274,16 @@ def _make_ocx_env_test_impl(ctx):
     asserts.equals(env, "/w/snap.json", attrs["OCX_PATCH_SNAPSHOT"])
     asserts.equals(env, "", attrs["OCX_PATCHES"])
 
-    # A translucent label attr replaces the ambient value and is watched
-    # through ctx.path(); the shadowed ambient file is not, since nothing
-    # reads it any more.
+    # A translucent label attr replaces the ambient value and is watched —
+    # ctx.path() alone registers nothing since Bazel 7.1; the shadowed ambient
+    # file is not, since nothing reads it any more.
     pinned = _env_ctx(env = _AMBIENT, sigstore_trusted_root = "/w/trusted-root.json")
     asserts.equals(
         env,
         "/w/trusted-root.json",
         make_ocx_env(pinned, host, False).env.get("OCX_SIGSTORE_TRUSTED_ROOT", "<absent>"),
     )
+    asserts.true(env, "/w/trusted-root.json" in pinned.watched, "the attr trust root is not watched")
     asserts.false(
         env,
         "/site/trusted-root.json" in pinned.watched,

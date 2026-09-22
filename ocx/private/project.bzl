@@ -130,8 +130,13 @@ def _lazy_project(ctx, host, binary):
 def _ocx_project_repo_impl(ctx):
     host = host_info(ctx.os.name, ctx.os.arch)
     binary = ocx_bin(ctx)
+
+    # ctx.path() resolves a label but watches nothing (Bazel >= 7.1), so an
+    # edited lock would leave the fetched repo stale; ctx.watch() records the
+    # content dependency.
+    ctx.watch(ctx.attr.ocx_toml)
+    ctx.watch(ctx.attr.ocx_lock)
     toml = ctx.path(ctx.attr.ocx_toml)
-    ctx.path(ctx.attr.ocx_lock)  # register the lock as an input — edits refetch
     ocx_env = make_ocx_env(ctx, host, ctx.attr.isolated_home)
     project = ["--project", str(toml)]
 

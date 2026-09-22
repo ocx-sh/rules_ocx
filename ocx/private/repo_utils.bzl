@@ -674,7 +674,8 @@ def make_ocx_env(ctx, host, isolated_home):
 
     # Attrs beat the ambient environment: a bool row is only ever turned on
     # (its "off" is the ambient answer), a path row becomes the resolved file,
-    # and ctx.path() is what registers that file with Bazel. A surviving
+    # and ctx.watch() is what registers that file with Bazel — ctx.path()
+    # alone watches nothing since Bazel 7.1. A surviving
     # ambient path row is watched instead — it names a file ocx reads that
     # Bazel would otherwise never see, so editing an ambient site config would
     # not refetch, and a relative one that cannot be watched is refused rather
@@ -686,7 +687,11 @@ def make_ocx_env(ctx, host, isolated_home):
         row = OCX_ENV_CLASSES[key]
         override = getattr(ctx.attr, row.attr)
         if override:
-            env[key] = str(ctx.path(override)) if row.path else "1"
+            if row.path:
+                ctx.watch(override)
+                env[key] = str(ctx.path(override))
+            else:
+                env[key] = "1"
         elif row.path and env.get(key, ""):
             # A `file://` value on a `file_url` row still names a file: ocx
             # reads OCX_SIGSTORE_TRUSTED_ROOT through FileReference::parse,
@@ -744,9 +749,13 @@ def ocx_bin(ctx):
     Args:
         ctx: repository_ctx with an `ocx` label attr.
 
+    Watches the binary, so an `ocx.download(version = …)` change refetches
+    every repo the old binary produced.
+
     Returns:
         path object of the executable to invoke.
     """
+    ctx.watch(ctx.attr.ocx)
     stable = ctx.path(ctx.attr.ocx)
     exe = stable.dirname.get_child(stable.basename + ".exe")
     return exe if exe.exists else stable
