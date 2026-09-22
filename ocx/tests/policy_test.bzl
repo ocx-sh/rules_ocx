@@ -7,7 +7,7 @@ into `ocx package install`, `ocx pull` and the lazy project launcher."""
 
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 load("//ocx/private:package.bzl", "install_args")
-load("//ocx/private:project.bzl", "lazy_project_command", "pull_args")
+load("//ocx/private:project.bzl", "env_args", "lazy_project_command", "pull_args")
 load(
     "//ocx/private:repo_utils.bzl",
     "CONFIG_ATTRS",
@@ -24,7 +24,7 @@ load(
 # C-001: the four classes, and how many rows each carries. A count is what
 # catches a row that silently changed class — the per-row assertions below
 # only see the row they are on.
-_CLASS_SIZES = {"site": 10, "translucent": 4, "explicit": 2, "pinned": 5}
+_CLASS_SIZES = {"site": 10, "translucent": 4, "explicit": 2, "pinned": 7}
 
 # C-001: the rows `no_config` blanks. OCX_SIGSTORE_TRUSTED_ROOT is deliberately
 # absent — a trust root is not a config tier, and with `no_config` plus a
@@ -239,6 +239,28 @@ def _pull_args_test_impl(ctx):
     )
     return unittest.end(env)
 
+def _env_args_test_impl(ctx):
+    """0.6.1+: the eager `ocx env` composes store paths, never toolchain links.
+
+    Without `--pinned` a project `env` answers with
+    `<project>/.ocx/toolchain/links/…` — a tree nothing renders beside the
+    user's ocx.toml here, so every baked launcher would point at nothing.
+    """
+    env = unittest.begin(ctx)
+    project = ["--project", "/w/ocx.toml"]
+    asserts.equals(
+        env,
+        ["--format", "json"] + project + ["env", "--pinned"] + EAGER_LAZY_MODE,
+        env_args(project, [], []),
+    )
+    asserts.equals(
+        env,
+        ["--format", "json"] + project + ["env", "--pinned", "--platform", "linux/arm64"] +
+        EAGER_LAZY_MODE + ["-g", "dev,ci"],
+        env_args(project, ["--platform", "linux/arm64"], ["dev", "ci"]),
+    )
+    return unittest.end(env)
+
 def _lazy_project_command_test_impl(ctx):
     """C-015: the lazy project launcher re-enters `ocx exec`, not `ocx run`."""
     env = unittest.begin(ctx)
@@ -256,6 +278,7 @@ def _lazy_project_command_test_impl(ctx):
         "--project",
         '"$(rlocation r+proj/ocx.toml)"',
         "exec",
+        "--pinned",
         "-g",
         "'dev,ci'",
         "--",
@@ -268,6 +291,7 @@ def _lazy_project_command_test_impl(ctx):
         "--project",
         '"C:\\repo\\ocx.toml"',
         "exec",
+        "--pinned",
         "--",
         "shellcheck",
     ], lazy_project_command('"C:\\repo\\ocx.exe"', '"C:\\repo\\ocx.toml"', [], "shellcheck"))
@@ -280,6 +304,7 @@ resolve_policy_test = unittest.make(_resolve_policy_test_impl)
 policy_kwargs_test = unittest.make(_policy_kwargs_test_impl)
 install_args_test = unittest.make(_install_args_test_impl)
 pull_args_test = unittest.make(_pull_args_test_impl)
+env_args_test = unittest.make(_env_args_test_impl)
 lazy_project_command_test = unittest.make(_lazy_project_command_test_impl)
 
 def policy_test_suite(name):
@@ -296,5 +321,6 @@ def policy_test_suite(name):
         policy_kwargs_test,
         install_args_test,
         pull_args_test,
+        env_args_test,
         lazy_project_command_test,
     )

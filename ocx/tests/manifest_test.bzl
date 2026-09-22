@@ -61,7 +61,7 @@ def _archive_type_test_impl(ctx):
     return unittest.end(env)
 
 # The two message fragments, held in constants (.claude/rules/starlark.md).
-_FLOOR_FRAGMENT = "requires ocx 0.6.0 or newer"
+_FLOOR_FRAGMENT = "requires ocx 0.6.1 or newer"
 _MALFORMED_FRAGMENT = "is not a dotted-numeric version"
 
 # 64 lowercase hex characters.
@@ -69,12 +69,12 @@ _HEX = "0123456789abcdef" * 4
 
 _DIST = "https://mirror.example/dist/"
 
-# Covers: C-012, S-008 — ocx.download(version) below the 0.6.0 floor is refused
+# Covers: C-012, S-008 — ocx.download(version) below the 0.6.1 floor is refused
 # before any download; at or above it the floor is silent.
 def _min_version_error_test_impl(ctx):
     env = unittest.begin(ctx)
 
-    asserts.equals(env, "0.6.0", MIN_OCX_VERSION)
+    asserts.equals(env, "0.6.1", MIN_OCX_VERSION)
 
     below = min_version_error("0.5.8")
     asserts.true(
@@ -83,7 +83,14 @@ def _min_version_error_test_impl(ctx):
         "0.5.8 must be refused with the floor message, got: %r" % below,
     )
 
-    asserts.equals(env, "", min_version_error("0.6.0"))
+    # 0.6.0 has neither `--pinned` nor OCX_NO_CONSENT.
+    below_patch = min_version_error("0.6.0")
+    asserts.true(
+        env,
+        _FLOOR_FRAGMENT in below_patch,
+        "0.6.0 must be refused with the floor message, got: %r" % below_patch,
+    )
+    asserts.equals(env, "", min_version_error("0.6.1"))
     asserts.equals(env, "", min_version_error("0.7.1"))
 
     # Numeric, not lexical: "0.10.0" < "0.6.0" as strings.

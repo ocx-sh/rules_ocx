@@ -28,8 +28,8 @@ _download = tag_class(
         ),
         "version": attr.string(
             doc = "Exact ocx version (default: the version pinned with this rules_ocx " +
-                  "release). Must be " + MIN_OCX_VERSION + " or newer — rules_ocx drives " +
-                  "`ocx exec` and pins `OCX_NO_VERIFY`, and the floor is checked " +
+                  "release). Must be " + MIN_OCX_VERSION + " or newer — rules_ocx passes " +
+                  "`--pinned` to `ocx env`/`exec` and pins `OCX_NO_CONSENT`, and the floor is checked " +
                   "before any download.",
         ),
     },

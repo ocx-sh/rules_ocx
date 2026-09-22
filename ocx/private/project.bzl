@@ -46,12 +46,38 @@ def pull_args(project, target, groups):
         args += ["-g", ",".join(groups)]
     return args
 
+def env_args(project, target, groups):
+    """The argv for `ocx --format json env` (pure).
+
+    `--pinned`: since 0.6.1 a project `env` composes through the toolchain
+    links under `<project>/.ocx/toolchain/links/` by default — a tree only a
+    render writes, and one that moves on the next `ocx update`. The flag
+    composes the digest-pinned store paths instead (0.6.0's only answer), and
+    as the CLI tier it outranks ocx.toml's `pinned` key and
+    OCX_TOOLCHAIN_PINNED.
+
+    Args:
+        project: `["--project", <toml path>]`.
+        target: `["--platform", <platform>]`, or `[]` for the host.
+        groups: `ctx.attr.groups`.
+
+    Returns:
+        argv list, after the ocx binary.
+    """
+    args = ["--format", "json"] + project + ["env", "--pinned"] + target + EAGER_LAZY_MODE
+    if groups:
+        args += ["-g", ",".join(groups)]
+    return args
+
 def lazy_project_command(binary, toml, groups, name):
     """The lazy launcher argv that re-enters ocx at execution time (pure).
 
     `exec`, not `run`: 0.6.0 hides `ocx run` behind a deprecation warning on
     every invocation and 0.7 deletes it, so a launcher baked with the old verb
-    is noisy today and broken on the next CLI bump.
+    is noisy today and broken on the next CLI bump. `--pinned` for the reason
+    env_args() gives, and one more: an unpinned `exec` heals the missing
+    links, writing `.ocx/toolchain/` beside the `--project` file — here the
+    runfiles copy, inside the external repository, from within an action.
 
     Args:
         binary: the ocx binary argv fragment, already quoted per OS by the caller.
@@ -63,7 +89,7 @@ def lazy_project_command(binary, toml, groups, name):
         argv list; every element arrives already quoted per OS by the caller,
         this builder quotes nothing.
     """
-    return [binary, "--project", toml, "exec"] + groups + ["--", name]
+    return [binary, "--project", toml, "exec", "--pinned"] + groups + ["--", name]
 
 def _lazy_project(ctx, host, binary):
     """Renders text-only launchers deferring `ocx pull` to first execution.
@@ -171,7 +197,16 @@ def _ocx_project_repo_impl(ctx):
             ctx.attr.platform or host.ocx_platform,
         ),
     }
-    pull = pull_args(project, target, ctx.attr.groups)
+
+    # `ocx pull` renders the toolchain home `<project dir>/.ocx/toolchain`
+    # (0.6.1+) and re-saves ocx.lock to bump its mtime — both writes into the
+    # user's checkout. Point it at copies inside this repository instead; the
+    # store content it pulls is keyed on ocx.lock, not on where it sits.
+    # Every other call stays on the checkout: a relative `[env]` path in
+    # ocx.toml resolves against the project directory.
+    ctx.file("ocx.toml", ctx.read(ctx.attr.ocx_toml))
+    ctx.file("ocx.lock", ctx.read(ctx.attr.ocx_lock))
+    pull = pull_args(["--project", str(ctx.path("ocx.toml"))], target, ctx.attr.groups)
     run_ocx(
         ctx,
         binary,
@@ -182,13 +217,10 @@ def _ocx_project_repo_impl(ctx):
         hints = no_leaf,
     )
 
-    env_cmd = ["--format", "json"] + project + ["env"] + target + EAGER_LAZY_MODE
-    if ctx.attr.groups:
-        env_cmd += ["-g", ",".join(ctx.attr.groups)]
     stdout = run_ocx(
         ctx,
         binary,
-        env_cmd,
+        env_args(project, target, ctx.attr.groups),
         ocx_env.env,
         "composing the environment of " + str(ctx.attr.ocx_toml),
         host.is_windows,

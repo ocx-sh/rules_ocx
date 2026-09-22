@@ -213,6 +213,11 @@ def _make_ocx_env_test_impl(ctx):
     asserts.equals(env, "0", ambient["OCX_QUIET"])
     asserts.equals(env, "1", ambient["OCX_NO_CONFIG_REFRESH"])
 
+    # 0.6.1+: no consent stamp for a checkout the user never allowed, and no
+    # exported toolchain root steering the render out of the repository.
+    asserts.equals(env, "1", ambient["OCX_NO_CONSENT"])
+    asserts.equals(env, "", ambient["OCX_TOOLCHAIN_DIR"])
+
     # OCX_NO_PROJECT is pinned on, closing the CWD walk the package tier would
     # otherwise run from the fetch directory. An ambient "0" reopens it.
     asserts.equals(env, "1", ambient["OCX_NO_PROJECT"])
@@ -423,7 +428,7 @@ def _passthrough_env_test_impl(ctx):
         asserts.false(env, key in forwarded, key + " must never be read from the environment")
 
     # Resolved or pinned, never forwarded verbatim.
-    for key in ["OCX_HOME", "OCX_NO_CONFIG_REFRESH", "OCX_PROJECT", "OCX_GLOBAL", "OCX_QUIET", "OCX_NO_PROJECT"]:
+    for key in ["OCX_HOME", "OCX_NO_CONFIG_REFRESH", "OCX_PROJECT", "OCX_GLOBAL", "OCX_QUIET", "OCX_NO_PROJECT", "OCX_NO_CONSENT", "OCX_TOOLCHAIN_DIR"]:
         asserts.false(env, key in forwarded, key + " is not a passthrough")
     return unittest.end(env)
 
@@ -802,6 +807,10 @@ _PINNED_EXPORTS_SH = "\n".join([
     "export OCX_NO_PROJECT",
     'OCX_NO_CONFIG_REFRESH="1"',
     "export OCX_NO_CONFIG_REFRESH",
+    'OCX_NO_CONSENT="1"',
+    "export OCX_NO_CONSENT",
+    'OCX_TOOLCHAIN_DIR=""',
+    "export OCX_TOOLCHAIN_DIR",
 ])
 
 _PINNED_EXPORTS_BAT = "\r\n".join([
@@ -809,6 +818,8 @@ _PINNED_EXPORTS_BAT = "\r\n".join([
     'set "OCX_GLOBAL=0"',
     'set "OCX_NO_PROJECT=1"',
     'set "OCX_NO_CONFIG_REFRESH=1"',
+    'set "OCX_NO_CONSENT=1"',
+    'set "OCX_TOOLCHAIN_DIR="',
 ])
 
 def _sh_lazy_launcher_test_impl(ctx):
@@ -886,7 +897,7 @@ def _bat_lazy_launcher_test_impl(ctx):
     asserts.true(env, 'set "OCX_CONFIG=C:\\repo\\config.toml"' in script)
     asserts.true(
         env,
-        '"C:\\repo\\ocx.exe" --project "C:\\repo\\ocx.toml" exec -- shellcheck %*' in script,
+        '"C:\\repo\\ocx.exe" --project "C:\\repo\\ocx.toml" exec --pinned -- shellcheck %*' in script,
         "the rendered Windows launcher does not re-enter `ocx exec`",
     )
 

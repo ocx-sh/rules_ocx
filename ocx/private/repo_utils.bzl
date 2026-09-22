@@ -79,6 +79,17 @@ OCX_ENV_CLASSES = {
     "OCX_QUIET": _env("pinned", value = "0"),
     "OCX_NO_PROJECT": _env("pinned", value = "1"),
     "OCX_NO_CONFIG_REFRESH": _env("pinned", value = "1"),
+    # `ocx pull` and `ocx exec` otherwise stamp shell-activation consent for
+    # the `--project` directory, which the prompt hook then honours on every
+    # `cd` (ocx-sh/ocx#400). The flags outrank it; no call here passes one.
+    "OCX_NO_CONSENT": _env("pinned", value = "1"),
+    # Empty is ocx's "absent": the render `ocx pull` does stays at
+    # `<project>/.ocx/toolchain` — the repository-local copy project.bzl hands
+    # it — instead of following an exported root into the user's home. Not a
+    # repository path: ocx refuses a root outside $HOME/$OCX_HOME with exit 78
+    # on *every* command, and Bazel's output base is outside $HOME on macOS.
+    # A config.toml `toolchain_dir` still outranks this (env is its weakest tier).
+    "OCX_TOOLCHAIN_DIR": _env("pinned", value = ""),
 }
 
 # The one pinned row a lazy launcher does not re-export (C-011).
