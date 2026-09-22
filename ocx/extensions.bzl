@@ -86,7 +86,7 @@ _project = tag_class(
         ),
         "ocx_lock": attr.label(
             mandatory = True,
-            doc = "The committed ocx.lock (watched; edits refetch).",
+            doc = "The committed ocx.lock next to `ocx_toml` (watched; edits refetch).",
         ),
         "ocx_toml": attr.label(
             mandatory = True,

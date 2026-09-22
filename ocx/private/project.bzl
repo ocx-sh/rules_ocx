@@ -165,6 +165,11 @@ def _ocx_project_repo_impl(ctx):
     ctx.watch(ctx.attr.ocx_toml)
     ctx.watch(ctx.attr.ocx_lock)
     toml = ctx.path(ctx.attr.ocx_toml)
+
+    # ocx reads the lock beside ocx.toml; any other label would be pulled but
+    # never checked, and edits to the real lock would never refetch.
+    if ctx.path(ctx.attr.ocx_lock) != toml.dirname.get_child("ocx.lock"):
+        fail("rules_ocx: ocx_lock {} must be the ocx.lock next to ocx_toml {}".format(ctx.attr.ocx_lock, ctx.attr.ocx_toml))
     ocx_env = make_ocx_env(ctx, host, ctx.attr.isolated_home)
     project = ["--project", str(toml)]
 
