@@ -9,7 +9,9 @@ time."""
 load(":platforms.bzl", "host_info")
 load(
     ":repo_utils.bzl",
+    "CA_FILE_TAIL",
     "CONFIG_ATTRS",
+    "CONFIG_TAIL",
     "EAGER_LAZY_MODE",
     "POLICY_ATTRS",
     "bat_value",
@@ -174,10 +176,11 @@ def _ocx_project_repo_impl(ctx):
         "checking {} against its lockfile".format(ctx.attr.ocx_toml),
         host.is_windows,
         hints = {
-            65: "run 'ocx lock' next to {} and commit the updated ocx.lock".format(ctx.attr.ocx_toml),
+            65: "run 'ocx lock' next to {} and commit the updated ocx.lock".format(ctx.attr.ocx_toml) +
+                CA_FILE_TAIL,
             78: ("missing or unsupported ocx.lock next to {} — run 'ocx lock' with the " +
                  "pinned ocx and commit the result, or run 'ocx config update' if a " +
-                 "required managed config is unsynced").format(ctx.attr.ocx_toml),
+                 "required managed config is unsynced").format(ctx.attr.ocx_toml) + CONFIG_TAIL,
         },
     )
 
@@ -195,7 +198,7 @@ def _ocx_project_repo_impl(ctx):
              "platform; an unsynced required managed config also exits 78 " +
              "('ocx config update')").format(
             ctx.attr.platform or host.ocx_platform,
-        ),
+        ) + CONFIG_TAIL,
     }
 
     # `ocx pull` renders the toolchain home `<project dir>/.ocx/toolchain`
@@ -242,7 +245,7 @@ def _ocx_project_repo_impl(ctx):
         closure_hints[65] = ("the composed closure conflicts — two tools in scope declare the " +
                              "same entrypoint, or one repository resolved to two digests; run " +
                              "'ocx inspect --closure' next to {} to see the pair, then narrow " +
-                             "`groups` or reconcile the versions").format(ctx.attr.ocx_toml)
+                             "`groups` or reconcile the versions").format(ctx.attr.ocx_toml) + CA_FILE_TAIL
         discovered = discover_bins(
             ctx,
             run_ocx(

@@ -74,7 +74,7 @@ in-tree draft ocx-sh/ocx#12.
    before it ever reaches a
    fail(). 82 is deliberately absent from `SYSEXIT_HINTS` — only
    `ocx config setup` / `ocx self setup` raise it, and invariant 5 forbids a
-   repo rule from running either.
+   repo rule from running either; so is 86, raised only by publishing.
 5. Repository rules watch the ambient ocx config tiers — except lazy
    `ocx.package(bins = …)`, which returns before `make_ocx_env()` and leaves
    config resolution to the launcher at run time. (`ocx.project(bins = …)`
@@ -161,8 +161,9 @@ in-tree draft ocx-sh/ocx#12.
 - `ocx lock --check`: exit 0 current / 65 stale / 78 missing. Offline.
 - Root flags before subcommand: `--format json --project <toml>`.
 - Sysexits: 64 usage · 65 data/stale · 69 unavailable · 74 io · 75 transient
-  (retried) · 77 permission · 78 config error (missing/unsupported lock **or**
-  a required-but-unsynced managed config) · 79 not found (incl. a required
+  (retried) · 77 permission · 78 config error (missing/unsupported lock, a
+  required-but-unsynced managed config, or a refused setting such as a
+  registry host outside `trusted_hosts`) · 79 not found (incl. a required
   patch companion) · 80 auth · 81 blocked by policy · 82 dirty rc · 83
   transparency log unavailable · 84 registry without the OCI Referrers API ·
   85 unsupported signing key backend. 0.5.3 moved
@@ -177,7 +178,14 @@ in-tree draft ocx-sh/ocx#12.
   only, which no repo rule reaches. None of the three is retried — a
   transparency-log outage is settled for longer than three round-trips and 85
   is deterministic — and the 83 and 84 hints offer
-  `ocx.policy(allow_unverified = True)` as their last route.
+  `ocx.policy(allow_unverified = True)` as their last route. 0.6.1/0.6.2
+  moved causes: a guarded registry/Sigstore host that does not resolve, and a
+  TLS certificate refusal, are 69 (never a retried 75); a package layer
+  refused at extraction is 65 (was 1); an extra CA file is 74 unreadable / 65
+  not a certificate, inline PEM 78. Every command resolves config first, so
+  those 65/78 causes reach calls whose override hint names one cause —
+  `CA_FILE_TAIL`/`CONFIG_TAIL` keep them honest. 86 (forge capability, 0.6.1)
+  is publish-only, unmapped like 82.
 - Config precedence: system (`/etc/ocx/config.toml`, literal on every OS —
   on Windows Rust resolves it drive-relative, so `C:\etc\ocx\config.toml` is
   a real tier there; the repo rules skip watching it anyway because that

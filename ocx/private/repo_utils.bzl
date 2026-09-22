@@ -135,6 +135,24 @@ def _rows(cls):
 # the whole point.
 EAGER_LAZY_MODE = ["--lazy-mode", "never"]
 
+# Every ocx command resolves its whole configuration before it does anything
+# (Context::try_init), so a refused setting surfaces as 65/74/78 from *any*
+# call — including the ones whose call-site hint names a single cause. These
+# tails keep those overrides honest; the default hints below spell the same
+# causes inline.
+#
+# 0.6.2: an extra CA *file* holding no certificate is 65 (unreadable: 74);
+# inline PEM text that is not one is 78.
+CA_FILE_TAIL = ("; if the error above names a CA file instead, it holds no valid " +
+                "certificate — fix OCX_EXTRA_CA_CERTS or extra_ca_certs")
+
+# A registry host resolving to a private/loopback/metadata address is refused
+# with 78 (the fix is a trusted_hosts entry); 0.6.1 made the ocx.toml
+# `activate` key and 0.6.2's config.toml `toolchain_dir` refusable too.
+CONFIG_TAIL = ("; if the error above names a setting instead, ocx refused it — a registry " +
+               "host resolving to a private address (allow it in " +
+               "[registries.\"<ns>\"].trusted_hosts), or a config.toml / ocx.toml value")
+
 SYSEXIT_HINTS = {
     64: ("usage error — the pinned ocx CLI and rules_ocx disagree on the command surface; " +
          "pin an ocx release this rules_ocx supports with ocx.download(version = '…') in " +
@@ -145,12 +163,24 @@ SYSEXIT_HINTS = {
     # snapshot to V2 (companions keyed by tag) and dropped V1 entirely, so a
     # file frozen by an older ocx and committed lands here — a shape this
     # rules_ocx's own pin bump is what starts refusing.
-    65: ("data error — a malformed reference or digest; in a project, a lockfile out of date " +
-         "with ocx.toml ('ocx lock', then commit); or a patch_snapshot written by an older " +
-         "ocx ('ocx patch freeze' again, then commit)"),
-    69: "a required service or registry is unavailable — check network, OCX_MIRRORS, and registry auth",
+    #
+    # 0.6.1+: a package layer refused at extraction (a path escaping its root,
+    # a symlink ladder, a hard link out) is 65, not 1 — the artifact is hostile
+    # or corrupt, so it never clears on retry.
+    65: ("data error — a malformed reference or digest; a package layer ocx refused to " +
+         "extract (it escapes its root — a hostile or corrupt artifact, report it to the " +
+         "publisher); in a project, a lockfile out of date with ocx.toml ('ocx lock', then " +
+         "commit); a patch_snapshot written by an older ocx ('ocx patch freeze' again, then " +
+         "commit)" + CA_FILE_TAIL),
+    # 0.6.1+: a guarded registry or Sigstore host that does not resolve is 69
+    # (was 78/64); 0.6.2: so is a TLS certificate refusal, never a retried 75.
+    69: ("a required service or registry is unavailable — its host did not resolve, or its " +
+         "TLS certificate was refused (behind an intercepting proxy, export " +
+         "OCX_EXTRA_CA_CERTS or set extra_ca_certs in config.toml); check network, " +
+         "OCX_MIRRORS, and registry auth"),
     74: ("io error — a local read or write failed (disk full, or a denied filesystem " +
-         "operation); check disk space and permissions on OCX_HOME"),
+         "operation); check disk space and permissions on OCX_HOME, and that an " +
+         "OCX_EXTRA_CA_CERTS / extra_ca_certs file is readable"),
     75: ("transient registry failure — a timeout, capacity exceeded, or an incomplete " +
          "transfer; retry, or route through OCX_MIRRORS"),
     77: ("permission denied — the registry rejected the request for this repository (403), or " +
@@ -158,9 +188,10 @@ SYSEXIT_HINTS = {
          "permissions"),
     # Both project-tier 78s (missing/unsupported ocx.lock) are overridden at
     # their call sites, so this shared text only ever reaches the package tier,
-    # which has no lockfile at all — leaving one cause to name.
+    # which has no lockfile — leaving the managed config and CONFIG_TAIL.
     78: ("configuration error — a required managed config has never been synced; run " +
-         "'ocx config update' (no_config = True / OCX_NO_CONFIG=1 opts out of the tier)"),
+         "'ocx config update' (no_config = True / OCX_NO_CONFIG=1 opts out of the tier)" +
+         CONFIG_TAIL),
     79: ("not found — the reference, or a required patch companion composed onto it, does not " +
          "exist in the registry; check the name, or refresh the companions with 'ocx patch sync'"),
     80: "authentication required — the registry needs credentials for this reference; run 'ocx login <registry>'",
@@ -169,7 +200,8 @@ SYSEXIT_HINTS = {
     # 82 (dirty rc) has no entry: it is raised only by `ocx config setup` and
     # `ocx self setup` refusing to overwrite a hand-edited managed shell block,
     # and no repository rule ever runs either command — a hint here would be
-    # dead code.
+    # dead code. 86 (0.6.1, a forge lacking a capability a write transport
+    # needs) likewise: only announce/claim/cascade raise it, all publishing.
     #
     # 83/85 (0.6.0): raised only inside `maybe_auto_verify`, the gate an
     # operator [[trust.policy]] attaches to a materializing fetch. Its one

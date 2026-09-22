@@ -1525,6 +1525,16 @@ def _bat_value_test_impl(ctx):
 # path (C-008).
 _DOCUMENTED_SYSEXITS = [64, 65, 69, 74, 75, 77, 78, 79, 80, 81, 83, 84, 85]
 
+# (code, fragment): the cause each hint must name since ocx 0.6.1/0.6.2.
+_HINT_CAUSES = [
+    (65, "refused to extract"),
+    (65, "OCX_EXTRA_CA_CERTS"),
+    (69, "did not resolve"),
+    (69, "OCX_EXTRA_CA_CERTS"),
+    (74, "OCX_EXTRA_CA_CERTS"),
+    (78, "trusted_hosts"),
+]
+
 def _sysexit_hints_test_impl(ctx):
     """W17: the hint table covers the documented sysexits, and nothing else."""
     env = unittest.begin(ctx)
@@ -1538,6 +1548,12 @@ def _sysexit_hints_test_impl(ctx):
     # 82 (dirty rc) is deliberately absent: only `ocx config setup` / `ocx self
     # setup` raise it, and invariant 5 forbids a repo rule from running either.
     asserts.false(env, 82 in SYSEXIT_HINTS, "sysexit 82 is unreachable from a repository rule")
+    asserts.false(env, 86 in SYSEXIT_HINTS, "sysexit 86 is unreachable from a repository rule")
+
+    # 0.6.1/0.6.2 moved causes onto 65, 69 and 78 (and a CA file onto 74);
+    # each hint must name what now lands there, or it misdirects the fix.
+    for code, fragment in _HINT_CAUSES:
+        asserts.true(env, fragment in SYSEXIT_HINTS[code], "sysexit {} hint omits '{}'".format(code, fragment))
     return unittest.end(env)
 
 sh_launcher_test = unittest.make(_sh_launcher_test_impl)
