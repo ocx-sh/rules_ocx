@@ -152,7 +152,7 @@ locally.
   CLI's `--format json` surface likely changed — check the `install`,
   `which`, `env` and `inspect --closure` shapes and the sysexit codes against
   AGENTS.md's "Two-tier ocx CLI contract" before adapting the Starlark.
-- Two couplings to ocx fail *open*, so no test in this repo catches a drift —
+- Four couplings to ocx fail *open*, so no test in this repo catches a drift —
   the unit tests pin what rules_ocx emits, not what ocx actually does.
   Re-verify both by hand on every bump:
   - Every path `ambient_config_paths()` hard-codes and watches:

@@ -220,7 +220,7 @@ in-tree draft ocx-sh/ocx#12.
   the `state/` root `isolated_home` relocates.
 - Env handling is **one classified table**, `OCX_ENV_CLASSES`
   (`ocx/private/repo_utils.bzl`), keyed by variable name — a new ocx variable
-  is one row plus its class, not four structures that can disagree. Four
+  is one row plus its class, not three places that can disagree. Four
   classes:
   - *site* (11, forwarded verbatim): OCX_MIRRORS, OCX_INSECURE_REGISTRIES,
     OCX_OFFLINE, OCX_FROZEN, OCX_REMOTE, OCX_JOBS, OCX_INDEX,
@@ -255,7 +255,7 @@ in-tree draft ocx-sh/ocx#12.
     is. The pull-on-a-copy above is what keeps the render out of the
     checkout; a config.toml `toolchain_dir` still outranks the variable.
   Env passthrough (getenv-declared, all 15) is exactly site ∪ translucent.
-  `OCX_ALLOW_YANKED` left that set **in this release** — ocx 0.6.0 still reads
+  `OCX_ALLOW_YANKED` left that set **in v0.4.0** — ocx 0.6.0 still reads
   it, but rules_ocx no longer forwards an ambient value and instead always
   writes it (**breaking**: it no longer works as an ambient escape hatch,
   write `ocx.policy(allow_yanked = True)`) — and `OCX_SIGSTORE_TRUSTED_ROOT`
