@@ -7,7 +7,7 @@ from repository rules — it never re-implements OCX internals in Starlark.
 
 module(
     name = "rules_ocx",
-    version = "0.4.0",
+    version = "0.5.0",
     bazel_compatibility = [">=8.0.0"],
 )
 
