@@ -75,8 +75,9 @@ is then enforced on the fetch. Any other manifest name is fetched
 unverified: the transport to the mirror is then all that stands behind the
 rows it serves, sha256 included.
 
-`version` must be {} or newer: rules_ocx drives `ocx exec` and pins
-`OCX_NO_VERIFY`, neither of which exists on older releases.""".format(MIN_OCX_VERSION),
+`version` must be {} or newer: rules_ocx passes `--pinned` to `ocx env`
+and `ocx exec` and pins `OCX_NO_CONSENT`, none of which exists on older
+releases.""".format(MIN_OCX_VERSION),
     attrs = {
         "dist_manifest": attr.label(
             default = "//dist:dist.json",
@@ -90,7 +91,7 @@ rows it serves, sha256 included.
         ),
         "version": attr.string(
             mandatory = True,
-            doc = "Exact ocx version to download, e.g. '0.6.0'. Must be " +
+            doc = "Exact ocx version to download, e.g. '0.6.2'. Must be " +
                   "{} or newer.".format(MIN_OCX_VERSION),
         ),
     },

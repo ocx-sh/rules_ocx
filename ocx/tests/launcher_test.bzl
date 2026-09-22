@@ -213,6 +213,11 @@ def _make_ocx_env_test_impl(ctx):
     asserts.equals(env, "0", ambient["OCX_QUIET"])
     asserts.equals(env, "1", ambient["OCX_NO_CONFIG_REFRESH"])
 
+    # 0.6.1+: no consent stamp for a checkout the user never allowed, and no
+    # exported toolchain root steering the render out of the repository.
+    asserts.equals(env, "1", ambient["OCX_NO_CONSENT"])
+    asserts.equals(env, "", ambient["OCX_TOOLCHAIN_DIR"])
+
     # OCX_NO_PROJECT is pinned on, closing the CWD walk the package tier would
     # otherwise run from the fetch directory. An ambient "0" reopens it.
     asserts.equals(env, "1", ambient["OCX_NO_PROJECT"])
@@ -274,15 +279,16 @@ def _make_ocx_env_test_impl(ctx):
     asserts.equals(env, "/w/snap.json", attrs["OCX_PATCH_SNAPSHOT"])
     asserts.equals(env, "", attrs["OCX_PATCHES"])
 
-    # A translucent label attr replaces the ambient value and is watched
-    # through ctx.path(); the shadowed ambient file is not, since nothing
-    # reads it any more.
+    # A translucent label attr replaces the ambient value and is watched —
+    # ctx.path() alone registers nothing since Bazel 7.1; the shadowed ambient
+    # file is not, since nothing reads it any more.
     pinned = _env_ctx(env = _AMBIENT, sigstore_trusted_root = "/w/trusted-root.json")
     asserts.equals(
         env,
         "/w/trusted-root.json",
         make_ocx_env(pinned, host, False).env.get("OCX_SIGSTORE_TRUSTED_ROOT", "<absent>"),
     )
+    asserts.true(env, "/w/trusted-root.json" in pinned.watched, "the attr trust root is not watched")
     asserts.false(
         env,
         "/site/trusted-root.json" in pinned.watched,
@@ -400,6 +406,7 @@ _PASSTHROUGH_ENV = [
     "OCX_DEFAULT_REGISTRY",
     "OCX_MANAGED_CONFIG",
     "OCX_PATCHES",
+    "OCX_EXTRA_CA_CERTS",
     "OCX_CONFIG",
     "OCX_PATCH_SNAPSHOT",
     "OCX_SIGSTORE_TRUSTED_ROOT",
@@ -407,11 +414,11 @@ _PASSTHROUGH_ENV = [
 ]
 
 def _passthrough_env_test_impl(ctx):
-    """W17/F5: all 14 forwarded env vars, and nothing else."""
+    """W17/F5: all 15 forwarded env vars, and nothing else."""
     env = unittest.begin(ctx)
     forwarded = [key for key, row in OCX_ENV_CLASSES.items() if row.cls in ["site", "translucent"]]
     asserts.equals(env, _PASSTHROUGH_ENV, forwarded)
-    asserts.equals(env, 14, len(forwarded))
+    asserts.equals(env, 15, len(forwarded))
 
     # The weakening pair is explicit-only: reading either with getenv() puts
     # an ambient value back in charge of what the build verifies and accepts,
@@ -422,7 +429,7 @@ def _passthrough_env_test_impl(ctx):
         asserts.false(env, key in forwarded, key + " must never be read from the environment")
 
     # Resolved or pinned, never forwarded verbatim.
-    for key in ["OCX_HOME", "OCX_NO_CONFIG_REFRESH", "OCX_PROJECT", "OCX_GLOBAL", "OCX_QUIET", "OCX_NO_PROJECT"]:
+    for key in ["OCX_HOME", "OCX_NO_CONFIG_REFRESH", "OCX_PROJECT", "OCX_GLOBAL", "OCX_QUIET", "OCX_NO_PROJECT", "OCX_NO_CONSENT", "OCX_TOOLCHAIN_DIR"]:
         asserts.false(env, key in forwarded, key + " is not a passthrough")
     return unittest.end(env)
 
@@ -801,6 +808,10 @@ _PINNED_EXPORTS_SH = "\n".join([
     "export OCX_NO_PROJECT",
     'OCX_NO_CONFIG_REFRESH="1"',
     "export OCX_NO_CONFIG_REFRESH",
+    'OCX_NO_CONSENT="1"',
+    "export OCX_NO_CONSENT",
+    'OCX_TOOLCHAIN_DIR=""',
+    "export OCX_TOOLCHAIN_DIR",
 ])
 
 _PINNED_EXPORTS_BAT = "\r\n".join([
@@ -808,6 +819,8 @@ _PINNED_EXPORTS_BAT = "\r\n".join([
     'set "OCX_GLOBAL=0"',
     'set "OCX_NO_PROJECT=1"',
     'set "OCX_NO_CONFIG_REFRESH=1"',
+    'set "OCX_NO_CONSENT=1"',
+    'set "OCX_TOOLCHAIN_DIR="',
 ])
 
 def _sh_lazy_launcher_test_impl(ctx):
@@ -885,7 +898,7 @@ def _bat_lazy_launcher_test_impl(ctx):
     asserts.true(env, 'set "OCX_CONFIG=C:\\repo\\config.toml"' in script)
     asserts.true(
         env,
-        '"C:\\repo\\ocx.exe" --project "C:\\repo\\ocx.toml" exec -- shellcheck %*' in script,
+        '"C:\\repo\\ocx.exe" --project "C:\\repo\\ocx.toml" exec --pinned -- shellcheck %*' in script,
         "the rendered Windows launcher does not re-enter `ocx exec`",
     )
 
@@ -1512,6 +1525,16 @@ def _bat_value_test_impl(ctx):
 # path (C-008).
 _DOCUMENTED_SYSEXITS = [64, 65, 69, 74, 75, 77, 78, 79, 80, 81, 83, 84, 85]
 
+# (code, fragment): the cause each hint must name since ocx 0.6.1/0.6.2.
+_HINT_CAUSES = [
+    (65, "refused to extract"),
+    (65, "OCX_EXTRA_CA_CERTS"),
+    (69, "did not resolve"),
+    (69, "OCX_EXTRA_CA_CERTS"),
+    (74, "OCX_EXTRA_CA_CERTS"),
+    (78, "trusted_hosts"),
+]
+
 def _sysexit_hints_test_impl(ctx):
     """W17: the hint table covers the documented sysexits, and nothing else."""
     env = unittest.begin(ctx)
@@ -1525,6 +1548,12 @@ def _sysexit_hints_test_impl(ctx):
     # 82 (dirty rc) is deliberately absent: only `ocx config setup` / `ocx self
     # setup` raise it, and invariant 5 forbids a repo rule from running either.
     asserts.false(env, 82 in SYSEXIT_HINTS, "sysexit 82 is unreachable from a repository rule")
+    asserts.false(env, 86 in SYSEXIT_HINTS, "sysexit 86 is unreachable from a repository rule")
+
+    # 0.6.1/0.6.2 moved causes onto 65, 69 and 78 (and a CA file onto 74);
+    # each hint must name what now lands there, or it misdirects the fix.
+    for code, fragment in _HINT_CAUSES:
+        asserts.true(env, fragment in SYSEXIT_HINTS[code], "sysexit {} hint omits '{}'".format(code, fragment))
     return unittest.end(env)
 
 sh_launcher_test = unittest.make(_sh_launcher_test_impl)

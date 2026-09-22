@@ -9,7 +9,9 @@ time."""
 load(":platforms.bzl", "host_info")
 load(
     ":repo_utils.bzl",
+    "CA_FILE_TAIL",
     "CONFIG_ATTRS",
+    "CONFIG_TAIL",
     "EAGER_LAZY_MODE",
     "POLICY_ATTRS",
     "bat_value",
@@ -46,12 +48,38 @@ def pull_args(project, target, groups):
         args += ["-g", ",".join(groups)]
     return args
 
+def env_args(project, target, groups):
+    """The argv for `ocx --format json env` (pure).
+
+    `--pinned`: since 0.6.1 a project `env` composes through the toolchain
+    links under `<project>/.ocx/toolchain/links/` by default — a tree only a
+    render writes, and one that moves on the next `ocx update`. The flag
+    composes the digest-pinned store paths instead (0.6.0's only answer), and
+    as the CLI tier it outranks ocx.toml's `pinned` key and
+    OCX_TOOLCHAIN_PINNED.
+
+    Args:
+        project: `["--project", <toml path>]`.
+        target: `["--platform", <platform>]`, or `[]` for the host.
+        groups: `ctx.attr.groups`.
+
+    Returns:
+        argv list, after the ocx binary.
+    """
+    args = ["--format", "json"] + project + ["env", "--pinned"] + target + EAGER_LAZY_MODE
+    if groups:
+        args += ["-g", ",".join(groups)]
+    return args
+
 def lazy_project_command(binary, toml, groups, name):
     """The lazy launcher argv that re-enters ocx at execution time (pure).
 
     `exec`, not `run`: 0.6.0 hides `ocx run` behind a deprecation warning on
     every invocation and 0.7 deletes it, so a launcher baked with the old verb
-    is noisy today and broken on the next CLI bump.
+    is noisy today and broken on the next CLI bump. `--pinned` for the reason
+    env_args() gives, and one more: an unpinned `exec` heals the missing
+    links, writing `.ocx/toolchain/` beside the `--project` file — here the
+    runfiles copy, inside the external repository, from within an action.
 
     Args:
         binary: the ocx binary argv fragment, already quoted per OS by the caller.
@@ -63,7 +91,7 @@ def lazy_project_command(binary, toml, groups, name):
         argv list; every element arrives already quoted per OS by the caller,
         this builder quotes nothing.
     """
-    return [binary, "--project", toml, "exec"] + groups + ["--", name]
+    return [binary, "--project", toml, "exec", "--pinned"] + groups + ["--", name]
 
 def _lazy_project(ctx, host, binary):
     """Renders text-only launchers deferring `ocx pull` to first execution.
@@ -130,8 +158,18 @@ def _lazy_project(ctx, host, binary):
 def _ocx_project_repo_impl(ctx):
     host = host_info(ctx.os.name, ctx.os.arch)
     binary = ocx_bin(ctx)
+
+    # ctx.path() resolves a label but watches nothing (Bazel >= 7.1), so an
+    # edited lock would leave the fetched repo stale; ctx.watch() records the
+    # content dependency.
+    ctx.watch(ctx.attr.ocx_toml)
+    ctx.watch(ctx.attr.ocx_lock)
     toml = ctx.path(ctx.attr.ocx_toml)
-    ctx.path(ctx.attr.ocx_lock)  # register the lock as an input — edits refetch
+
+    # ocx reads the lock beside ocx.toml; any other label would be pulled but
+    # never checked, and edits to the real lock would never refetch.
+    if ctx.path(ctx.attr.ocx_lock) != toml.dirname.get_child("ocx.lock"):
+        fail("rules_ocx: ocx_lock {} must be the ocx.lock next to ocx_toml {}".format(ctx.attr.ocx_lock, ctx.attr.ocx_toml))
     ocx_env = make_ocx_env(ctx, host, ctx.attr.isolated_home)
     project = ["--project", str(toml)]
 
@@ -143,10 +181,11 @@ def _ocx_project_repo_impl(ctx):
         "checking {} against its lockfile".format(ctx.attr.ocx_toml),
         host.is_windows,
         hints = {
-            65: "run 'ocx lock' next to {} and commit the updated ocx.lock".format(ctx.attr.ocx_toml),
+            65: "run 'ocx lock' next to {} and commit the updated ocx.lock".format(ctx.attr.ocx_toml) +
+                CA_FILE_TAIL,
             78: ("missing or unsupported ocx.lock next to {} — run 'ocx lock' with the " +
                  "pinned ocx and commit the result, or run 'ocx config update' if a " +
-                 "required managed config is unsynced").format(ctx.attr.ocx_toml),
+                 "required managed config is unsynced").format(ctx.attr.ocx_toml) + CONFIG_TAIL,
         },
     )
 
@@ -164,9 +203,18 @@ def _ocx_project_repo_impl(ctx):
              "platform; an unsynced required managed config also exits 78 " +
              "('ocx config update')").format(
             ctx.attr.platform or host.ocx_platform,
-        ),
+        ) + CONFIG_TAIL,
     }
-    pull = pull_args(project, target, ctx.attr.groups)
+
+    # `ocx pull` renders the toolchain home `<project dir>/.ocx/toolchain`
+    # (0.6.1+) and re-saves ocx.lock to bump its mtime — both writes into the
+    # user's checkout. Point it at copies inside this repository instead; the
+    # store content it pulls is keyed on ocx.lock, not on where it sits.
+    # Every other call stays on the checkout: a relative `[env]` path in
+    # ocx.toml resolves against the project directory.
+    ctx.file("ocx.toml", ctx.read(ctx.attr.ocx_toml))
+    ctx.file("ocx.lock", ctx.read(ctx.attr.ocx_lock))
+    pull = pull_args(["--project", str(ctx.path("ocx.toml"))], target, ctx.attr.groups)
     run_ocx(
         ctx,
         binary,
@@ -177,13 +225,10 @@ def _ocx_project_repo_impl(ctx):
         hints = no_leaf,
     )
 
-    env_cmd = ["--format", "json"] + project + ["env"] + target + EAGER_LAZY_MODE
-    if ctx.attr.groups:
-        env_cmd += ["-g", ",".join(ctx.attr.groups)]
     stdout = run_ocx(
         ctx,
         binary,
-        env_cmd,
+        env_args(project, target, ctx.attr.groups),
         ocx_env.env,
         "composing the environment of " + str(ctx.attr.ocx_toml),
         host.is_windows,
@@ -205,7 +250,7 @@ def _ocx_project_repo_impl(ctx):
         closure_hints[65] = ("the composed closure conflicts — two tools in scope declare the " +
                              "same entrypoint, or one repository resolved to two digests; run " +
                              "'ocx inspect --closure' next to {} to see the pair, then narrow " +
-                             "`groups` or reconcile the versions").format(ctx.attr.ocx_toml)
+                             "`groups` or reconcile the versions").format(ctx.attr.ocx_toml) + CA_FILE_TAIL
         discovered = discover_bins(
             ctx,
             run_ocx(

@@ -12,19 +12,24 @@ in-tree draft ocx-sh/ocx#12.
   host detection happens in repository rules.
 - **`@ocx_tool`**: pinned ocx binary, downloaded per the vendored
   `dist/dist.json` (snapshot of https://setup.ocx.sh/dist.json),
-  sha256-enforced. **Floor: ocx ≥ 0.6.0** (`MIN_OCX_VERSION`), because the
-  lazy project launcher re-enters `ocx exec` (`ocx run` is
-  hidden-and-warning in 0.6, deleted in 0.7) and `OCX_NO_VERIFY` is new in
-  0.6.0 — `ocx.download(version = …)` below it fails before any
-  download. Mirror knobs (site settings, env-only — no attrs):
+  sha256-enforced. **Floor: ocx ≥ 0.6.1** (`MIN_OCX_VERSION`), because
+  `env`/`exec` take `--pinned` and ocx reads `OCX_NO_CONSENT` only from
+  0.6.1 (and the lazy project launcher re-enters `ocx exec` — `ocx run` is
+  hidden-and-warning in 0.6, deleted in 0.7) — `ocx.download(version = …)`
+  below it fails before any download. Mirror knobs (site settings, env-only — no attrs):
   `OCX_INSTALL_DIST_URL` (manifest), `OCX_INSTALL_MIRROR_URL` (artifact host,
   `<mirror>/<tag>/<filename>`). A manifest URL whose last path segment is
   `<64 lowercase hex>.json` (www-setup's `dist_pin_digest` convention) is
   fetched with that digest enforced; any other name is fetched unverified, as
   before.
-- **Project tier** (`ocx.project`): watches ocx.toml+ocx.lock; runs
-  `ocx lock --check` → `ocx pull` → `ocx --format json env` →
-  `ocx --format json inspect --closure`; renders a launcher per executable the
+- **Project tier** (`ocx.project`): watches ocx.toml+ocx.lock (`ctx.watch` —
+  `ctx.path(label)` registers nothing since Bazel 7.1); runs
+  `ocx lock --check` → `ocx pull` → `ocx --format json env --pinned` →
+  `ocx --format json inspect --closure`. `pull` alone runs against a copy of
+  ocx.toml+ocx.lock inside the repository: since 0.6.1 it renders the toolchain
+  home `<project dir>/.ocx/toolchain` and re-saves ocx.lock, and neither may
+  land in the checkout; the rest stay on the checkout, where a relative
+  `[env]` path resolves. Renders a launcher per executable the
   closure's interface surface declares. **Package tier** (`ocx.package`):
   runs `ocx --format json package install/which/env`, then
   `package inspect --closure` (`[-p platform]` throughout); symlinks store
@@ -69,7 +74,7 @@ in-tree draft ocx-sh/ocx#12.
    before it ever reaches a
    fail(). 82 is deliberately absent from `SYSEXIT_HINTS` — only
    `ocx config setup` / `ocx self setup` raise it, and invariant 5 forbids a
-   repo rule from running either.
+   repo rule from running either; so is 86, raised only by publishing.
 5. Repository rules watch the ambient ocx config tiers — except lazy
    `ocx.package(bins = …)`, which returns before `make_ocx_env()` and leaves
    config resolution to the launcher at run time. (`ocx.project(bins = …)`
@@ -82,25 +87,16 @@ in-tree draft ocx-sh/ocx#12.
    under `$OCX_HOME/state/projects/`. (0.6.0's `ocx shell` group is `allow`,
    `completion`, `revoke`, `state`; the last two only read, but a fetch has no
    use for either.)
-   `ocx pull` and `ocx exec` stamp shell-activation consent, unconditional in
-   0.6.0 (no flag, env, TTY or hook gates it), at
-   `$OCX_HOME/state/projects/<key>/consent.json`, keyed on the `--project`
-   toml's canonical dir. Once the shell hook is installed that stamp lets the
-   project `[env]` apply on `cd` unprompted; `lock --check`, `env` and
-   `inspect --closure` stamp nothing. Documented side effect of the tiers that
-   pull — [ocx-sh/ocx#400](https://github.com/ocx-sh/ocx/issues/400) asks for
-   `OCX_NO_CONSENT` (one pinned row once it lands). Only the eager
-   `ocx.project` tier stamps the user's checkout, and that is the case
-   `isolated_home = True` confines to the repository; the lazy `bins`
-   launchers' `ocx exec` stamps at action time but passes
-   `--project "$(rlocation <repo>/ocx.toml)"`, so it keys on an output-base
-   copy that can activate nothing (`bazel clean --expunge` drops that
-   directory, not the stamp, which lives in the shared `$OCX_HOME`) — and
-   `isolated_home` is no escape there, both lazy tiers `fail()` on `bins` +
-   `isolated_home` (`project.bzl`, `package.bzl`). `ocx shell revoke` is the
-   only thing that clears a stamp.
+   No consent stamp is written: `ocx pull` and `ocx exec` would otherwise
+   stamp `$OCX_HOME/state/projects/<key>/consent.json` for the `--project`
+   dir, letting the prompt hook apply that project's `[env]` on `cd`
+   unprompted; the pinned `OCX_NO_CONSENT=1` (0.6.1,
+   [ocx-sh/ocx#400](https://github.com/ocx-sh/ocx/issues/400)) suppresses
+   it at fetch time and in every lazy launcher. What `pull` still writes
+   under that key is a `render_stamp.json` for the repository-local copy
+   (above) — shared `$OCX_HOME`, keyed on an output-base path, inert.
 
-## Two-tier ocx CLI contract (verified against 0.6.0)
+## Two-tier ocx CLI contract (verified against 0.6.2)
 
 - `ocx --format json env` → `{"entries":[{"key","value","type":"path"|"constant"|"list"
   [,"separator"]}], "binaries":[…],"entrypoints":[…],"integrations":[…],
@@ -119,6 +115,12 @@ in-tree draft ocx-sh/ocx#12.
   in the consumer's terms (upgrade rules_ocx, or `ocx.download(version = …)`),
   never the private constant; folding it into a constant would silently
   *replace* an environment ocx would have extended.
+- **Always `--pinned` on project `env`/`exec`.** Since 0.6.1 both compose
+  through `<project>/.ocx/toolchain/links/…` by default (ladder `--pinned` ▸
+  ocx.toml `pinned` ▸ `OCX_TOOLCHAIN_PINNED` ▸ links), and an unpinned `exec`
+  heals missing links by writing that tree. `--pinned` composes the
+  digest-pinned store paths — 0.6.0's only answer — and writes nothing. The
+  package tier has no toolchain home.
 - **Lazy composition is refused on every eager path** (`EAGER_LAZY_MODE`).
   `ocx pull` writes a shim tree instead of content when the ladder
   `--lazy-mode ▸ [package."<id>"] ▸ [group.<g>] ▸ toolchain ▸ OCX_LAZY_MODE ▸
@@ -159,8 +161,9 @@ in-tree draft ocx-sh/ocx#12.
 - `ocx lock --check`: exit 0 current / 65 stale / 78 missing. Offline.
 - Root flags before subcommand: `--format json --project <toml>`.
 - Sysexits: 64 usage · 65 data/stale · 69 unavailable · 74 io · 75 transient
-  (retried) · 77 permission · 78 config error (missing/unsupported lock **or**
-  a required-but-unsynced managed config) · 79 not found (incl. a required
+  (retried) · 77 permission · 78 config error (missing/unsupported lock, a
+  required-but-unsynced managed config, or a refused setting such as a
+  registry host outside `trusted_hosts`) · 79 not found (incl. a required
   patch companion) · 80 auth · 81 blocked by policy · 82 dirty rc · 83
   transparency log unavailable · 84 registry without the OCI Referrers API ·
   85 unsupported signing key backend. 0.5.3 moved
@@ -175,7 +178,14 @@ in-tree draft ocx-sh/ocx#12.
   only, which no repo rule reaches. None of the three is retried — a
   transparency-log outage is settled for longer than three round-trips and 85
   is deterministic — and the 83 and 84 hints offer
-  `ocx.policy(allow_unverified = True)` as their last route.
+  `ocx.policy(allow_unverified = True)` as their last route. 0.6.1/0.6.2
+  moved causes: a guarded registry/Sigstore host that does not resolve, and a
+  TLS certificate refusal, are 69 (never a retried 75); a package layer
+  refused at extraction is 65 (was 1); an extra CA file is 74 unreadable / 65
+  not a certificate, inline PEM 78. Every command resolves config first, so
+  those 65/78 causes reach calls whose override hint names one cause —
+  `CA_FILE_TAIL`/`CONFIG_TAIL` keep them honest. 86 (forge capability, 0.6.1)
+  is publish-only, unmapped like 82.
 - Config precedence: system (`/etc/ocx/config.toml`, literal on every OS —
   on Windows Rust resolves it drive-relative, so `C:\etc\ocx\config.toml` is
   a real tier there; the repo rules skip watching it anyway because that
@@ -212,12 +222,16 @@ in-tree draft ocx-sh/ocx#12.
   (`ocx/private/repo_utils.bzl`), keyed by variable name — a new ocx variable
   is one row plus its class, not four structures that can disagree. Four
   classes:
-  - *site* (10, forwarded verbatim): OCX_MIRRORS, OCX_INSECURE_REGISTRIES,
+  - *site* (11, forwarded verbatim): OCX_MIRRORS, OCX_INSECURE_REGISTRIES,
     OCX_OFFLINE, OCX_FROZEN, OCX_REMOTE, OCX_JOBS, OCX_INDEX,
-    OCX_DEFAULT_REGISTRY, OCX_MANAGED_CONFIG, OCX_PATCHES. `OCX_MIRRORS` and
+    OCX_DEFAULT_REGISTRY, OCX_MANAGED_CONFIG, OCX_PATCHES,
+    OCX_EXTRA_CA_CERTS (0.6.2, extra TLS roots — path or PEM text — for
+    every registry/index/Sigstore/TUF client; unwatched, since a root decides
+    whether a fetch connects, not which bytes it gets). `OCX_MIRRORS` and
     `OCX_INSECURE_REGISTRIES` are the residual ambient *transport*-weakening
     path the policy tier does not close — a CI image exporting both routes
-    every fetch at a plain-HTTP host of its choosing. Digest pinning (`pins`
+    every fetch at a plain-HTTP host of its choosing; OCX_EXTRA_CA_CERTS is
+    the TLS-interception sibling. Digest pinning (`pins`
     or an `@sha256:` reference) is the mitigation; a system
     `/etc/ocx/config.toml` locking the host shut is the other, and
     `no_config = True` prunes that one. `OCX_SIGSTORE_TRUSTED_ROOT`
@@ -232,11 +246,15 @@ in-tree draft ocx-sh/ocx#12.
     (`no_config`).
   - *explicit* (2, **never** read from the environment, always written from
     the resolved `ocx.policy()`): OCX_NO_VERIFY, OCX_ALLOW_YANKED.
-  - *pinned* (5, a fixed value on every invocation): OCX_PROJECT "",
+  - *pinned* (7, a fixed value on every invocation): OCX_PROJECT "",
     OCX_GLOBAL "0", OCX_QUIET "0", OCX_NO_PROJECT "1",
-    OCX_NO_CONFIG_REFRESH "1". A lazy launcher re-exports all of them but
-    OCX_QUIET.
-  Env passthrough (getenv-declared, all 14) is exactly site ∪ translucent.
+    OCX_NO_CONFIG_REFRESH "1", OCX_NO_CONSENT "1", OCX_TOOLCHAIN_DIR "".
+    A lazy launcher re-exports all of them but OCX_QUIET. OCX_TOOLCHAIN_DIR
+    is empty (ocx's "absent"), not a repository path: ocx exits 78 on *every*
+    command for a root outside `$HOME`/`$OCX_HOME`, and macOS's output base
+    is. The pull-on-a-copy above is what keeps the render out of the
+    checkout; a config.toml `toolchain_dir` still outranks the variable.
+  Env passthrough (getenv-declared, all 15) is exactly site ∪ translucent.
   `OCX_ALLOW_YANKED` left that set **in this release** — ocx 0.6.0 still reads
   it, but rules_ocx no longer forwards an ambient value and instead always
   writes it (**breaking**: it no longer works as an ambient escape hatch,
@@ -245,8 +263,10 @@ in-tree draft ocx-sh/ocx#12.
   Never forwarded and needing no neutralization: OCX_LAZY_MODE /
   OCX_LAZY_REPORT (outranked by the `--lazy-mode never` above), OCX_ENV
   (ocx strips an inherited one on every compose; its decoder refuses `OCX_*`
-  keys outright), and OCX_CEILING_PATH (its only reader is the project CWD
-  walk, which `OCX_NO_PROJECT=1` closes).
+  keys outright), OCX_CEILING_PATH (its only reader is the project CWD
+  walk, which `OCX_NO_PROJECT=1` closes), OCX_TOOLCHAIN_PINNED (outranked by
+  `--pinned`) and OCX_TOOLCHAIN_ACTIVATE (read only by shell activation —
+  `self activate`/`setup`, `shell state`, the prompt hook).
 
 ## Workflow
 
@@ -267,8 +287,8 @@ in-tree draft ocx-sh/ocx#12.
 
 The dev toolchain comes from the committed `ocx.toml`/`ocx.lock`
 (bazelisk, actionlint, git-cliff, task, hawkeye, lychee, shellcheck).
-`direnv allow`, or 0.6.0's prompt hook (`ocx self setup --hook` once, then
-`ocx shell allow` in this checkout — the hook stays inert until the project
+ocx's prompt hook activates it: `ocx self setup --hook` once, then
+`ocx shell allow` in this checkout (the hook stays inert until the project
 has a consent stamp); `ocx exec -- <cmd>` for a one-off. buildifier is not in the
 ocx catalog yet → `buildifier_prebuilt` dev dependency.
 

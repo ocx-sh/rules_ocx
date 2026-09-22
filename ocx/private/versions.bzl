@@ -12,17 +12,17 @@ load("@bazel_skylib//lib:versions.bzl", "versions")
 
 visibility(["//ocx", "//ocx/tests"])
 
-DEFAULT_OCX_VERSION = "0.6.0"
+DEFAULT_OCX_VERSION = "0.6.2"
 
 # Floor checked by _ocx_download_impl before any download (min_version_error).
-MIN_OCX_VERSION = "0.6.0"
+MIN_OCX_VERSION = "0.6.1"
 
 MIN_OCX_VERSION_MSG = (
     "rules_ocx: ocx.download(version = \"{version}\") " +
     "requires ocx {min} or newer" +
-    " — rules_ocx drives `ocx exec` and pins `OCX_NO_VERIFY`, " +
-    "neither of which exists on {version}. Fix: version = \"{min}\" or newer " +
-    "(rules_ocx 0.3.0 is the last release supporting ocx 0.5.8)."
+    " — rules_ocx passes `--pinned` to `ocx env` and `ocx exec`, and pins " +
+    "`OCX_NO_CONSENT`, none of which exists on {version}. Fix: version = \"{min}\" " +
+    "or newer (rules_ocx 0.4.0 is the last release supporting ocx 0.6.0)."
 )
 
 # A version that is not dotted numerals never reaches the floor comparison:

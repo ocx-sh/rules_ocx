@@ -61,8 +61,9 @@ is then enforced on the fetch. Any other manifest name is fetched
 unverified: the transport to the mirror is then all that stands behind the
 rows it serves, sha256 included.
 
-`version` must be 0.6.0 or newer: rules_ocx drives `ocx exec` and pins
-`OCX_NO_VERIFY`, neither of which exists on older releases.
+`version` must be 0.6.1 or newer: rules_ocx passes `--pinned` to `ocx env`
+and `ocx exec` and pins `OCX_NO_CONSENT`, none of which exists on older
+releases.
 
 **ATTRIBUTES**
 
@@ -72,7 +73,7 @@ rows it serves, sha256 included.
 | <a id="ocx_download-name"></a>name |  A unique name for this repository.   | <a href="https://bazel.build/concepts/labels#target-names">Name</a> | required |  |
 | <a id="ocx_download-dist_manifest"></a>dist_manifest |  Release manifest snapshot (dist.json schema 1).   | <a href="https://bazel.build/concepts/labels">Label</a> | optional |  `"@rules_ocx//dist:dist.json"`  |
 | <a id="ocx_download-triple"></a>triple |  Escape hatch: exact release target triple, e.g. 'x86_64-unknown-linux-gnu' to prefer the glibc build. Defaults to host detection (Linux maps to musl).   | String | optional |  `""`  |
-| <a id="ocx_download-version"></a>version |  Exact ocx version to download, e.g. '0.6.0'. Must be 0.6.0 or newer.   | String | required |  |
+| <a id="ocx_download-version"></a>version |  Exact ocx version to download, e.g. '0.6.2'. Must be 0.6.1 or newer.   | String | required |  |
 
 
 <a id="ocx_package_hub"></a>

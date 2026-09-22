@@ -100,7 +100,8 @@ honored by the repository rules:
 Passed through to repo rules as well: `OCX_INDEX`, `OCX_OFFLINE`,
 `OCX_FROZEN`, `OCX_REMOTE`, `OCX_JOBS`, `OCX_DEFAULT_REGISTRY`, `OCX_CONFIG`,
 `OCX_NO_CONFIG`, `OCX_MANAGED_CONFIG`, `OCX_PATCHES`, `OCX_PATCH_SNAPSHOT`,
-`OCX_SIGSTORE_TRUSTED_ROOT` — together with `OCX_MIRRORS` and `OCX_INSECURE_REGISTRIES` above, that is
+`OCX_SIGSTORE_TRUSTED_ROOT`, `OCX_EXTRA_CA_CERTS` (extra TLS roots, e.g. a
+corporate proxy CA) — together with `OCX_MIRRORS` and `OCX_INSECURE_REGISTRIES` above, that is
 the whole forwarded set. `OCX_HOME` is resolved rather than forwarded: it
 selects the store the rules point ocx at.
 
@@ -239,21 +240,12 @@ repository rule has.
 ## Reproducibility
 
 - **Project tier** is fully pinned by your committed `ocx.lock` (per-platform
-  sha256 digests). A stale lock fails the fetch with instructions. In ocx 0.6.0
-  both `ocx pull` and `ocx exec` record a shell-activation consent stamp under
-  `$OCX_HOME/state/projects/`, keyed on the project directory they were pointed
-  at; it only matters once you install the ocx shell hook, and `ocx shell
-  revoke` clears it. The eager `ocx.project` fetch stamps **your checkout**
-  (`isolated_home = True` keeps that stamp inside the repository instead). A
-  lazy `ocx.project(bins = …)` launcher stamps on every `ocx exec`, i.e. at
-  action time on every machine that runs the tool — but it points ocx at the
-  fetched repository's own copy of `ocx.toml`, so the stamp keys on an
-  output-base directory you never `cd` into and that can activate nothing.
-  `bazel clean --expunge` removes that directory; the stamp itself lives in
-  the shared `$OCX_HOME`, and `ocx shell revoke` is what removes it.
-  `isolated_home` is not the escape there: it is incompatible with `bins`,
-  since a lazy launcher must resolve the store on whatever machine executes
-  it.
+  sha256 digests). A stale lock fails the fetch with instructions. Nothing is
+  written to your checkout: no shell-activation consent stamp
+  (`OCX_NO_CONSENT=1`, eager fetch and lazy launchers alike), and the
+  toolchain home `ocx pull` renders lands in the fetched repository, not in a
+  `.ocx/` next to your `ocx.toml`. Launchers compose digest-pinned store paths
+  (`--pinned`), never the moving `.ocx/toolchain/links` tree.
 - **Package tier**, pick one:
   - `index = "//:index"` — commit an index snapshot
     (`ocx --index index index update ocx.sh/jqlang/jq`); tags resolve frozen from it,
