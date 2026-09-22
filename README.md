@@ -100,7 +100,8 @@ honored by the repository rules:
 Passed through to repo rules as well: `OCX_INDEX`, `OCX_OFFLINE`,
 `OCX_FROZEN`, `OCX_REMOTE`, `OCX_JOBS`, `OCX_DEFAULT_REGISTRY`, `OCX_CONFIG`,
 `OCX_NO_CONFIG`, `OCX_MANAGED_CONFIG`, `OCX_PATCHES`, `OCX_PATCH_SNAPSHOT`,
-`OCX_SIGSTORE_TRUSTED_ROOT` — together with `OCX_MIRRORS` and `OCX_INSECURE_REGISTRIES` above, that is
+`OCX_SIGSTORE_TRUSTED_ROOT`, `OCX_EXTRA_CA_CERTS` (extra TLS roots, e.g. a
+corporate proxy CA) — together with `OCX_MIRRORS` and `OCX_INSECURE_REGISTRIES` above, that is
 the whole forwarded set. `OCX_HOME` is resolved rather than forwarded: it
 selects the store the rules point ocx at.
 

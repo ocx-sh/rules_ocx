@@ -214,12 +214,16 @@ in-tree draft ocx-sh/ocx#12.
   (`ocx/private/repo_utils.bzl`), keyed by variable name — a new ocx variable
   is one row plus its class, not four structures that can disagree. Four
   classes:
-  - *site* (10, forwarded verbatim): OCX_MIRRORS, OCX_INSECURE_REGISTRIES,
+  - *site* (11, forwarded verbatim): OCX_MIRRORS, OCX_INSECURE_REGISTRIES,
     OCX_OFFLINE, OCX_FROZEN, OCX_REMOTE, OCX_JOBS, OCX_INDEX,
-    OCX_DEFAULT_REGISTRY, OCX_MANAGED_CONFIG, OCX_PATCHES. `OCX_MIRRORS` and
+    OCX_DEFAULT_REGISTRY, OCX_MANAGED_CONFIG, OCX_PATCHES,
+    OCX_EXTRA_CA_CERTS (0.6.2, extra TLS roots — path or PEM text — for
+    every registry/index/Sigstore/TUF client; unwatched, since a root decides
+    whether a fetch connects, not which bytes it gets). `OCX_MIRRORS` and
     `OCX_INSECURE_REGISTRIES` are the residual ambient *transport*-weakening
     path the policy tier does not close — a CI image exporting both routes
-    every fetch at a plain-HTTP host of its choosing. Digest pinning (`pins`
+    every fetch at a plain-HTTP host of its choosing; OCX_EXTRA_CA_CERTS is
+    the TLS-interception sibling. Digest pinning (`pins`
     or an `@sha256:` reference) is the mitigation; a system
     `/etc/ocx/config.toml` locking the host shut is the other, and
     `no_config = True` prunes that one. `OCX_SIGSTORE_TRUSTED_ROOT`
@@ -242,7 +246,7 @@ in-tree draft ocx-sh/ocx#12.
     command for a root outside `$HOME`/`$OCX_HOME`, and macOS's output base
     is. The pull-on-a-copy above is what keeps the render out of the
     checkout; a config.toml `toolchain_dir` still outranks the variable.
-  Env passthrough (getenv-declared, all 14) is exactly site ∪ translucent.
+  Env passthrough (getenv-declared, all 15) is exactly site ∪ translucent.
   `OCX_ALLOW_YANKED` left that set **in this release** — ocx 0.6.0 still reads
   it, but rules_ocx no longer forwards an ambient value and instead always
   writes it (**breaking**: it no longer works as an ambient escape hatch,

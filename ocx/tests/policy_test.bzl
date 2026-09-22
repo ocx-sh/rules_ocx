@@ -24,7 +24,7 @@ load(
 # C-001: the four classes, and how many rows each carries. A count is what
 # catches a row that silently changed class — the per-row assertions below
 # only see the row they are on.
-_CLASS_SIZES = {"site": 10, "translucent": 4, "explicit": 2, "pinned": 7}
+_CLASS_SIZES = {"site": 11, "translucent": 4, "explicit": 2, "pinned": 7}
 
 # C-001: the rows `no_config` blanks. OCX_SIGSTORE_TRUSTED_ROOT is deliberately
 # absent — a trust root is not a config tier, and with `no_config` plus a

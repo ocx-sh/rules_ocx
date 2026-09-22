@@ -406,6 +406,7 @@ _PASSTHROUGH_ENV = [
     "OCX_DEFAULT_REGISTRY",
     "OCX_MANAGED_CONFIG",
     "OCX_PATCHES",
+    "OCX_EXTRA_CA_CERTS",
     "OCX_CONFIG",
     "OCX_PATCH_SNAPSHOT",
     "OCX_SIGSTORE_TRUSTED_ROOT",
@@ -413,11 +414,11 @@ _PASSTHROUGH_ENV = [
 ]
 
 def _passthrough_env_test_impl(ctx):
-    """W17/F5: all 14 forwarded env vars, and nothing else."""
+    """W17/F5: all 15 forwarded env vars, and nothing else."""
     env = unittest.begin(ctx)
     forwarded = [key for key, row in OCX_ENV_CLASSES.items() if row.cls in ["site", "translucent"]]
     asserts.equals(env, _PASSTHROUGH_ENV, forwarded)
-    asserts.equals(env, 14, len(forwarded))
+    asserts.equals(env, 15, len(forwarded))
 
     # The weakening pair is explicit-only: reading either with getenv() puts
     # an ambient value back in charge of what the build verifies and accepts,

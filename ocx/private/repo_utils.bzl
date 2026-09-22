@@ -57,6 +57,12 @@ OCX_ENV_CLASSES = {
     "OCX_DEFAULT_REGISTRY": _env("site"),
     "OCX_MANAGED_CONFIG": _env("site"),
     "OCX_PATCHES": _env("site", hermetic = True),
+    # 0.6.2: extra TLS roots (a PEM path, or the PEM text) for every registry,
+    # index, Sigstore and TUF client — a corporate proxy CA. Outranks every
+    # config.toml tier. Opaque rather than a watched `path` row: a root decides
+    # whether a fetch connects, never which bytes it gets (digests do), so an
+    # edit has nothing to invalidate.
+    "OCX_EXTRA_CA_CERTS": _env("site"),
     # translucent: ambient value forwarded, but a rule attr overrides it and
     # no_config blanks the hermetic ones.
     "OCX_CONFIG": _env("translucent", attr = "config", path = True, hermetic = True),
