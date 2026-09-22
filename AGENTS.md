@@ -267,8 +267,8 @@ in-tree draft ocx-sh/ocx#12.
 
 The dev toolchain comes from the committed `ocx.toml`/`ocx.lock`
 (bazelisk, actionlint, git-cliff, task, hawkeye, lychee, shellcheck).
-`direnv allow`, or 0.6.0's prompt hook (`ocx self setup --hook` once, then
-`ocx shell allow` in this checkout — the hook stays inert until the project
+ocx's prompt hook activates it: `ocx self setup --hook` once, then
+`ocx shell allow` in this checkout (the hook stays inert until the project
 has a consent stamp); `ocx exec -- <cmd>` for a one-off. buildifier is not in the
 ocx catalog yet → `buildifier_prebuilt` dev dependency.
 
