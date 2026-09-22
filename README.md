@@ -13,7 +13,7 @@ resolution goes through the `ocx` binary; the durable contracts are
 
 ```starlark
 # MODULE.bazel
-bazel_dep(name = "rules_ocx", version = "0.1.0")
+bazel_dep(name = "rules_ocx", version = "0.5.0")
 
 ocx = use_extension("@rules_ocx//ocx:extensions.bzl", "ocx")
 
@@ -74,11 +74,11 @@ to scanning PATH, which exposes that package's private executables too;
    of `https://setup.ocx.sh/dist.json` (sha256-verified).
 2. `ocx.project()` / `ocx.package()` repository rules shell out to that
    binary: `ocx lock --check` (staleness gate), `ocx pull` / `ocx package
-   install` (populate the content-addressed store), `ocx --format json env`
+   install` (populate the content-addressed store), `ocx --format json env --pinned`
    (composed environment).
 3. Packages live in the shared `OCX_HOME` store (`~/.ocx` by default) —
    content-addressed, digest-pinned, hardlink-composed. Repository rules run
-   unsandboxed, so the store is shared with your shell, direnv, and CI,
+   unsandboxed, so the store is shared with your shell and CI,
    fetched once per machine.
 4. Generated repos contain launcher scripts (skylib `native_binary`) that
    apply the package environment and exec the store binaries — usable in
@@ -136,13 +136,16 @@ value replaces the trust anchor signatures are checked against, and
 `sigstore_trusted_root` and pin digests (`pins`, or an `@sha256:` reference) to
 close both.
 
-`OCX_PROJECT`, `OCX_GLOBAL`, `OCX_QUIET`, `OCX_NO_PROJECT` and
-`OCX_NO_CONFIG_REFRESH` are deliberately *not* passed through — each carries a
-fixed value on every invocation. Project context comes from the explicit
+`OCX_PROJECT`, `OCX_GLOBAL`, `OCX_QUIET`, `OCX_NO_PROJECT`,
+`OCX_NO_CONFIG_REFRESH`, `OCX_NO_CONSENT` and `OCX_TOOLCHAIN_DIR` are
+deliberately *not* passed through — each carries a fixed value on every
+invocation. Project context comes from the explicit
 `--project` flag (which `--global` refuses to combine with), `--quiet` would
 suppress the JSON reports the rules parse, `OCX_NO_PROJECT` closes the
 directory walk a fetch would otherwise run from Bazel's own working directory,
-and the managed-config refresh wants a TTY no repo rule has.
+the managed-config refresh wants a TTY no repo rule has, `OCX_NO_CONSENT`
+means no shell-activation consent stamp is written, and an empty
+`OCX_TOOLCHAIN_DIR` keeps the `ocx pull` render in the fetched repository.
 
 ## Weakening posture: `ocx.policy`
 
@@ -277,7 +280,7 @@ once, into the shared content-addressed store.
 Trade-offs: `bins` names are not validated at fetch time, `//:content` /
 `//:env.bzl` are unavailable (they would need materialized bytes), and the
 first executions on a cold machine race on the store
-([ocx#179](https://github.com/ocx-sh/ocx/issues/179)).
+([ocx-sh/ocx#179](https://github.com/ocx-sh/ocx/issues/179)).
 
 ## API docs
 

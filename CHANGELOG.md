@@ -90,11 +90,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Neutralize leaked OCX_PROJECT and retry racy package installs
 - Unbreak Windows — LF scripts, runfiles tree, no stardoc under MSVC *(ci)*
-[0.4.0]: https://github.com/ocx-sh/ocx/compare/v0.3.0..v0.4.0
-[0.3.0]: https://github.com/ocx-sh/ocx/compare/v0.2.0..v0.3.0
-[0.2.0]: https://github.com/ocx-sh/ocx/compare/v0.1.3..v0.2.0
-[0.1.3]: https://github.com/ocx-sh/ocx/compare/v0.1.2..v0.1.3
-[0.1.2]: https://github.com/ocx-sh/ocx/compare/v0.1.1..v0.1.2
-[0.1.1]: https://github.com/ocx-sh/ocx/compare/v0.1.0..v0.1.1
+[0.4.0]: https://github.com/ocx-sh/rules_ocx/compare/v0.3.0..v0.4.0
+[0.3.0]: https://github.com/ocx-sh/rules_ocx/compare/v0.2.0..v0.3.0
+[0.2.0]: https://github.com/ocx-sh/rules_ocx/compare/v0.1.3..v0.2.0
+[0.1.3]: https://github.com/ocx-sh/rules_ocx/compare/v0.1.2..v0.1.3
+[0.1.2]: https://github.com/ocx-sh/rules_ocx/compare/v0.1.1..v0.1.2
+[0.1.1]: https://github.com/ocx-sh/rules_ocx/compare/v0.1.0..v0.1.1
 [0.1.0]: https://github.com/ocx-sh/ocx/tree/v0.1.0
 

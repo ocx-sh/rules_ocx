@@ -35,15 +35,15 @@ footer = """
     {% if release.version -%}
         {% if release.previous.version -%}
             [{{ release.version | trim_start_matches(pat="v") }}]: \
-                https://github.com/ocx-sh/ocx\
+                https://github.com/ocx-sh/rules_ocx\
                     /compare/{{ release.previous.version }}..{{ release.version }}
         {% else -%}
             [{{ release.version | trim_start_matches(pat="v") }}]: \
-                https://github.com/ocx-sh/ocx/tree/{{ release.version }}
+                https://github.com/ocx-sh/rules_ocx/tree/{{ release.version }}
         {% endif -%}
     {% else -%}
         {% if release.previous.version -%}
-            [unreleased]: https://github.com/ocx-sh/ocx\
+            [unreleased]: https://github.com/ocx-sh/rules_ocx\
                 /compare/{{ release.previous.version }}..HEAD
         {% endif -%}
     {% endif -%}

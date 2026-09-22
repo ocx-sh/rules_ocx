@@ -27,10 +27,18 @@ Only the latest release is supported with security updates.
   rewritten, dropped or duplicated row upstream fails closed with no override
   flag (procedure: `.claude/rules/dist-snapshot.md`).
 - `OCX_INSTALL_DIST_URL` bypasses all of that: it replaces the whole manifest
-  with whatever the named URL serves — no sha256, no guard — and the sha256
-  `download_and_extract` then enforces comes out of that same response.
-  Setting it is an explicit out-of-band trust decision about the mirror,
+  with whatever the named URL serves. A URL whose last path segment is
+  `<sha256>.json` is fetched with that digest enforced; any other name is
+  fetched unverified — and the sha256 `download_and_extract` then enforces
+  comes out of that same response. Setting it is an explicit out-of-band trust decision about the mirror,
   equivalent to trusting whoever publishes the ocx release itself.
+- What a build verifies or accepts is decided by `MODULE.bazel` alone:
+  `ocx.policy(allow_unverified, allow_yanked)` is written on every invocation
+  and never read from the environment. Ambient variables can still weaken
+  transport or trust — `OCX_MIRRORS`, `OCX_INSECURE_REGISTRIES`,
+  `OCX_EXTRA_CA_CERTS`, and `OCX_SIGSTORE_TRUSTED_ROOT` unless the
+  `sigstore_trusted_root` attr is set; digest pins (`pins`, `@sha256:`) are
+  the mitigation.
 - Package integrity is enforced by OCX itself via OCI digests; `ocx.lock`
   pins per-platform sha256 digests keyed to the upstream registry host,
   making lockfiles portable across mirrors.
