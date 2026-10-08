@@ -278,6 +278,8 @@ in-tree draft ocx-sh/ocx#12.
   `sigstore_trusted_root` or `isolated_home` — that tier has unit coverage
   only. `examples/package` does declare `ocx.policy()` at its defaults, so the
   tag's acceptance is covered end to end; its weakening effects are not.
+- `task site:lighthouse` — Lighthouse 100x4 + budgets (`site/lighthouse.budgets.mjs`) over every built
+  site page, mobile; `task site:test` is its offline unit test. CI runs both on site PRs.
 - `bazel run //docs:update` regenerates stardoc output; CI diff_tests it.
 - `task dist:update` refreshes `dist/dist.json`.
 - Conventional Commits; changelog via git-cliff; never push to remote;

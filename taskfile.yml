@@ -73,6 +73,20 @@ tasks:
     cmds:
       - pnpm run check
 
+  site:lighthouse:
+    desc: Lighthouse 100x4 plus budgets on every built page (mobile, median of 3 on failure; needs Chromium)
+    deps: [site:install]
+    dir: site
+    cmds:
+      - pnpm exec playwright-core install chromium
+      - pnpm run lighthouse
+
+  site:test:
+    desc: Offline unit test of the Lighthouse budgets and page discovery
+    dir: site
+    cmds:
+      - pnpm run test
+
   site:dev:
     desc: Live site at http://localhost:4321/integrations/bazel/
     deps: [site:install]
