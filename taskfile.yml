@@ -18,6 +18,7 @@ tasks:
       - task: lint
       - task: test
       - task: test:examples
+      - task: site:check
 
   lint:
     desc: buildifier + actionlint + license headers + links + dist snapshot + guards
@@ -49,6 +50,33 @@ tasks:
     cmds:
       - for: { var: EXAMPLES }
         cmd: cd {{.ITEM}} && ocx --project ../../ocx.toml exec -- bazelisk test //...
+
+  site:install:
+    desc: Install the site's dependencies from the committed lockfile
+    dir: site
+    cmds:
+      - pnpm install --frozen-lockfile
+
+  site:build:
+    desc: Build the Starlight site (ocx.sh/integrations/bazel/) from docs/
+    deps: [site:install]
+    dir: site
+    cmds:
+      - pnpm run build
+
+  site:check:
+    desc: Build the site, then check its layout and the Stardoc anchors
+    deps: [site:build]
+    dir: site
+    cmds:
+      - pnpm run check
+
+  site:dev:
+    desc: Live site at http://localhost:4321/integrations/bazel/
+    deps: [site:install]
+    dir: site
+    cmds:
+      - pnpm run dev
 
   docs:update:
     desc: Regenerate stardoc API docs

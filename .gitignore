@@ -14,3 +14,10 @@ examples/*/index/*/c/
 # Local agent scratch: harness telemetry and MCP server caches.
 .claude/state/
 .serena/
+
+# Starlight site: dependencies, build output and pages generated from docs/ by site/scripts/port-docs.mjs.
+site/node_modules/
+site/dist/
+site/.astro/
+site/.lighthouseci/
+site/src/content/docs/

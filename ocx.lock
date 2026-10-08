@@ -1,9 +1,9 @@
 [metadata]
 lock_version = 3
 declaration_hash_version = 1
-declaration_hash = "sha256:ec78cee57e0ff98f5da20d626727799b40832bfabb04edbd851988e8da317390"
-generated_by = "ocx 0.5.0"
-generated_at = "2026-08-02T12:15:33Z"
+declaration_hash = "sha256:47150eb52d9c3e12a17e6e900b5e46a6a7806c77508699c81209ab0757267291"
+generated_by = "ocx 0.6.5"
+generated_at = "2026-10-07T17:40:20Z"
 
 [[tool]]
 name = "actionlint"
@@ -66,6 +66,32 @@ repository = "ocx.sh/lychee/lychee"
 "linux/amd64" = "sha256:fb090cfaa91ba0fcfbe963185add1c72a1a18a4cfcbe560d84bd003ab9ddbb81"
 "linux/arm64" = "sha256:9e78ff5b9e52cc69e8b8245e655663a462abc05c47d98c691e71d8ba1caa87fa"
 "windows/amd64" = "sha256:b0d8f87626a38fa2c58ff6f69671aa6090f7da791e4c3ae59158960eb809fc65"
+
+[[tool]]
+name = "node"
+group = "default"
+repository = "ocx.sh/nodejs/node"
+
+[tool.platforms]
+"darwin/amd64" = "sha256:6eeb00b315b7b6a08327d036d816fd2f7ad753851fae7c796f5b5e2de047c862"
+"darwin/arm64" = "sha256:c25372df1ee5d2764f027193d70cd46fdf01f5506d98b0aeb52c07792d0849c9"
+"linux/amd64+libc.glibc" = "sha256:21f942839c3f9367c5ce0f5dda804621b945f48777d6e35598004ad0c9727dc7"
+"linux/arm64+libc.glibc" = "sha256:76aaeb829ea9d40c4092d1c176da35edd1260b75d1bf911f48829da392347a69"
+"windows/amd64" = "sha256:737687a6e9eb4fa7d168529eae2eb291d5c0dee76e02e5758b2d27f6f1b48aa6"
+"windows/arm64" = "sha256:af5f53029aa40b512e7e795adfbdeada4a7d1db362b312982cea58348ad901c2"
+
+[[tool]]
+name = "pnpm"
+group = "default"
+repository = "ocx.sh/pnpm/pnpm"
+
+[tool.platforms]
+"darwin/arm64" = "sha256:3984948b101cdf9e8562ed2d59ee0c02ccc5fb13cc5fd26153730a8b5e1c592f"
+"linux/amd64+libc.glibc" = "sha256:00d9ca96d5cf67b4ee551cce0e29221981fe6e8c0f4bf956f58a28f4c36c27bc"
+"linux/amd64+libc.musl" = "sha256:922ef1f7b3c50a57ae7b6180d9fc3ca1d8692b2b5982418a5b533e634723824c"
+"linux/arm64+libc.glibc" = "sha256:ac90cc4f15c60c3ff4512eecb3b3d812ac5c84a3510132c515f78b9039ff771f"
+"windows/amd64" = "sha256:8ecef6280250e89f4fee9042d19c74e84837c50071aecbc0bd3c1c9bb9fa5652"
+"windows/arm64" = "sha256:453372cc0efa2af86dea7b2c503744d8d4203ccfddff304899bfd2cd72e47d1d"
 
 [[tool]]
 name = "shellcheck"

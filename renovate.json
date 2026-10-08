@@ -20,6 +20,20 @@
       "groupName": "bazel-deps",
       "semanticCommitType": "chore",
       "semanticCommitScope": "deps"
+    },
+    {
+      "description": "Site npm deps — group, chore(deps) prefix",
+      "matchManagers": ["npm"],
+      "groupName": "site-deps",
+      "semanticCommitType": "chore",
+      "semanticCommitScope": "deps"
+    },
+    {
+      "description": "Theme and deploy action move together: the action aborts when its Pagefind differs from the theme's",
+      "matchPackageNames": ["@ocx-sh/theme", "ocx-sh/website/.github/actions/deploy"],
+      "groupName": "ocx-theme",
+      "semanticCommitType": "build",
+      "semanticCommitScope": "site"
     }
   ]
 }

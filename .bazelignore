@@ -1,3 +1,5 @@
 examples
 e2e
 .agents/worktrees
+site/node_modules
+site/dist

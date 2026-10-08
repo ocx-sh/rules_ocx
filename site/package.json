@@ -1,0 +1,23 @@
+{
+  "name": "rules-ocx-site",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "port": "node scripts/port-docs.mjs",
+    "dev": "pnpm run port && astro dev --host",
+    "build": "pnpm run port && astro build",
+    "check": "node scripts/check-anchors.mjs && ocx-site check --dist dist",
+    "lighthouse": "node scripts/lighthouse.mjs",
+    "test": "node --test scripts/lighthouse.test.mjs"
+  },
+  "dependencies": {
+    "@astrojs/starlight": "0.42.4",
+    "@ocx-sh/theme": "github:ocx-sh/website#9543500a6c48d40df5c7a2bdf2379fea75d183c1&path:/packages/theme",
+    "astro": "7.3.5"
+  },
+  "devDependencies": {
+    "@lhci/cli": "0.15.1",
+    "lighthouse": "12.6.1",
+    "playwright-core": "^1.63.0"
+  }
+}
