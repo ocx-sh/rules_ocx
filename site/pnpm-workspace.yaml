@@ -3,5 +3,6 @@ allowBuilds:
   sharp: true
   # The git-subdir theme runs its `prepack` when pnpm prepares it. Keep the SHA in step
   # with package.json. Gone once the theme installs from npm.
-  "@ocx-sh/theme@https://codeload.github.com/ocx-sh/website/tar.gz/9543500a6c48d40df5c7a2bdf2379fea75d183c1#path:/packages/theme": true
+  "@ocx-sh/theme@https://codeload.github.com/ocx-sh/website/tar.gz/1b898a76d4c3bbe60d9619a931c74f21660f4eb4#path:/packages/theme": true
   '@ocx-sh/theme@https://codeload.github.com/ocx-sh/website/tar.gz/38d1b3164d6ae227efd6d84fbc0b47615c9ec00d#path:/packages/theme': set this to true or false
+  '@ocx-sh/theme@https://codeload.github.com/ocx-sh/website/tar.gz/9543500a6c48d40df5c7a2bdf2379fea75d183c1#path:/packages/theme': set this to true or false
