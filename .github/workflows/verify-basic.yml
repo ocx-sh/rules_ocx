@@ -24,7 +24,7 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0 # `task secrets` (gitleaks git) scans the full history
-      - uses: ocx-sh/conventions/.github/actions/setup@25738f8615e5be69714ed4b58dd332f9a3e4e78c # v0
+      - uses: ocx-sh/conventions/.github/actions/setup@2c061a46ced91e5fb27581ef9e6cd64e489ab39e # v0
         with:
           groups: default,lint
       - run: task ci:lint
@@ -37,8 +37,6 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
-    # Reads OTEL_AUTH, so it runs in an environment.
-    environment: ci
     permissions:
       contents: read
       checks: write
@@ -46,17 +44,17 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: ocx-sh/conventions/.github/actions/setup@25738f8615e5be69714ed4b58dd332f9a3e4e78c # v0
+      - uses: ocx-sh/conventions/.github/actions/setup@2c061a46ced91e5fb27581ef9e6cd64e489ab39e # v0
         with:
           groups: default,test
-          otel-auth: ${{ secrets.OTEL_AUTH }}
+          otel-auth: ${{ secrets.OTEL_OTLP_AUTH }}
       - run: task ci:test
       - name: Push JUnit telemetry
         if: always()
-        uses: ocx-sh/conventions/.github/actions/setup@25738f8615e5be69714ed4b58dd332f9a3e4e78c # v0
+        uses: ocx-sh/conventions/.github/actions/setup@2c061a46ced91e5fb27581ef9e6cd64e489ab39e # v0
         with:
           report: target/reports/junit/*.xml
-          otel-auth: ${{ secrets.OTEL_AUTH }}
+          otel-auth: ${{ secrets.OTEL_OTLP_AUTH }}
       - name: Publish JUnit report
         if: always()
         uses: mikepenz/action-junit-report@6ef3fdcfcd5f0b5d14df3e659ef19b8c6820f93d # v6.6.1
@@ -68,23 +66,21 @@ jobs:
 
   build:
     runs-on: ubuntu-latest
-    # Reads the Bazel cache and OTEL secrets, so it runs in an environment. BAZEL_CACHE_WRITE_AUTH lives only in
-    # `ci-write` (deployment branches: the default branch); PR jobs get `ci`, which holds read-only credentials.
-    environment: ${{ github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && 'ci-write' || 'ci' }}
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: ocx-sh/conventions/.github/actions/setup@25738f8615e5be69714ed4b58dd332f9a3e4e78c # v0
+      - uses: ocx-sh/conventions/.github/actions/setup@2c061a46ced91e5fb27581ef9e6cd64e489ab39e # v0
         with:
           groups: default,build
-          # Cache writes only on push to the default branch (environment `ci-write`); fork PRs get empty secrets and run uncached.
-          bazel-cache: ${{ github.event_name == 'push' && 'write' || 'read' }}
-          cache-read-auth: ${{ secrets.BAZEL_CACHE_READ_AUTH }}
-          cache-write-auth: ${{ github.event_name == 'push' && secrets.BAZEL_CACHE_WRITE_AUTH || '' }}
-          otel-auth: ${{ secrets.OTEL_AUTH }}
+          # Org secrets. Cache writes only on a push to main (read credential everywhere else); fork PRs see
+          # empty secrets and run uncached.
+          bazel-cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'write' || 'read' }}
+          cache-read-auth: ${{ !(github.event_name == 'push' && github.ref == 'refs/heads/main') && secrets.BAZEL_CACHE_READ_AUTH || '' }}
+          cache-write-auth: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') && secrets.BAZEL_CACHE_WRITE_AUTH || '' }}
+          otel-auth: ${{ secrets.OTEL_OTLP_AUTH }}
       - run: task ci:build
 
   docs:
@@ -95,7 +91,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: ocx-sh/conventions/.github/actions/setup@25738f8615e5be69714ed4b58dd332f9a3e4e78c # v0
+      - uses: ocx-sh/conventions/.github/actions/setup@2c061a46ced91e5fb27581ef9e6cd64e489ab39e # v0
         with:
           groups: default,docs
       - run: task ci:docs
