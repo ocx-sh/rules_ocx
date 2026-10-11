@@ -1,5 +1,5 @@
 # Changes here will be overwritten by Copier; NEVER EDIT MANUALLY
-_commit: 136f3a3
+_commit: b987c09
 _src_path: https://github.com/ocx-sh/conventions.git
 bazel: true
 deep_os:
@@ -17,4 +17,6 @@ site:
     dir: site
     dist: site/dist
     path: /integrations/bazel
+    paths:
+    - docs/**
 theme_bundle: true
