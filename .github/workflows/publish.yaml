@@ -10,6 +10,9 @@ on:
       tag_name:
         required: true
         type: string
+    secrets:
+      BCR_PUBLISH_TOKEN:
+        required: true
   workflow_dispatch:
     inputs:
       tag_name:
@@ -19,7 +22,7 @@ on:
 
 jobs:
   publish:
-    uses: bazel-contrib/publish-to-bcr/.github/workflows/publish.yaml@v1.4.1
+    uses: bazel-contrib/publish-to-bcr/.github/workflows/publish.yaml@c316f1611511a40423572303f66c80bb30bfe2f8 # v1.4.1
     with:
       tag_name: ${{ inputs.tag_name }}
       # Fork of bazelbuild/bazel-central-registry that the PR branch is pushed

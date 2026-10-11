@@ -4,20 +4,22 @@ on:
   push:
     tags: ["v*"]
 
-permissions:
-  contents: write
+permissions: {}
 
 jobs:
   release:
     name: GitHub Release
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           fetch-depth: 0
+          persist-credentials: false
       - name: Setup OCX
-        uses: ocx-sh/setup-ocx@v1
+        uses: ocx-sh/setup-ocx@25fa771f8572572dc64528db89560de68a163a0e # v1.4.0
         with:
           version: "0.6.2"
       - name: Verify tag matches MODULE.bazel version
@@ -57,7 +59,8 @@ jobs:
     if: ${{ !contains(github.ref_name, '-') }}
     permissions:
       contents: write
-    secrets: inherit
+    secrets:
+      BCR_PUBLISH_TOKEN: ${{ secrets.BCR_PUBLISH_TOKEN }}
     uses: ./.github/workflows/publish.yaml
     with:
       tag_name: ${{ github.ref_name }}
