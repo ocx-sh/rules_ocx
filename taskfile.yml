@@ -40,6 +40,7 @@ tasks:
     desc: Lint and format check (buildifier, license headers, links, dist snapshot, guards)
     cmds:
       - task: lint
+      - task: pins:check
 
   ci:test:
     desc: Basic-tier Bazel tests (--config=basic); JUnit copied to target/reports/junit/
@@ -215,7 +216,7 @@ tasks:
     desc: buildifier + license headers + links + dist snapshot + guards (workflows are in task workflows:lint)
     cmds:
       - task: buildifier:check
-      - ocx exec -g lint -- hawkeye check
+      - ocx exec -g lint -- hawkeye check --fail-on-unknown
       # The ocx.sh/integrations/bazel/ link 404s until the site's first deploy and the edge flip;
       # drop the exclude then.
       - ocx exec -g lint -- lychee --no-progress --exclude '^https://ocx\.sh/integrations/bazel/' README.md CONTRIBUTING.md SECURITY.md
