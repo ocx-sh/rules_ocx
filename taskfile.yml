@@ -1,31 +1,224 @@
 # https://taskfile.dev — dev toolchain provisioned via ocx (see ocx.toml)
 version: "3"
 
+includes:
+  baseline:
+    taskfile: ./taskfiles/baseline.taskfile.yml
+    flatten: true
+
 vars:
-  BAZEL: ocx exec -- bazelisk
+  # bazelisk lives in both the test and build groups (the verify-basic test and build jobs pull one each).
+  BAZEL: ocx exec -g test -- bazelisk
+  BAZEL_BUILD: ocx exec -g build -- bazelisk
   EXAMPLES: examples/project examples/package examples/cross_platform
+  # Bazel versions the deep tier covers; rolling is forward-compat early warning only (never blocks).
+  BAZEL_VERSIONS: 8.7.0 9.x
+  # Remote-cache tuning (--config=ci) only on CI; a laptop keeps its own output base settings.
+  CI_CFG:
+    sh: if [ -n "${CI:-}" ]; then echo --config=ci; fi
+  # Docs freshness (//docs) only matches the pinned dev Bazel: stardoc emits an extra `repo_mapping`
+  # row per repository rule on Bazel 9 and not on 8, so it is excluded on any other USE_BAZEL_VERSION.
+  DOCS_EXCLUDE:
+    sh: case "${USE_BAZEL_VERSION:-9}" in 9*) ;; *) echo "-//docs/..." ;; esac
 
 tasks:
   default:
     deps: [verify]
 
   verify:
-    desc: Full gate — lint, unit tests, docs freshness, example workspaces
+    desc: Full gate — lint, workflow lint, basic-tier tests, example workspaces, site build
     cmds:
-      - task: lint
-      - task: test
+      - task: ci:lint
+      - task: workflows:lint
+      - task: ci:test
       - task: test:examples
       - task: site:check
 
-  lint:
-    desc: buildifier + actionlint + license headers + links + dist snapshot + guards
+  # --- baseline ci:* entry points (verify-basic / verify-deep call these) ---
+
+  ci:lint:
+    desc: Lint and format check (buildifier, license headers, links, dist snapshot, guards)
     cmds:
-      - "{{.BAZEL}} run //:buildifier.check"
-      - ocx exec -- actionlint
-      - ocx exec -- hawkeye check
+      - task: lint
+
+  ci:test:
+    desc: Basic-tier Bazel tests (--config=basic); JUnit copied to target/reports/junit/
+    cmds:
+      - defer: { task: junit:collect, vars: { DIR: ".", PREFIX: basic } }
+      - "{{.BAZEL}} test --config=basic {{.CI_CFG}} --verbose_test_summary -- //... {{.DOCS_EXCLUDE}}"
+
+  ci:build:
+    desc: Build every Bazel target
+    cmds:
+      - "{{.BAZEL_BUILD}} build {{.CI_CFG}} -- //... {{.DOCS_EXCLUDE}}"
+
+  ci:docs:
+    desc: Site build and checks, budget unit test and the Lighthouse gate
+    cmds:
+      - task: site:check
+      - task: site:test
+      - task: site:lighthouse
+
+  ci:deep:
+    desc: Nightly tier — full tests per Bazel version, examples, BCR parity, pin completeness, offline determinism
+    cmds:
+      - for: { var: BAZEL_VERSIONS }
+        task: deep:test
+        vars: { BAZEL_VERSION: "{{.ITEM}}" }
+      - task: deep:test
+        vars: { BAZEL_VERSION: rolling }
+        ignore_error: true
+      - task: deep:examples
+      - task: deep:bcr-parity
+      - task: pins:check
+      - task: deep:offline
+
+  deep:test:
+    internal: true
+    env:
+      USE_BAZEL_VERSION: "{{.BAZEL_VERSION}}"
+    vars:
+      DOCS_EXCLUDE:
+        sh: case "{{.BAZEL_VERSION}}" in 9*) ;; *) echo "-//docs/..." ;; esac
+    cmds:
+      - defer: { task: junit:collect, vars: { DIR: ".", PREFIX: "deep-{{.BAZEL_VERSION}}" } }
+      - "{{.BAZEL}} test --config=deep {{.CI_CFG}} --verbose_test_summary -- //... {{.DOCS_EXCLUDE}}"
+
+  # Live ocx.sh registry; Bazel 9 examples run on Linux only (bounds the registry fan-out).
+  deep:examples:
+    internal: true
+    cmds:
+      - for: { var: EXAMPLES }
+        task: deep:example
+        vars: { EXAMPLE: "{{.ITEM}}", BAZEL_VERSION: 8.7.0 }
+      - for: { var: EXAMPLES }
+        task: deep:example
+        vars: { EXAMPLE: "{{.ITEM}}", BAZEL_VERSION: 9.x }
+        if: '{{eq OS "linux"}}'
+
+  deep:example:
+    internal: true
+    env:
+      USE_BAZEL_VERSION: "{{.BAZEL_VERSION}}"
+    cmds:
+      - defer: { task: junit:collect, vars: { DIR: "{{.EXAMPLE}}", PREFIX: "example-{{base .EXAMPLE}}-{{.BAZEL_VERSION}}" } }
+      - cd {{.EXAMPLE}} && ocx --project ../../ocx.toml exec -g test -- bazelisk test //... --verbose_test_summary
+
+  # Reproduces the BCR presubmit for e2e/bzlmod. Deliberately no remote cache: a hit would hide a break
+  # BCR would then find in the submission PR (e2e/ is its own workspace and does not import the baseline rc).
+  deep:bcr-parity:
+    internal: true
+    cmds:
+      - for: { var: BAZEL_VERSIONS }
+        task: deep:bcr-build
+        vars: { BAZEL_VERSION: "{{.ITEM}}" }
+      - for: { var: BAZEL_VERSIONS }
+        task: deep:bcr-rosetta
+        vars: { BAZEL_VERSION: "{{.ITEM}}" }
+        if: '{{and (eq OS "darwin") (eq ARCH "arm64")}}'
+
+  deep:bcr-build:
+    internal: true
+    env:
+      USE_BAZEL_VERSION: "{{.BAZEL_VERSION}}"
+    dir: e2e/bzlmod
+    cmds:
+      - ocx --project ../../ocx.toml exec -g test -- bazelisk build //...
+
+  # BCR's macOS agent is Intel: emulate darwin/amd64 with an x86_64 bazelisk under Rosetta (the repo-rule
+  # host arch is the Bazel JVM arch, and `arch -x86_64` cannot downgrade the arm64 bazelisk from ocx).
+  deep:bcr-rosetta:
+    internal: true
+    env:
+      USE_BAZEL_VERSION: "{{.BAZEL_VERSION}}"
+    dir: e2e/bzlmod
+    cmds:
+      - softwareupdate --install-rosetta --agree-to-license
+      - curl -fsSL -o "${RUNNER_TEMP:-/tmp}/bazelisk-x64" https://github.com/bazelbuild/bazelisk/releases/download/v1.29.0/bazelisk-darwin-amd64
+      - chmod +x "${RUNNER_TEMP:-/tmp}/bazelisk-x64"
+      - arch -x86_64 "${RUNNER_TEMP:-/tmp}/bazelisk-x64" build //...
+
+  # Deterministic, arch-independent guard for the class of bug that broke the BCR macOS presubmit: every
+  # ocx.package `pins` map must list all four BCR platforms.
+  pins:check:
+    desc: Every ocx.package pins map in e2e/bzlmod and examples/package covers all four BCR platforms
+    cmds:
+      - |
+        rc=0
+        for f in e2e/bzlmod/MODULE.bazel examples/package/MODULE.bazel; do
+          blocks=$(grep -c 'pins = {' "$f")
+          for p in darwin/amd64 darwin/arm64 linux/amd64 windows/amd64; do
+            n=$(grep -c "\"$p\"" "$f") || n=0
+            if [ "$n" -ne "$blocks" ]; then
+              echo "FAIL $f: platform '$p' appears $n time(s), expected $blocks (one per pins block)"
+              rc=1
+            fi
+          done
+          [ "$rc" -ne 0 ] || echo "OK $f ($blocks pins block(s), all four platforms present)"
+        done
+        exit "$rc"
+
+  # Hermetic offline behaviour; a network-backed cache would mask it. Linux only (one runner is enough).
+  deep:offline:
+    internal: true
+    cmds:
+      - for: { var: BAZEL_VERSIONS }
+        task: deep:offline-version
+        vars: { BAZEL_VERSION: "{{.ITEM}}" }
+        if: '{{eq OS "linux"}}'
+
+  deep:offline-version:
+    internal: true
+    env:
+      USE_BAZEL_VERSION: "{{.BAZEL_VERSION}}"
+    cmds:
+      - "{{.BAZEL}} fetch @dev_tools//..."
+      - cmd: OCX_OFFLINE=1 {{.BAZEL}} fetch --force @dev_tools//...
+      - cmd: |
+          empty=$(mktemp -d)/empty-ocx-home
+          if OCX_HOME="$empty" OCX_OFFLINE=1 {{.BAZEL}} fetch --force @dev_tools//...; then
+            echo "expected the offline fetch against an empty store to fail" >&2
+            exit 1
+          fi
+          echo "offline failure mode OK"
+
+  # Copies every test.xml under DIR's bazel-testlogs to target/reports/junit/<PREFIX>-<path>.xml.
+  junit:collect:
+    internal: true
+    cmds:
+      - cmd: |
+          out="{{.ROOT_DIR}}/target/reports/junit"; mkdir -p "$out"
+          tl=$(cd {{.DIR}} && {{.BAZEL}} info bazel-testlogs 2>/dev/null) || exit 0
+          for f in "$tl"/*/test.xml "$tl"/*/*/test.xml "$tl"/*/*/*/test.xml "$tl"/*/*/*/*/test.xml "$tl"/*/*/*/*/*/test.xml; do
+            [ -f "$f" ] || continue
+            rel="${f#$tl/}"; rel="${rel%/test.xml}"
+            cp "$f" "$out/{{.PREFIX}}-${rel//\//_}.xml"
+          done
+
+  release:bump-files:
+    desc: "Rewrite the MODULE.bazel module version (called by release:prepare; VERSION=x.y.z)"
+    requires:
+      vars: [VERSION]
+    cmds:
+      # release.yml refuses to publish when the tag and MODULE.bazel disagree, so the module() version is
+      # the one that has to move. Anchoring on a bare `version = "…",` line keeps bazel_dep() versions untouched.
+      - |
+        matches=$(grep -c '^[[:space:]]*version = "' MODULE.bazel)
+        if [ "$matches" -ne 1 ]; then
+          echo "MODULE.bazel: expected exactly one module version line, found $matches" >&2
+          exit 1
+        fi
+        sed -i.bak 's/^\([[:space:]]*version = "\)[^"]*\(",\)$/\1{{.VERSION}}\2/' MODULE.bazel
+        rm -f MODULE.bazel.bak
+
+  lint:
+    desc: buildifier + license headers + links + dist snapshot + guards (workflows are in task workflows:lint)
+    cmds:
+      - task: buildifier:check
+      - ocx exec -g lint -- hawkeye check
       # The ocx.sh/integrations/bazel/ link 404s until the site's first deploy and the edge flip;
       # drop the exclude then.
-      - ocx exec -- lychee --no-progress --exclude '^https://ocx\.sh/integrations/bazel/' README.md CONTRIBUTING.md SECURITY.md
+      - ocx exec -g lint -- lychee --no-progress --exclude '^https://ocx\.sh/integrations/bazel/' README.md CONTRIBUTING.md SECURITY.md
       # Guards the pin/snapshot lockstep invariant on every PR — the scheduled
       # update-dist.yml only checks it when it refreshes the snapshot itself.
       - task: dist:check
@@ -33,11 +226,23 @@ tasks:
       # choose our pin, move it backwards, or rewrite a committed sha256.
       - python3 scripts/bump_ocx_test.py
 
-  format:
-    desc: Apply buildifier formatting
+  # make-location (buildifier >= 9) flags every `$(location)` in the examples and tests; the old
+  # buildifier_prebuilt 8.2 gate did not, so it stays off until those call sites are migrated on purpose.
+  buildifier:check:
+    desc: buildifier format + lint check over every tracked Bazel file
     cmds:
-      - "{{.BAZEL}} run //:buildifier.fix"
-      - ocx exec -- hawkeye format
+      - git ls-files -z -- '*.bzl' '*.bazel' BUILD WORKSPACE | xargs -0 ocx exec -g lint -- buildifier -mode=diff -lint=warn -warnings=-make-location
+
+  buildifier:fix:
+    desc: buildifier format + lint fix over every tracked Bazel file
+    cmds:
+      - git ls-files -z -- '*.bzl' '*.bazel' BUILD WORKSPACE | xargs -0 ocx exec -g lint -- buildifier -mode=fix -lint=fix -warnings=-make-location
+
+  format:
+    desc: Apply buildifier and hawkeye formatting
+    cmds:
+      - task: buildifier:fix
+      - ocx exec -g lint -- hawkeye format
 
   test:
     desc: Unit tests + docs freshness (no network)
@@ -48,48 +253,48 @@ tasks:
     desc: Example workspaces — integration tests against live ocx.sh
     cmds:
       - for: { var: EXAMPLES }
-        cmd: cd {{.ITEM}} && ocx --project ../../ocx.toml exec -- bazelisk test //...
+        cmd: cd {{.ITEM}} && ocx --project ../../ocx.toml exec -g test -- bazelisk test //...
 
   site:install:
     desc: Install the site's dependencies from the committed lockfile
     dir: site
     cmds:
-      - pnpm install --frozen-lockfile
+      - ocx exec -g docs -- pnpm install --frozen-lockfile
 
   site:build:
     desc: Build the Starlight site (ocx.sh/integrations/bazel/) from docs/
     deps: [site:install]
     dir: site
     cmds:
-      - pnpm run build
+      - ocx exec -g docs -- pnpm run build
 
   site:check:
     desc: Build the site, then check its layout and the Stardoc anchors
     deps: [site:build]
     dir: site
     cmds:
-      - pnpm run check
+      - ocx exec -g docs -- pnpm run check
 
   site:lighthouse:
     desc: Lighthouse 100x4 plus budgets on every built page (mobile, median of 3 on failure; needs Chromium)
     deps: [site:install]
     dir: site
     cmds:
-      - pnpm exec playwright-core install chromium
-      - pnpm run lighthouse
+      - ocx exec -g docs -- pnpm exec playwright-core install {{if env "CI"}}--with-deps {{end}}chromium
+      - ocx exec -g docs -- pnpm run lighthouse
 
   site:test:
     desc: Offline unit test of the Lighthouse budgets and page discovery
     dir: site
     cmds:
-      - pnpm run test
+      - ocx exec -g docs -- pnpm run test
 
   site:dev:
     desc: Live site at http://localhost:4321/integrations/bazel/
     deps: [site:install]
     dir: site
     cmds:
-      - pnpm run dev
+      - ocx exec -g docs -- pnpm run dev
 
   docs:update:
     desc: Regenerate stardoc API docs

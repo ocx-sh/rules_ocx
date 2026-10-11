@@ -21,3 +21,6 @@ site/dist/
 site/.astro/
 site/.lighthouseci/
 site/src/content/docs/
+
+# Baseline CI artifacts: JUnit reports from ci:test / ci:deep.
+target/

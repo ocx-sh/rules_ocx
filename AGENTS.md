@@ -270,7 +270,9 @@ in-tree draft ocx-sh/ocx#12.
 
 ## Workflow
 
-- `task verify` — lint + unit tests + examples. Run after any change.
+- `task verify` — lint + workflow lint + basic-tier tests + examples + site build. Run after any change.
+  CI (`verify-basic` per PR, `verify-deep` nightly) runs the `ci:*` tasks of `taskfile.yml`; deep covers
+  the Bazel-version matrix, examples, BCR parity, pin completeness and offline determinism.
 - `bazel test //...` — unit tests (no network) + docs freshness.
 - Examples under `examples/*` are the integration tests (live ocx.sh
   registry — dogfooding); each is its own module with `local_path_override`.
@@ -288,11 +290,12 @@ in-tree draft ocx-sh/ocx#12.
 ## Dogfooding
 
 The dev toolchain comes from the committed `ocx.toml`/`ocx.lock`
-(bazelisk, actionlint, git-cliff, task, hawkeye, lychee, shellcheck).
+(bazelisk, actionlint, buildifier, git-cliff, task, hawkeye, lychee, shellcheck, grouped by CI role:
+`ocx exec -g lint -- <tool>`; the lint group is also what `@dev_tools` exposes to Bazel).
 ocx's prompt hook activates it: `ocx self setup --hook` once, then
 `ocx shell allow` in this checkout (the hook stays inert until the project
-has a consent stamp); `ocx exec -- <cmd>` for a one-off. buildifier is not in the
-ocx catalog yet → `buildifier_prebuilt` dev dependency.
+has a consent stamp); `ocx exec -- <cmd>` for a one-off. buildifier comes from ocx
+(`task buildifier:check` / `buildifier:fix`); there is no `buildifier_prebuilt` dev dependency.
 
 ## Spec / plan / ADR conventions
 
