@@ -37,7 +37,7 @@ jobs:
           integrity="sha256-$(openssl dgst -sha256 -binary "$archive" | openssl base64 -A)"
           echo "integrity: $integrity" | tee integrity.txt
       - name: Generate release notes
-        run: ocx exec -- git-cliff --latest --strip header -o notes.md
+        run: ocx exec -g release -- git-cliff --latest --strip header -o notes.md
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}

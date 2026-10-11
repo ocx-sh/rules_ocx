@@ -1,4 +1,7 @@
 # rules_ocx developer defaults. Keep minimal — consumers set their own flags.
+# Shared baseline: remote cache, --config=ci/basic/deep, .bazelrc.user (template-owned).
+import %workspace%/bazel/baseline.bazelrc
+
 common --enable_platform_specific_config
 
 # Windows: sh_test data needs a real runfiles tree, not just a manifest.
@@ -10,5 +13,3 @@ test --test_output=errors
 
 # Repo rules talk to the shared OCX_HOME and the ocx.sh registry; keep their
 # env visible to fetches (getenv() declarations in the rules do the tracking).
-
-try-import %workspace%/.bazelrc.user
