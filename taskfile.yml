@@ -1,9 +1,6 @@
 # https://taskfile.dev — dev toolchain provisioned via ocx (see ocx.toml)
 version: "3"
 
-includes:
-  release: ./taskfiles/release.taskfile.yml
-
 vars:
   BAZEL: ocx exec -- bazelisk
   EXAMPLES: examples/project examples/package examples/cross_platform
