@@ -11,3 +11,9 @@ includes = [
     "scripts/**/*.sh",
 ]
 excludes = ["dist/**", "examples/**"]
+
+# hawkeye does not know Starlark; without this rule it skips every .bzl as "unsupported"
+# and the gate checks nothing (the task passes --fail-on-unknown to keep it that way).
+[[rules]]
+style_out = "script"
+extensions = ["bzl", "bazel"]
