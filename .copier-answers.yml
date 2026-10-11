@@ -1,0 +1,20 @@
+# Changes here will be overwritten by Copier; NEVER EDIT MANUALLY
+_commit: 21306db
+_src_path: https://github.com/ocx-sh/conventions.git
+bazel: true
+deep_os:
+- ubuntu-latest
+- macos-latest
+- windows-latest
+languages:
+- bazel
+- shell
+- typescript
+profile: full
+repo_name: rules_ocx
+site:
+    deploy: true
+    dir: site
+    dist: site/dist
+    path: /integrations/bazel
+theme_bundle: true
