@@ -21,7 +21,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
       # Refreshes the snapshot and moves DEFAULT_OCX_VERSION plus every
       # setup-ocx pin to the newest stable in lockstep. Nothing is written
       # unless every guard passes: the refresh may only *add* rows (no
@@ -37,7 +39,7 @@ jobs:
       - name: Refresh snapshot and bump the pin
         run: python3 scripts/bump_ocx.py
       - name: Open PR if changed
-        uses: peter-evans/create-pull-request@v7
+        uses: peter-evans/create-pull-request@22a9089034f40e5a961c8808d113e2c98fb63676 # v7
         with:
           # GITHUB_TOKEN-created PRs never trigger CI workflows; a PAT makes
           # checks run on the PR.
