@@ -3,13 +3,18 @@
 clients = ["claude", "codex", "opencode"]
 
 [bundles]
-docs-essentials = "ghcr.io/ocx-sh/lore/docs-essentials:latest"
-code-docs-essentials = "ghcr.io/ocx-sh/lore/code-docs-essentials:latest"
 bazel-essentials = "ghcr.io/ocx-sh/lore/bazel-essentials:latest"
+code-docs-essentials = "ghcr.io/ocx-sh/lore/code-docs-essentials:latest"
+docs-essentials = "ghcr.io/ocx-sh/lore/docs-essentials:latest"
+ocx-theme = "ghcr.io/ocx-sh/lore/ocx-theme:latest"
 shell-essentials = "ghcr.io/ocx-sh/lore/shell-essentials:latest"
 typescript-essentials = "ghcr.io/ocx-sh/lore/typescript-essentials:latest"
-ocx-theme = "ghcr.io/ocx-sh/lore/ocx-theme:latest"
 
 [skills]
+update-dist = "./agent-config/update-dist"
 
 [rules]
+dist-snapshot = "./agent-config/dist-snapshot.md"
+mirror-auth = "./agent-config/mirror-auth.md"
+release = "./agent-config/release.md"
+starlark = "./agent-config/starlark.md"

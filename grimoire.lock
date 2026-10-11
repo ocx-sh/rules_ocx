@@ -3,9 +3,9 @@ agent = []
 [metadata]
 lock_version = 1
 declaration_hash_version = 1
-declaration_hash = "sha256:dc18d31b37d9c0da7548ac1ba24c01dc9932603046eb8b7ae90f9b3e87b2ce28"
+declaration_hash = "sha256:0b3c0cbec30f8285481b4dbbcdcee0658c519fce74bcee9c542032aeac2004ff"
 generated_by = "grim 0.14.3"
-generated_at = "2026-10-11T19:27:09Z"
+generated_at = "2026-10-11T22:54:46Z"
 
 [[skill]]
 name = "bazel-adopt"
@@ -113,6 +113,11 @@ pinned = "ghcr.io/ocx-sh/lore/shell-port@sha256:b05c189ec9d8681729a882ccfc68dbcd
 bundle = "ghcr.io/ocx-sh/lore/shell-essentials"
 bundle_tag = "latest"
 
+[[skill]]
+name = "update-dist"
+path = "./agent-config/update-dist"
+hash = "sha256:50988c38a671902ef550f2c1ac1a2d3d0c189325bc36a1eeabaf9e7b53e037f8"
+
 [[rule]]
 name = "bazel-quality"
 pinned = "ghcr.io/ocx-sh/lore/bazel-quality@sha256:801251d8969ca06841c4a6a83796f0cb3555a86dcc9373a092b115f600ef574f"
@@ -136,10 +141,20 @@ repo = "ghcr.io/ocx-sh/lore/typescript-essentials"
 tag = "latest"
 
 [[rule]]
+name = "dist-snapshot"
+path = "./agent-config/dist-snapshot.md"
+hash = "sha256:87989cb39893dca7fe23daa3c3c75b2d8b6c18183abb09c33c154018aecd79cb"
+
+[[rule]]
 name = "docs-quality"
 pinned = "ghcr.io/ocx-sh/lore/docs-quality@sha256:065355e0be2ce30d340c71b57bb10c5360a954a166023199535cedee56cee96c"
 bundle = "ghcr.io/ocx-sh/lore/docs-essentials"
 bundle_tag = "latest"
+
+[[rule]]
+name = "mirror-auth"
+path = "./agent-config/mirror-auth.md"
+hash = "sha256:3f48e3badf0fd9336e31b34da1699c6982d995d441539351dda4234c488da19a"
 
 [[rule]]
 name = "powershell-quality"
@@ -148,10 +163,20 @@ bundle = "ghcr.io/ocx-sh/lore/shell-essentials"
 bundle_tag = "latest"
 
 [[rule]]
+name = "release"
+path = "./agent-config/release.md"
+hash = "sha256:26925298c0336ec9214ca690e916f9a6414b49df6e0f02d0ae45b115a61e6c94"
+
+[[rule]]
 name = "shell-quality"
 pinned = "ghcr.io/ocx-sh/lore/shell-quality@sha256:737adb8dfab155b1569aec93c709fea413c07af612ec0976e1e1d3aada95cef7"
 bundle = "ghcr.io/ocx-sh/lore/shell-essentials"
 bundle_tag = "latest"
+
+[[rule]]
+name = "starlark"
+path = "./agent-config/starlark.md"
+hash = "sha256:b6cee0322d4ac4b690aba9361c79ed0213fbda48115484a5f329bb5622f88d02"
 
 [[rule]]
 name = "typescript-packaging"
