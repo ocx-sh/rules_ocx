@@ -149,7 +149,8 @@ tasks:
         for f in e2e/bzlmod/MODULE.bazel examples/package/MODULE.bazel; do
           blocks=$(grep -c 'pins = {' "$f")
           for p in darwin/amd64 darwin/arm64 linux/amd64 windows/amd64; do
-            n=$(grep -c "\"$p\"" "$f") || n=0
+            # `.` stands for the quote: an embedded " in a grep argument is lost on Windows (Git's grep).
+            n=$(grep -c "^ *.$p.:" "$f") || n=0
             if [ "$n" -ne "$blocks" ]; then
               echo "FAIL $f: platform '$p' appears $n time(s), expected $blocks (one per pins block)"
               rc=1
@@ -190,6 +191,8 @@ tasks:
       - cmd: |
           out="{{.ROOT_DIR}}/target/reports/junit"; mkdir -p "$out"
           tl=$(cd {{.DIR}} && {{.BAZEL}} info bazel-testlogs 2>/dev/null) || exit 0
+          # On Windows bazel prints C:\... ; the globs and the prefix strip below need the MSYS form.
+          tl=$(cygpath -u "$tl" 2>/dev/null || printf '%s' "$tl")
           for f in "$tl"/*/test.xml "$tl"/*/*/test.xml "$tl"/*/*/*/test.xml "$tl"/*/*/*/*/test.xml "$tl"/*/*/*/*/*/test.xml; do
             [ -f "$f" ] || continue
             rel="${f#$tl/}"; rel="${rel%/test.xml}"
