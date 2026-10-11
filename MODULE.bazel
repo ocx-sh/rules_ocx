@@ -16,7 +16,6 @@ bazel_dep(name = "platforms", version = "1.0.0")
 
 bazel_dep(name = "rules_shell", version = "0.6.1", dev_dependency = True)
 bazel_dep(name = "stardoc", version = "0.8.0", dev_dependency = True)
-bazel_dep(name = "buildifier_prebuilt", version = "8.2.0.2", dev_dependency = True)
 
 ocx = use_extension("//ocx:extensions.bzl", "ocx")
 use_repo(ocx, "ocx_tool")
@@ -27,6 +26,8 @@ use_repo(ocx, "ocx_tool")
 ocx_dev = use_extension("//ocx:extensions.bzl", "ocx", dev_dependency = True)
 ocx_dev.project(
     name = "dev_tools",
+    # Only the lint tools are exposed to Bazel (actionlint, shellcheck, buildifier); the other groups are task-side.
+    groups = ["lint"],
     ocx_lock = "//:ocx.lock",
     ocx_toml = "//:ocx.toml",
 )

@@ -34,10 +34,12 @@ sh_test(
     srcs = ["dev_tools_test.sh"],
     data = [
         "@dev_tools//:actionlint",
+        "@dev_tools//:buildifier",
         "@dev_tools//:shellcheck",
     ],
     env = {
         "ACTIONLINT_BIN": "$(location @dev_tools//:actionlint)",
+        "BUILDIFIER_BIN": "$(location @dev_tools//:buildifier)",
         "SHELLCHECK_BIN": "$(location @dev_tools//:shellcheck)",
     },
 )

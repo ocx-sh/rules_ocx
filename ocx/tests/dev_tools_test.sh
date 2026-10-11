@@ -5,4 +5,5 @@ set -euo pipefail
 
 "$SHELLCHECK_BIN" --version | grep -q "version:"
 "$ACTIONLINT_BIN" -version >/dev/null
+"$BUILDIFIER_BIN" --version | grep -q "buildifier version"
 echo "dev_tools launchers OK"
