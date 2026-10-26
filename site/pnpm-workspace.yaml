@@ -2,4 +2,4 @@ allowBuilds:
   esbuild: true
   sharp: true
 minimumReleaseAgeExclude:
-  - '@ocx-sh/theme@0.1.1'
+  - '@ocx-sh/theme@0.3.0'
