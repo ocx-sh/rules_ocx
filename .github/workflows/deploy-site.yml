@@ -33,14 +33,14 @@ jobs:
         with:
           persist-credentials: false
       - name: Setup
-        uses: ocx-sh/conventions/.github/actions/setup@a5b53015cf4f48869aa356289f6f985707adcd56 # v0.1.1
+        uses: ocx-sh/conventions/.github/actions/setup@723b544119d0a57045bd9c796d570848f73cf3bb # v0
         with:
           groups: default,docs
       - name: Build the site
         run: task ci:docs
       - name: Deploy
         id: deploy
-        uses: ocx-sh/website/.github/actions/deploy@1b898a76d4c3bbe60d9619a931c74f21660f4eb4 # v0.1.1
+        uses: ocx-sh/website/.github/actions/deploy@e86b83014538975c186912e5038567c69b2f2f2c # v0.3.0
         with:
           dist: "site/dist"
           path: "/integrations/bazel/"

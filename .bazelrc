@@ -13,3 +13,6 @@ test --test_output=errors
 
 # Repo rules talk to the shared OCX_HOME and the ocx.sh registry; keep their
 # env visible to fetches (getenv() declarations in the rules do the tracking).
+
+# Developer-local overrides; must stay the last line (baseline contract C-012).
+try-import %workspace%/.bazelrc.user
