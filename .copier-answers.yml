@@ -16,7 +16,7 @@ site:
     deploy: true
     dir: site
     dist: site/dist
-    path: /integrations/bazel
+    path: /integrations/bazel/
     paths:
     - docs/**
 theme_bundle: true
