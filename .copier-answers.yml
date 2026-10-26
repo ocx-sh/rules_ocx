@@ -1,7 +1,8 @@
 # Changes here will be overwritten by Copier; NEVER EDIT MANUALLY
-_commit: v0.1.1
+_commit: v0.3.1-1-g723b544
 _src_path: https://github.com/ocx-sh/conventions.git
 bazel: true
+bazel_cache_write: main
 deep_os:
 - ubuntu-latest
 - macos-latest
@@ -10,8 +11,12 @@ languages:
 - bazel
 - shell
 - typescript
+maintainers:
+- michael-herwig
 profile: full
 repo_name: rules_ocx
+repo_owner: ocx-sh
+repo_workflows: false
 site:
     deploy: true
     dir: site
@@ -19,4 +24,6 @@ site:
     path: /integrations/bazel/
     paths:
     - docs/**
+submodules: false
 theme_bundle: true
+zizmor_ignore: []
