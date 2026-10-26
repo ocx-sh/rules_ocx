@@ -43,5 +43,5 @@ jobs:
         uses: ocx-sh/website/.github/actions/deploy@1b898a76d4c3bbe60d9619a931c74f21660f4eb4 # v0.1.1
         with:
           dist: "site/dist"
-          path: "/integrations/bazel"
+          path: "/integrations/bazel/"
           storage-key: ${{ secrets.BUNNY_STORAGE_KEY }}
