@@ -54,7 +54,7 @@ Create `lint_test.sh` and make it executable.
 #!/usr/bin/env bash
 set -euo pipefail
 
-"$SHELLCHECK_BIN" --version | grep -q "version:"
+grep -q "version:" <<<"$("$SHELLCHECK_BIN" --version)"
 echo "shellcheck OK"
 ```
 

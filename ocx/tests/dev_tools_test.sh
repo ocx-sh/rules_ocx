@@ -3,7 +3,7 @@
 # Copyright 2026 The OCX Authors
 set -euo pipefail
 
-"$SHELLCHECK_BIN" --version | grep -q "version:"
+grep -q "version:" <<<"$("$SHELLCHECK_BIN" --version)"
 "$ACTIONLINT_BIN" -version >/dev/null
-"$BUILDIFIER_BIN" --version | grep -q "buildifier version"
+grep -q "buildifier version" <<<"$("$BUILDIFIER_BIN" --version)"
 echo "dev_tools launchers OK"
