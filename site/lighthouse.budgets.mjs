@@ -33,7 +33,7 @@ export function pages(distDir) {
   if (!existsSync(distDir)) throw new Error(`missing dist: ${distDir}`);
   return readdirSync(distDir, { recursive: true, encoding: 'utf8' })
     .map((f) => f.split('\\').join('/'))
-    .filter((f) => f.endsWith('.html'))
+    .filter((f) => f.endsWith('.html') && !f.split('/').includes('frag')) // noindex deferred fragments, not pages
     .map((f) => (f === 'index.html' ? '/' : `/${f.replace(/index\.html$/, '')}`))
     .sort();
 }
