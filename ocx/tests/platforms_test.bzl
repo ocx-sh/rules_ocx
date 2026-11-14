@@ -10,21 +10,21 @@ def _host_info_test_impl(ctx):
     env = unittest.begin(ctx)
 
     linux = host_info("linux", "amd64")
-    asserts.equals(env, "x86_64-unknown-linux-musl", linux.triple)
+    asserts.equals(env, ["x86_64-unknown-linux-musl"], linux.triples)
     asserts.equals(env, "linux/amd64", linux.ocx_platform)
     asserts.false(env, linux.is_windows)
     asserts.equals(env, "", linux.exe_ext)
 
     arm = host_info("Linux", "aarch64")
-    asserts.equals(env, "aarch64-unknown-linux-musl", arm.triple)
+    asserts.equals(env, ["aarch64-unknown-linux-musl"], arm.triples)
     asserts.equals(env, "linux/arm64", arm.ocx_platform)
 
     mac = host_info("mac os x", "aarch64")
-    asserts.equals(env, "aarch64-apple-darwin", mac.triple)
+    asserts.equals(env, ["aarch64-apple-darwin"], mac.triples)
     asserts.equals(env, "darwin/arm64", mac.ocx_platform)
 
     win = host_info("Windows 11", "amd64")
-    asserts.equals(env, "x86_64-pc-windows-msvc", win.triple)
+    asserts.equals(env, ["x86_64-pc-windows-gnullvm", "x86_64-pc-windows-msvc"], win.triples)
     asserts.equals(env, "windows/amd64", win.ocx_platform)
     asserts.true(env, win.is_windows)
     asserts.equals(env, ".exe", win.exe_ext)

@@ -3,7 +3,8 @@
 
 """Unit tests for ocx/private/manifest.bzl."""
 
-load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
+load("@bazel_skylib//lib:partial.bzl", "partial")
+load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
 load("//ocx/private:manifest.bzl", "archive_type", "artifact_url", "manifest_sha256", "select_release")
 load("//ocx/private:versions.bzl", "DEFAULT_OCX_VERSION", "MIN_OCX_VERSION", "min_version_error")
 
@@ -34,14 +35,54 @@ _MANIFEST = {
 
 def _select_release_test_impl(ctx):
     env = unittest.begin(ctx)
-    row = select_release(_MANIFEST, "0.3.9", "x86_64-unknown-linux-musl")
+    row = select_release(_MANIFEST, "0.3.9", ["x86_64-unknown-linux-musl"])
     asserts.equals(env, "b" * 64, row["sha256"])
     asserts.equals(env, "v0.3.9", row["tag"])
     return unittest.end(env)
 
+_WIN_GNULLVM = "x86_64-pc-windows-gnullvm"
+_WIN_MSVC = "x86_64-pc-windows-msvc"
+_WIN_TARGETS = [_WIN_GNULLVM, _WIN_MSVC]
+
+def _win_manifest(*targets):
+    return {
+        "schema": 1,
+        "releases": [
+            {"version": "1.0.0", "target": t, "sha256": "c" * 64}
+            for t in targets
+        ],
+    }
+
+# Windows host candidates are [gnullvm, msvc]: first one with a row wins.
+def _select_release_windows_test_impl(ctx):
+    env = unittest.begin(ctx)
+    asserts.equals(env, _WIN_GNULLVM, select_release(_win_manifest(_WIN_GNULLVM), "1.0.0", _WIN_TARGETS)["target"])
+    asserts.equals(env, _WIN_MSVC, select_release(_win_manifest(_WIN_MSVC), "1.0.0", _WIN_TARGETS)["target"])
+    asserts.equals(env, _WIN_GNULLVM, select_release(_win_manifest(_WIN_MSVC, _WIN_GNULLVM), "1.0.0", _WIN_TARGETS)["target"])
+    return unittest.end(env)
+
+# Held in a constant: the traceback echoes the call site's source line.
+_NO_ROW_FRAGMENT = "not found in the dist manifest"
+
+def _select_release_none_subject_impl(_ctx):
+    select_release(_win_manifest("aarch64-apple-darwin"), "1.0.0", _WIN_TARGETS)
+    return []
+
+_select_release_none_subject = rule(implementation = _select_release_none_subject_impl)
+
+def _select_release_none_test_impl(ctx):
+    env = analysistest.begin(ctx)
+    asserts.expect_failure(env, _NO_ROW_FRAGMENT)
+    return analysistest.end(env)
+
+select_release_none_test = analysistest.make(
+    _select_release_none_test_impl,
+    expect_failure = True,
+)
+
 def _artifact_url_test_impl(ctx):
     env = unittest.begin(ctx)
-    row = select_release(_MANIFEST, "0.3.10", "x86_64-unknown-linux-musl")
+    row = select_release(_MANIFEST, "0.3.10", ["x86_64-unknown-linux-musl"])
 
     # No mirror: manifest URL verbatim.
     asserts.equals(env, row["url"], artifact_url(row, None))
@@ -150,6 +191,7 @@ def _manifest_sha256_test_impl(ctx):
     return unittest.end(env)
 
 select_release_test = unittest.make(_select_release_test_impl)
+select_release_windows_test = unittest.make(_select_release_windows_test_impl)
 artifact_url_test = unittest.make(_artifact_url_test_impl)
 archive_type_test = unittest.make(_archive_type_test_impl)
 min_version_error_test = unittest.make(_min_version_error_test_impl)
@@ -161,9 +203,13 @@ def manifest_test_suite(name):
     Args:
         name: name of the test suite target.
     """
+    subject = name + "_none_subject"
+    _select_release_none_subject(name = subject, tags = ["manual"])
     unittest.suite(
         name,
         select_release_test,
+        select_release_windows_test,
+        partial.make(select_release_none_test, target_under_test = ":" + subject),
         artifact_url_test,
         archive_type_test,
         min_version_error_test,
