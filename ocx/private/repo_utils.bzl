@@ -870,6 +870,30 @@ def decode_json(stdout, what):
         fail("rules_ocx: {} produced no output — expected JSON".format(what))
     return json.decode(stdout)
 
+def env_entries(stdout, what):
+    """Decodes an `ocx env` / `ocx package env` report into its entry rows.
+
+    ocx 0.6.6 renamed the report's root key `entries` to `items` and each row's
+    `type` to `kind`; the older shape is read too. Rows are returned with the
+    modifier under `type` whichever ocx produced them, so everything downstream
+    (launchers, the generated env.bzl) keeps one shape.
+
+    Args:
+        stdout: the command's JSON output.
+        what: the command's name, for error messages.
+
+    Returns:
+        The entry rows, each carrying `key`, `value` and `type`.
+    """
+    doc = decode_json(stdout, what)
+    rows = doc.get("items", doc.get("entries")) if type(doc) == "dict" else None
+    if type(rows) != "list":
+        fail("rules_ocx: {} reported neither `items` nor `entries` as a list — the report shape drifted".format(what))
+    return [
+        dict({k: v for k, v in r.items() if k != "kind"}, type = r["kind"]) if "kind" in r else r
+        for r in rows
+    ]
+
 # `value` if it is a JSON object, else an empty one — so a chained .get() over
 # a drifted report yields a missing key instead of a Starlark type error, and
 # the one fail() below stays the only way out of closure_packages().

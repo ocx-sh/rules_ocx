@@ -12,25 +12,28 @@ visibility(["//ocx", "//ocx/tests"])
 
 _HEX_DIGITS = "0123456789abcdef"
 
-def select_release(manifest, version, target):
-    """Finds the manifest row for an exact version and target triple.
+def select_release(manifest, version, targets):
+    """Finds the manifest row for an exact version and the first available target triple.
 
     Args:
         manifest: decoded dist.json object.
         version: exact ocx version, e.g. "0.3.10".
-        target: cargo-dist target triple, e.g. "x86_64-unknown-linux-musl".
+        targets: cargo-dist target triples in preference order, e.g.
+            ["x86_64-pc-windows-gnullvm", "x86_64-pc-windows-msvc"]; the first
+            with a row for `version` wins.
 
     Returns:
-        The matching release row (dict).
+        The matching release row (dict); its "target" is the triple selected.
     """
     if manifest.get("schema") != 1:
         fail("rules_ocx: unsupported dist.json schema '{}'".format(manifest.get("schema")))
-    for row in manifest["releases"]:
-        if row["version"] == version and row["target"] == target:
-            return row
+    for target in targets:
+        for row in manifest["releases"]:
+            if row["version"] == version and row["target"] == target:
+                return row
     fail(("rules_ocx: ocx {} for {} not found in the dist manifest — " +
           "run 'task dist:update' or point OCX_INSTALL_DIST_URL at a manifest " +
-          "that contains it").format(version, target))
+          "that contains it").format(version, " or ".join(targets)))
 
 def archive_type(filename):
     """Maps a release filename to the explicit download_and_extract type.

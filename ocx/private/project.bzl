@@ -16,8 +16,8 @@ load(
     "POLICY_ATTRS",
     "bat_value",
     "check_bin_names",
-    "decode_json",
     "discover_bins",
+    "env_entries",
     "make_ocx_env",
     "ocx_bin",
     "render_env_bzl",
@@ -234,7 +234,7 @@ def _ocx_project_repo_impl(ctx):
         host.is_windows,
         hints = no_leaf,
     )
-    entries = decode_json(stdout, "ocx env")["entries"]
+    entries = env_entries(stdout, "ocx env")
 
     # Foreign platforms expose no launchers, so they skip the closure call too.
     runnable = ctx.attr.platform in ("", host.ocx_platform)
