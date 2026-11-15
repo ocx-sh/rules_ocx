@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] - 2026-11-15
+
+### Documentation
+
+- Add tutorial, guides, concepts and environment reference
+
+### Fixed
+
+- Make the license gate check bazel files
+- Make junit collection and the pin check work on Windows
+- Deploy to the registered claim path with its trailing slash (#25) *(site)*
+- Avoid SIGPIPE from grep -q under pipefail in version checks (#28) *(test)*
+- Windows resolves the gnullvm archive; the ocx 0.6.6 environment document is read (#32)
+
 ## [0.5.0] - 2026-09-22
 
 ### Added
@@ -113,6 +127,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Neutralize leaked OCX_PROJECT and retry racy package installs
 - Unbreak Windows — LF scripts, runfiles tree, no stardoc under MSVC *(ci)*
+[0.5.1]: https://github.com/ocx-sh/rules_ocx/compare/v0.5.0..v0.5.1
 [0.5.0]: https://github.com/ocx-sh/rules_ocx/compare/v0.4.0..v0.5.0
 [0.4.0]: https://github.com/ocx-sh/rules_ocx/compare/v0.3.0..v0.4.0
 [0.3.0]: https://github.com/ocx-sh/rules_ocx/compare/v0.2.0..v0.3.0
