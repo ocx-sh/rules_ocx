@@ -15,6 +15,7 @@ load(
     "check_bin_names",
     "decode_json",
     "discover_bins",
+    "env_entries",
     "is_absolute_path",
     "make_ocx_env",
     "ocx_bin",
@@ -248,7 +249,7 @@ def _ocx_package_repo_impl(ctx):
         "composing the environment of " + pkg,
         host.is_windows,
     )
-    entries = decode_json(stdout, "ocx package env")["entries"]
+    entries = env_entries(stdout, "ocx package env")
 
     # The store is content-addressed and digest-pinned: symlinks into it are
     # stable for the lifetime of the pin.

@@ -18,6 +18,7 @@ load(
     "declared_bins",
     "decode_json",
     "discover_bins",
+    "env_entries",
     "is_absolute_path",
     "make_ocx_env",
     "path_dirs",
@@ -1209,6 +1210,8 @@ _GUARD_CASES = {
     # command nor rules_ocx — so the fragment is json.decode's own wording.
     "decode_empty": "produced no output",
     "decode_garbage": "unexpected character",
+    # A report with neither root key names both, so a third rename is diagnosed.
+    "env_no_root_key": "neither `items` nor `entries`",
     # F5: a relative OCX_HOME is caught before ctx.watch() tracebacks on it.
     "relative_home": "OCX_HOME must be absolute",
     # C-003: a relative ambient translucent `path` row is forwarded to ocx but
@@ -1254,6 +1257,8 @@ def _guard_impl(ctx):
         decode_json("   \n", "ocx package env")
     elif case == "decode_garbage":
         decode_json("oops", "ocx package env")
+    elif case == "env_no_root_key":
+        env_entries('{"binaries": []}', "ocx env")
     elif case == "relative_home":
         make_ocx_env(_env_ctx(env = {"OCX_HOME": "relative/.ocx"}), host_info("linux", "amd64"), False)
     elif case == "relative_translucent_path":
@@ -1446,6 +1451,26 @@ def _is_absolute_path_test_impl(ctx):
     asserts.false(env, is_absolute_path("/home/u", True), "POSIX root is not absolute on Windows")
     return unittest.end(env)
 
+def _env_entries_test_impl(ctx):
+    """Both report shapes yield rows keyed by `type`."""
+    env = unittest.begin(ctx)
+    want = [{"key": "PATH", "value": "/store/aa/content/bin", "type": "path"}]
+
+    # ocx 0.6.6: root `items`, row `kind`.
+    asserts.equals(env, want, env_entries(
+        '{"items": [{"key": "PATH", "value": "/store/aa/content/bin", "kind": "path"}], "binaries": []}',
+        "ocx env",
+    ))
+
+    # Older ocx: root `entries`, row `type`.
+    asserts.equals(env, want, env_entries(
+        '{"entries": [{"key": "PATH", "value": "/store/aa/content/bin", "type": "path"}]}',
+        "ocx env",
+    ))
+    return unittest.end(env)
+
+env_entries_test = unittest.make(_env_entries_test_impl)
+
 def _path_dirs_test_impl(ctx):
     """Only PATH names directories that hold executables."""
     env = unittest.begin(ctx)
@@ -1635,6 +1660,7 @@ def launcher_test_suite(name):
         declared_bins_test,
         entrypoints_surface_test,
         closure_packages_test,
+        env_entries_test,
         ambient_config_paths_test,
         sigstore_trust_root_path_test,
         is_absolute_path_test,

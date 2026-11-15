@@ -83,7 +83,8 @@ def host_info(os_name, arch):
 
     Returns:
         struct with fields:
-          triple: cargo-dist target triple of the ocx release artifact.
+          triples: cargo-dist target triples of the ocx release artifact, most
+            preferred first (Windows: gnullvm, then msvc for older releases).
           ocx_platform: ocx "os/arch" key for `-p` / ocx.lock.
           is_windows: bool.
           exe_ext: "" or ".exe".
@@ -95,21 +96,21 @@ def host_info(os_name, arch):
     ocx_arch = "amd64" if cpu == "x86_64" else "arm64"
     if os_name.startswith("linux"):
         return struct(
-            triple = cpu + "-unknown-linux-musl",
+            triples = [cpu + "-unknown-linux-musl"],
             ocx_platform = "linux/" + ocx_arch,
             is_windows = False,
             exe_ext = "",
         )
     if os_name.startswith("mac") or "os x" in os_name:
         return struct(
-            triple = cpu + "-apple-darwin",
+            triples = [cpu + "-apple-darwin"],
             ocx_platform = "darwin/" + ocx_arch,
             is_windows = False,
             exe_ext = "",
         )
     if os_name.startswith("windows"):
         return struct(
-            triple = cpu + "-pc-windows-msvc",
+            triples = [cpu + "-pc-windows-gnullvm", cpu + "-pc-windows-msvc"],
             ocx_platform = "windows/" + ocx_arch,
             is_windows = True,
             exe_ext = ".exe",

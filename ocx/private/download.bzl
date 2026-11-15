@@ -31,7 +31,7 @@ def _ocx_download_impl(ctx):
         fail(err)
 
     host = host_info(ctx.os.name, ctx.os.arch)
-    triple = ctx.attr.triple or host.triple
+    triples = [ctx.attr.triple] if ctx.attr.triple else host.triples
 
     dist_url = ctx.getenv("OCX_INSTALL_DIST_URL")
     if dist_url:
@@ -40,12 +40,12 @@ def _ocx_download_impl(ctx):
     else:
         manifest = json.decode(ctx.read(ctx.attr.dist_manifest))
 
-    row = select_release(manifest, ctx.attr.version, triple)
+    row = select_release(manifest, ctx.attr.version, triples)
     url = artifact_url(row, ctx.getenv("OCX_INSTALL_MIRROR_URL"))
     ctx.download_and_extract(url, output = "extracted", sha256 = row["sha256"], type = archive_type(row["filename"]))
 
     bin_name = "ocx" + host.exe_ext
-    nested = ctx.path("extracted/ocx-{}/{}".format(triple, bin_name))
+    nested = ctx.path("extracted/ocx-{}/{}".format(row["target"], bin_name))
     flat = ctx.path("extracted/" + bin_name)
     source = nested if nested.exists else flat
     if not source.exists:
