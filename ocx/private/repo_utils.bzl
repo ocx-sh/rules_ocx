@@ -894,6 +894,28 @@ def env_entries(stdout, what):
         for r in rows
     ]
 
+def package_report(stdout, what, key, field):
+    """Decodes an `ocx package install` / `which` report into its ref -> row map.
+
+    ocx 0.6.6 wraps the map as `{"schema_version": 1, "<key>": {...}}`
+    (`packages` for install, `paths` for which); older ocx printed the bare
+    map. Both are read.
+
+    Args:
+        stdout: the command's JSON output.
+        what: the command's name, for error messages.
+        key: the 0.6.6 member holding the map.
+        field: a string member every row must carry.
+
+    Returns:
+        The non-empty `{ref: row}` map, each row a dict carrying `field`.
+    """
+    doc = decode_json(stdout, what)
+    rows = doc.get(key) if type(doc) == "dict" and type(doc.get(key)) == "dict" else doc
+    if type(rows) != "dict" or not rows or [r for r in rows.values() if type(r) != "dict" or type(r.get(field)) != "string"]:
+        fail("rules_ocx: {} reported neither a `{}` map nor a bare map of rows with a `{}` — the report shape drifted".format(what, key, field))
+    return rows
+
 # `value` if it is a JSON object, else an empty one — so a chained .get() over
 # a drifted report yields a missing key instead of a Starlark type error, and
 # the one fail() below stays the only way out of closure_packages().

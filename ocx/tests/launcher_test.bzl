@@ -21,6 +21,7 @@ load(
     "env_entries",
     "is_absolute_path",
     "make_ocx_env",
+    "package_report",
     "path_dirs",
     "render_env_bzl",
     "render_launcher",
@@ -1212,6 +1213,8 @@ _GUARD_CASES = {
     "decode_garbage": "unexpected character",
     # A report with neither root key names both, so a third rename is diagnosed.
     "env_no_root_key": "neither `items` nor `entries`",
+    "package_report_no_map": "neither a `paths` map",
+    "package_report_no_field": "neither a `paths` map",
     # F5: a relative OCX_HOME is caught before ctx.watch() tracebacks on it.
     "relative_home": "OCX_HOME must be absolute",
     # C-003: a relative ambient translucent `path` row is forwarded to ocx but
@@ -1259,6 +1262,10 @@ def _guard_impl(ctx):
         decode_json("oops", "ocx package env")
     elif case == "env_no_root_key":
         env_entries('{"binaries": []}', "ocx env")
+    elif case == "package_report_no_map":
+        package_report('{"schema_version": 1}', "ocx package which", "paths", "path")
+    elif case == "package_report_no_field":
+        package_report('{"schema_version": 1, "paths": {"r": {"kind": "package"}}}', "ocx package which", "paths", "path")
     elif case == "relative_home":
         make_ocx_env(_env_ctx(env = {"OCX_HOME": "relative/.ocx"}), host_info("linux", "amd64"), False)
     elif case == "relative_translucent_path":
@@ -1471,6 +1478,38 @@ def _env_entries_test_impl(ctx):
 
 env_entries_test = unittest.make(_env_entries_test_impl)
 
+def _package_report_test_impl(ctx):
+    """Both `package which` / `install` shapes yield the same ref -> row map."""
+    env = unittest.begin(ctx)
+    row = {"path": "/store/aa", "kind": "package"}
+
+    # ocx 0.6.6: wrapped under `paths` beside `schema_version`.
+    asserts.equals(env, {"r": row}, package_report(
+        '{"schema_version": 1, "paths": {"r": {"path": "/store/aa", "kind": "package"}}}',
+        "ocx package which",
+        "paths",
+        "path",
+    ))
+
+    # ocx 0.6.5: the bare map.
+    asserts.equals(env, {"r": row}, package_report(
+        '{"r": {"path": "/store/aa", "kind": "package"}}',
+        "ocx package which",
+        "paths",
+        "path",
+    ))
+
+    # `package install` under 0.6.6.
+    asserts.equals(env, {"r": {"identifier": "i"}}, package_report(
+        '{"schema_version": 1, "packages": {"r": {"identifier": "i"}}}',
+        "ocx package install",
+        "packages",
+        "identifier",
+    ))
+    return unittest.end(env)
+
+package_report_test = unittest.make(_package_report_test_impl)
+
 def _path_dirs_test_impl(ctx):
     """Only PATH names directories that hold executables."""
     env = unittest.begin(ctx)
@@ -1661,6 +1700,7 @@ def launcher_test_suite(name):
         entrypoints_surface_test,
         closure_packages_test,
         env_entries_test,
+        package_report_test,
         ambient_config_paths_test,
         sigstore_trust_root_path_test,
         is_absolute_path_test,

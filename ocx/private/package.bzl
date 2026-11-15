@@ -13,12 +13,12 @@ load(
     "POLICY_ATTRS",
     "bat_value",
     "check_bin_names",
-    "decode_json",
     "discover_bins",
     "env_entries",
     "is_absolute_path",
     "make_ocx_env",
     "ocx_bin",
+    "package_report",
     "render_env_bzl",
     "render_launchers_build",
     "render_lazy_launcher",
@@ -194,8 +194,7 @@ def _ocx_package_repo_impl(ctx):
         hints = hints,
         retries = 2,
     )
-    report = decode_json(stdout, "ocx package install")
-    identifier = report.values()[0]["identifier"]
+    identifier = package_report(stdout, "ocx package install", "packages", "identifier").values()[0]["identifier"]
     if "@sha256:" not in pkg and not ctx.attr.index:
         # buildifier: disable=print
         print(("rules_ocx: '{}' ({}) resolved to '{}' — copy the digest into " +
@@ -213,7 +212,7 @@ def _ocx_package_repo_impl(ctx):
         "locating " + pkg,
         host.is_windows,
     )
-    answer = decode_json(stdout, "ocx package which").values()[0]
+    answer = package_report(stdout, "ocx package which", "paths", "path").values()[0]
 
     # `{"path", "kind"}`, not a bare string: a deferred tool has no package
     # directory yet, so ocx reports its shim tree and says which of the two it
