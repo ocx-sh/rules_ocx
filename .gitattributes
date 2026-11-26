@@ -5,6 +5,11 @@
 *.bzl text eol=lf
 *.bazel text eol=lf
 BUILD text eol=lf
+# Text compared byte for byte with a generated or ocx-written copy: the manifest example parity test, the
+# committed stardoc output, the dist snapshot and the test data.
+*.json text eol=lf
+docs/*.md text eol=lf
+ocx/tests/testdata/** text eol=lf
 
 ocx.lock merge=union
 MODULE.bazel.lock merge=union linguist-generated=true
