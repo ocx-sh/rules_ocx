@@ -165,6 +165,19 @@ _TOOL = {
     "launcher_path?": "string",
 }
 
+# Bounds of one link walk; Linux itself stops at 40 symlink expansions.
+_MAX_EXPANSIONS = 40
+_MAX_STEPS = 4096
+
+def tag_name_error(name):
+    """Why a tag `name` cannot be one directory and repository name, "" when it can.
+
+    The extension uses it as a path before Bazel validates the repository name,
+    so `../x` from a non-root module must not reach `mctx.file` or `ocx vendor -o`.
+    """
+    why = _bad_segment(name, True)
+    return "tag name '{}': {}".format(name, why) if why else ""
+
 def _tool_name_error(name, windows):
     """A tool or entry-point name becomes a file name and a label: one safe segment.
 
@@ -199,6 +212,44 @@ def _tree_conflicts(packages):
             for directory in dirs:
                 if link.path.startswith(directory + "/"):
                     return "link '{}' lies inside link-free directory '{}'".format(link.path, directory)
+    return ""
+
+def _chain_error(package):
+    """Resolves every link through the declared links; refuses one that leaves `content_dir`.
+
+    `_target_error` reads a target lexically, so `a/b/c -> ../..` followed by
+    `e -> a/b/c/../../x` looks inside while the real path climbs out. Here each
+    path component that is itself a declared link is replaced by that link's
+    target before the walk goes on. A loop, or more expansions than any real
+    package needs, is refused.
+    """
+    links = {link.path: link.target for link in package.tree.links}
+    base = len(package.content_dir.split("/"))
+    for link in package.tree.links:
+        stack = link.path.split("/")[:-1]
+        queue = link.target.split("/")
+        expansions = 0
+        for _ in range(_MAX_STEPS):
+            if not queue:
+                break
+            segment = queue.pop(0)
+            if segment in ("", "."):
+                continue
+            if segment == "..":
+                stack = stack[:-1]
+                if len(stack) < base:
+                    return "link '{}' has target '{}' that resolves outside content_dir '{}' through other links".format(link.path, link.target, package.content_dir)
+                continue
+            stack.append(segment)
+            here = "/".join(stack)
+            if here in links:
+                expansions += 1
+                if expansions > _MAX_EXPANSIONS:
+                    return "link '{}' (target '{}') runs through too many links or a loop".format(link.path, link.target)
+                stack.pop()
+                queue = links[here].split("/") + queue
+        if queue:
+            return "link '{}' (target '{}') runs through too many links or a loop".format(link.path, link.target)
     return ""
 
 def _parse_tree(tree, package, windows):
@@ -367,6 +418,8 @@ def parse_manifest(text):
         ))
 
     err = _tree_conflicts(packages)
+    for package in packages:
+        err = err or (_chain_error(package) if package.tree else "")
     if err:
         return struct(manifest = None, error = err)
     return struct(manifest = struct(

@@ -4,7 +4,7 @@
 """Unit tests for ocx/private/vendor_manifest.bzl."""
 
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
-load("//ocx/private:vendor_manifest.bzl", "parse_manifest")
+load("//ocx/private:vendor_manifest.bzl", "parse_manifest", "tag_name_error")
 load(":testdata/vendor_manifest_example.bzl", "EXAMPLE")
 
 _PKG = "packages/ocx.sh/sha256/1f/2e3d4c5b6a79881f2e3d4c5b6a7988"
@@ -233,6 +233,34 @@ def _tool_name_test_impl(ctx):
     asserts.true(env, parse_manifest(_mutated(twice)).error != "", "same name twice in one selection")
     return unittest.end(env)
 
+def _tag_name_test_impl(ctx):
+    env = unittest.begin(ctx)
+    for bad in ["../x", "..", "a/b", "", ".", "a\\b"]:
+        asserts.true(env, tag_name_error(bad) != "", "refused tag name " + repr(bad))
+    asserts.equals(env, "", tag_name_error("tools"), "control")
+    asserts.equals(env, "", tag_name_error("my_tools-2.0"), "control with punctuation")
+    return unittest.end(env)
+
+def _link_chain_test_impl(ctx):
+    env = unittest.begin(ctx)
+    content = _PKG + "/content/"
+
+    def check(links):
+        def mutate(raw):
+            _tree(raw)["links"] += [{"path": content + path, "target": target} for path, target in links]
+
+        return parse_manifest(_mutated(mutate)).error
+
+    # A link that climbs, through a directory link, out of the content root.
+    escape = [("a/b/c", "../.."), ("e", "a/b/c/../../x")]
+    asserts.true(env, "outside" in check(escape) or "resolves" in check(escape), "chain escapes: " + check(escape))
+
+    # Controls: the same shapes that stay inside, and a plain sibling `..` link.
+    asserts.equals(env, "", check([("a/b/c", "../.."), ("e", "a/b/c/f")]), "chain stays inside")
+    asserts.equals(env, "", check([("lib/libfoo.so", "../lib64/libfoo.so")]), "ordinary relative link")
+    asserts.true(env, check([("a", "b"), ("b", "a")]) != "", "a link loop is refused")
+    return unittest.end(env)
+
 def _shape_test_impl(ctx):
     env = unittest.begin(ctx)
     asserts.true(env, parse_manifest("").error != "", "empty")
@@ -256,6 +284,8 @@ shape_test = unittest.make(_shape_test_impl)
 conflicts_test = unittest.make(_conflicts_test_impl)
 containment_test = unittest.make(_containment_test_impl)
 tool_name_test = unittest.make(_tool_name_test_impl)
+tag_name_test = unittest.make(_tag_name_test_impl)
+link_chain_test = unittest.make(_link_chain_test_impl)
 
 def vendor_manifest_test_suite(name):
     """Instantiates the vendor_manifest.bzl test suite.
@@ -277,4 +307,6 @@ def vendor_manifest_test_suite(name):
         conflicts_test,
         containment_test,
         tool_name_test,
+        tag_name_test,
+        link_chain_test,
     )

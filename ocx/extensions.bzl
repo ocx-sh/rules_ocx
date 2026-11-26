@@ -23,7 +23,7 @@ load("//ocx/private:hub.bzl", "hub_platform_error", "ocx_hub_repo")
 load("//ocx/private:platforms.bzl", "host_info", "platform_constraints", "slug")
 load("//ocx/private:repo_utils.bzl", "POLICY_ATTRS", "policy_kwargs", "resolve_policy", "run_ocx")
 load("//ocx/private:set_repo.bzl", "ocx_set_repo", "vendor_args")
-load("//ocx/private:vendor_manifest.bzl", "parse_manifest")
+load("//ocx/private:vendor_manifest.bzl", "parse_manifest", "tag_name_error")
 load("//ocx/private:versions.bzl", "DEFAULT_OCX_VERSION", "MIN_OCX_VERSION")
 
 _download = tag_class(
@@ -281,6 +281,10 @@ def _ocx_impl(module_ctx):
     for mod in module_ctx.modules:
         for tier, tags in [("project", mod.tags.project), ("package", mod.tags.package)]:
             for tag in tags:
+                # Before any path or repository is built from the name.
+                err = tag_name_error(tag.name)
+                if err:
+                    fail("rules_ocx: {} (module '{}')".format(err, mod.name))
                 if tier == "project" and not mod.is_root:
                     fail("rules_ocx: ocx.project() may only be used by the root module (used by '{}')".format(mod.name))
 
