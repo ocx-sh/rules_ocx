@@ -1,6 +1,5 @@
 bazel-*
 .bazelrc.user
-.ocx_home/
 .lycheecache
 .task/
 __pycache__/

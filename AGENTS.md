@@ -1,8 +1,7 @@
 # rules_ocx (bazel-ocx)
 
 Bazel module extension + repository rules provisioning tools via the OCX
-package manager (https://ocx.sh, source at `../ocx`). Successor to the
-in-tree draft ocx-sh/ocx#12.
+package manager (https://ocx.sh, source at `../ocx`).
 
 ## Architecture (load-bearing)
 
@@ -18,8 +17,7 @@ in-tree draft ocx-sh/ocx#12.
   native `.direct` launcher ocx writes: no ocx, no `OCX_HOME`, no network at
   action time, so the tree runs under remote execution. Reserved names
   (`BUILD`, `WORKSPACE`, …, matched case-insensitively) inside a package are
-  moved to `_ocx_reserved/<n>` and declared back at their path. There is no
-  lazy launcher, no `bins`, no `pins`.
+  moved to `_ocx_reserved/<n>` and declared back at their path.
 - **Facts.** What the hub needs before any set is fetched (tool names and
   kinds per platform, `available_platforms`) is a *fact* stored in
   `MODULE.bazel.lock`, keyed by the tag and checked against the tag's inputs
@@ -29,12 +27,13 @@ in-tree draft ocx-sh/ocx#12.
   platforms) and fails naming `bazel mod deps --lockfile_mode=update`.
 - **`@ocx_tool`**: pinned ocx binary, downloaded per the vendored
   `dist/dist.json` (snapshot of https://setup.ocx.sh/dist.json),
-  sha256-enforced. `MIN_OCX_VERSION` is the floor; below it
+  sha256-enforced. `MIN_OCX_VERSION` is the floor, the first ocx release
+  whose `ocx vendor` writes manifest schema version 1; below it
   `ocx.download(version = …)` fails before any download. Mirror knobs (site
   settings, env-only): `OCX_INSTALL_DIST_URL` (manifest),
   `OCX_INSTALL_MIRROR_URL` (artifact host, `<mirror>/<tag>/<filename>`). An
   `OCX_INSTALL_BINARY` + `OCX_INSTALL_BINARY_SHA256` pair replaces the download
-  with a local build (CI uses it for an ocx under test); a mismatch fails.
+  with a local build; a mismatch fails.
 - Every ocx run (extension and repository rule) gets a fresh scratch
   `OCX_HOME` inside its working directory, deleted before return; the client's
   own home is never read. `HOME`, Docker configuration and the rest of the
@@ -76,8 +75,7 @@ in-tree draft ocx-sh/ocx#12.
 5. Managed config is hint-only — never run `ocx config setup/update` from a
    repo rule, and likewise never `ocx self setup`, nor `ocx shell allow` /
    `ocx shell revoke`, which write and delete the per-project consent stamp
-   under `$OCX_HOME/state/projects/`. `ocx vendor` writes no consent stamp, and
-   the pinned `OCX_NO_CONSENT=1` keeps any other call from stamping one.
+   under `$OCX_HOME/state/projects/`. `ocx vendor` writes no consent stamp.
 
 ## ocx CLI contract
 
@@ -106,8 +104,8 @@ in-tree draft ocx-sh/ocx#12.
 - Env handling is one classified table, `OCX_ENV_CLASSES`
   (`ocx/private/repo_utils.bzl`): *site* (forwarded verbatim by repository
   rules: mirrors, insecure registries, offline, index, default registry,
-  patches, extra CA certs, …), *translucent* (ambient unless a tag attr
-  overrides: `OCX_CONFIG`, `OCX_PATCH_SNAPSHOT`, `OCX_SIGSTORE_TRUSTED_ROOT`,
+  extra CA certs, …), *translucent* (ambient unless a tag attr
+  overrides: `OCX_CONFIG`, `OCX_SIGSTORE_TRUSTED_ROOT`,
   `OCX_NO_CONFIG`), *explicit* (`OCX_NO_VERIFY`, `OCX_ALLOW_YANKED`, only from
   `ocx.policy()`) and *pinned* (a fixed value on every call). The extension
   reads no variable of the table (invariant 3): its `ocx vendor --manifest-only`
@@ -129,7 +127,7 @@ in-tree draft ocx-sh/ocx#12.
 - `bazel test //...` — unit tests (no network) + docs freshness.
 - Examples under `examples/*` are the integration tests (live ocx.sh
   registry — dogfooding); each is its own module with `local_path_override`.
-  No example or e2e module sets `config`, `no_config`, `patch_snapshot`,
+  No example or e2e module sets `config`, `no_config`,
   `sigstore_trusted_root` or `isolated_home` — that tier has unit coverage
   only. `examples/package` does declare `ocx.policy()` at its defaults, so the
   tag's acceptance is covered end to end; its weakening effects are not.

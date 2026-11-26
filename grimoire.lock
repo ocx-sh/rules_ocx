@@ -116,7 +116,7 @@ bundle_tag = "latest"
 [[skill]]
 name = "update-dist"
 path = "./agent-config/update-dist"
-hash = "sha256:50988c38a671902ef550f2c1ac1a2d3d0c189325bc36a1eeabaf9e7b53e037f8"
+hash = "sha256:c76b8cb0c111ffb6d789dbc76d798c5a45b14869683ee0125a95bd0c411f364a"
 
 [[rule]]
 name = "bazel-quality"
@@ -176,7 +176,7 @@ bundle_tag = "latest"
 [[rule]]
 name = "starlark"
 path = "./agent-config/starlark.md"
-hash = "sha256:44766987a7600adcaf1ce96e485ec2fa3258c42958e6ef3b3f016d31f9778316"
+hash = "sha256:0cb69a9261021c55a75858b8ccc9b08e5203173ef13daec6b2ad016a53a1cd93"
 
 [[rule]]
 name = "typescript-packaging"

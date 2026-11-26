@@ -1,3 +1,5 @@
+Superseded by [adr_0002_vendor_tool_sets.md](../adr/adr_0002_vendor_tool_sets.md): this plan records the 0.6.0 adoption only. The fetch design it describes was replaced by `ocx vendor`.
+
 # Plan: Adopt ocx 0.6.0 — root-only `ocx.policy`, classified env, bootstrap parity
 
 ## Status
