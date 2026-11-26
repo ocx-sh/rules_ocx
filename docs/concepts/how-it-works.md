@@ -34,8 +34,7 @@ It looks for its files beside itself, then in the runfiles tree of the action.
 
 Bazel declares no symlinks on Windows, so a Windows set whose manifest lists a link fails and names the package.
 Empty directories of a package are not visible to actions on a remote executor.
-
-<!-- R9-MARK for the meta-orchestrator: the sentence above rests on e2e/rbe/RESULTS.md "Rig question 2" (kept locally, dropped on Buildbarn and NativeLink). Reword if R8 changes that answer. -->
+The rig showed this on Buildbarn and NativeLink: both drop an empty directory that a local build keeps.
 
 ## What is shared
 

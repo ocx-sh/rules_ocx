@@ -271,7 +271,7 @@ Remote execution is supported. Bazel uploads a set as the inputs of every
 action that uses one of its tools. The native launcher needs nothing else on
 the executor.
 
-<!-- R9-MARK for the meta-orchestrator: add one sentence naming the executors the rig proved (Buildbarn, NativeLink) once R8 is green, with the date. -->
+Buildbarn and NativeLink both ran the rig suite green on 2026-11-26.
 
 - Only trusted CI lanes write a shared remote repository contents cache. Each
   set is fetched into a scratch `OCX_HOME` from digest-verified blobs, and the

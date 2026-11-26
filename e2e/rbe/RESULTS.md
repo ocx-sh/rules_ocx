@@ -62,8 +62,8 @@ nginx `/v2/` lines of each leg. Each client has its own output base, repository 
 <!-- baseline:begin -->
 | measure | buildbarn | nativelink |
 |---|---|---|
-| ocx bootstrap download, @ocx_tool (s) | 8.1 | 6.7 |
-| cold client fetch, all six platforms (s) | 1.3 | 1.3 |
+| ocx bootstrap download, @ocx_tool (s) | 14.6 | 6.7 |
+| cold client fetch, all six platforms (s) | 1.4 | 1.3 |
 | registry requests / bytes, linux/amd64+libc.glibc | 6 / 330471 | 6 / 330471 |
 | registry requests / bytes, linux/amd64+libc.musl | 6 / 330463 | 6 / 330463 |
 | registry requests / bytes, linux/arm64+libc.glibc | 6 / 330473 | 6 / 330473 |
@@ -82,4 +82,21 @@ bytes. The repository rule ran once per client.
 
 ## New rules (R8)
 
-V-31 and V-65 numbers go here from `<run-dir>/measures.json`, beside the baseline above.
+Measured 2026-11-26 with `task rig:up rig:seed rig:baseline rig:test`, one rig per backend: Buildbarn 30 passed,
+NativeLink 29 passed and 1 skipped (the no-shell runner is a Buildbarn worker). `<run-dir>/measures.json`:
+
+| measure | buildbarn | nativelink |
+|---|---|---|
+| V-31: 5 actions over a one-file set, remote (s) | 0.8 | 1.0 |
+| V-31: 5 actions over the 100006-file set, remote, files uploaded (s) | 58.0 | 104.5 |
+| V-65: fetch of the 100006-file set (s) | 27.6 | 27.6 |
+| V-65: of that, `ocx vendor` (s) | 22.2 | 22.3 |
+| V-65: rule work, fetch minus `ocx vendor` (s), budget 10 | 5.4 | 5.3 |
+| V-65: the same subtraction for a one-file set (s) | 0.1 | 0.1 |
+
+V-65: the rule's `json.decode`, BUILD generation and moves cost 5.4 s and 5.3 s, inside the budget. The 12 s
+the first measure reported counted the first fetch of a client, which also pays Bazel's module graph and registry
+files and the extension's fact runs. The measure now fetches a small set first and times the big fetch alone; the
+bound still includes Bazel's own per-fetch work, which the one-file row puts at 0.1 s. V-31: the 100000-file
+batch takes 58.0 s and 104.5 s against 0.8 s and 1.0 s for the one-file set; each test starts on an empty
+instance name, so the batch includes the upload of every file.

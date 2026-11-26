@@ -15,7 +15,7 @@ It looks for its files beside itself or in the runfiles tree of the action.
 
 Remote execution is supported.
 
-<!-- R9-MARK for the meta-orchestrator: add one sentence naming the executors the rig proved (Buildbarn, NativeLink) once R8 is green, with the date. -->
+Buildbarn and NativeLink both ran the rig suite green on 2026-11-26.
 
 ## Require what the build needs
 
