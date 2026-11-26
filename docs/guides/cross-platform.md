@@ -86,3 +86,16 @@ Each one fetches only its own set repository.
 
 - A Windows set cannot carry symlinks, because Bazel declares none there. A Windows set whose package lists a link fails and names the package.
 - On Windows, build with `--enable_runfiles`. The launcher looks for its files in the runfiles tree and exits 78 without it.
+
+## Windows: path length
+
+Windows limits most paths to 260 characters, and a vendored package sits deep inside Bazel's output base.
+The launcher starts a long program path by itself, but two limits remain: a working directory longer than 260 characters (a test's working directory is its runfiles tree) and a tool that opens its own files below a long directory, such as an interpreter or a compiler.
+Both show up as `ocx-shim: failed to start … win32 error 3` or as a tool that cannot find its own files.
+Keep the paths short with one line in the workspace `.bazelrc`:
+
+```
+startup --output_user_root=C:/b
+```
+
+This is standard Bazel practice on Windows and is not specific to these rules. Bazel's Windows page recommends it. Set it yourself: the checked-in example workspaces do not carry it, because a `startup` option cannot be limited to one operating system.
