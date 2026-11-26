@@ -3,7 +3,7 @@
 #   host_test         the hub tool of the platform the test runs on runs
 #   runfiles_test     an action finds its launcher's files in the runfiles tree
 #   no_runfiles_test  Windows only: without a runfiles tree the launcher exits 78
-#   signature_test    macOS only: a launcher with one changed byte is killed
+#   signature_test    macOS only: the arm64 launcher carries a valid ad-hoc signature and starts; a changed copy does not verify
 
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load(":launcher_status.bzl", "launcher_status")

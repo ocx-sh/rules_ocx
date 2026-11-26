@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# V-27c: the darwin launcher reaches this workspace byte for byte, so its ad-hoc signature is intact and it
-# starts on Apple Silicon (an unsigned arm64 binary is killed with SIGKILL before `main`). The control is a copy
-# with one byte changed: its signature no longer verifies and the kernel kills it. Every number the verdict rests
-# on is printed, so a failed run names its own cause.
+# V-27c: the darwin/arm64 launcher reaches this workspace byte for byte, so it ships with a valid ad-hoc
+# signature and starts on Apple Silicon. Positive: `codesign --verify` passes and the launcher runs to its own
+# exit 78 (it finds no sidecar beside it). Control A: a copy with one byte changed no longer verifies. Control B:
+# a copy with its signature removed is refused at start. The hosted runner does not kill a *modified* page of an
+# ad-hoc linker-signed binary (the page hash is checked lazily, if at all), so that exit code is printed and
+# never asserted. Every number the verdict rests on is printed, so a failed run names its own cause.
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
@@ -39,19 +41,32 @@ codesign --verify --verbose=2 "$work/intact" || verify_intact=$?
 verify_flipped=0
 codesign --verify --verbose=2 "$work/flipped" || verify_flipped=$?
 
-set +e
-"$work/intact" --version >/dev/null 2>&1
-intact=$?
-"$work/flipped" --version >/dev/null 2>&1
-flipped=$?
-set -e
+run() {
+    set +e
+    "$1" --version >/dev/null 2>&1
+    local status=$?
+    set -e
+    echo "$status"
+}
+intact="$(run "$work/intact")"
+flipped="$(run "$work/flipped")"
 echo "codesign --verify: intact $verify_intact, flipped $verify_flipped"
-echo "run: intact exit $intact, flipped exit $flipped (SIGKILL is 137)"
+echo "run: intact exit $intact, flipped exit $flipped (printed only: the kernel's page check is not asserted)"
 
-# The intact copy starts: it finds no sidecar beside it and exits 78 itself.
+# Positive: valid signature, and the launcher itself ran (exit 78).
 test "$verify_intact" -eq 0
 test "$intact" -eq 78
-# The control: the changed copy is invalid and is killed.
+# Control A (deterministic): the changed copy does not verify.
 test "$verify_flipped" -ne 0
-test "$flipped" -eq 137
+
+# Control B: without a signature an arm64 binary is refused at start (SIGKILL, 137, "Killed: 9"). Not yet
+# observed on a hosted runner, so the verdict below is last and the log shows what happened first.
+cp -L "$JQ_BIN" "$work/stripped"
+chmod +x "$work/stripped"
+codesign --remove-signature "$work/stripped"
+echo "--- codesign -dvvv stripped"
+codesign -dvvv "$work/stripped" 2>&1 || true
+stripped="$(run "$work/stripped")"
+echo "run: stripped exit $stripped (expected 137)"
+test "$stripped" -ne 78
 echo "launcher signature OK"
