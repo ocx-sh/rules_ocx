@@ -161,6 +161,11 @@ def _conflicts_test_impl(ctx):
     def dup_case(raw):
         _tree(raw)["files"].append({"path": content + "bin/CMAKE", "executable": False})
 
+    def case_file_and_link(raw):
+        _tree(raw)["links"].append({"path": content + "bin/CMAKE-link", "target": "cmake"})
+        _tree(raw)["files"].append({"path": content + "bin/cmake-LINK", "executable": False})
+        _tree(raw)["links"].append({"path": content + "bin/Cmake", "target": "cmake"})
+
     def link_on_file(raw):
         _tree(raw)["links"].append({"path": content + "bin/cmake", "target": "x"})
 
@@ -172,7 +177,13 @@ def _conflicts_test_impl(ctx):
         _tree(raw)["links"].append({"path": content + "bin/l2", "target": "cmake"})
 
     asserts.true(env, check(dup_file) != "", "duplicate file")
-    asserts.true(env, check(dup_case) != "", "duplicate but for case")
+
+    # A terminfo database holds `terminfo/E/Eterm` and `terminfo/e/eterm`; a
+    # case-sensitive package tree is legitimate content, not a conflict (C-RO-05
+    # likewise keeps `BUILD.bazel` beside `build`). The exact-duplicate check
+    # above is its control: it still fires.
+    asserts.equals(env, "", check(dup_case), "paths differing only by case are distinct files")
+    asserts.equals(env, "", check(case_file_and_link), "a link beside a file differing only by case")
     asserts.true(env, check(link_on_file) != "", "link on a file's path")
     asserts.true(env, check(link_in_free_dir) != "", "link inside a link-free directory")
     asserts.equals(env, "", check(fine), "control: a distinct file and link")

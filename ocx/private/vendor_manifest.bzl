@@ -179,7 +179,9 @@ def _tool_name_error(name, windows):
 def _tree_conflicts(packages):
     """Duplicate paths, a link on a file, a link inside a link-free directory.
 
-    Compared lower-cased too: a case-insensitive host cannot hold both.
+    Compared exactly: package content may hold paths that differ only by case
+    (terminfo's `E/Eterm` and `e/eterm`). The tree is already on the client's
+    disk when this runs, and C-RO-05 keeps `BUILD.bazel` beside `build`.
     """
     seen = {}
     dirs = []
@@ -190,10 +192,9 @@ def _tree_conflicts(packages):
         if not package.tree:
             continue
         for entry in package.tree.files + package.tree.links:
-            key = entry.path.lower()
-            if key in seen:
-                return "path '{}' is listed twice (or twice but for case) among files and links".format(entry.path)
-            seen[key] = True
+            if entry.path in seen:
+                return "path '{}' is listed twice among files and links".format(entry.path)
+            seen[entry.path] = True
         for link in package.tree.links:
             for directory in dirs:
                 if link.path.startswith(directory + "/"):
