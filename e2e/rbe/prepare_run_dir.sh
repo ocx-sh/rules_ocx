@@ -20,5 +20,7 @@ for s in 0 1; do
   done
 done
 # The unprivileged images write here; the worker cache dirs stay 0700 like upstream's run.sh.
-find "$run" -type d ! -name cache -exec chmod 0777 {} +
+# Only directories this user owns: on a second `rig:up` the containers own what they wrote, need no change, and
+# some are unreadable to this user (find says so and exits 1).
+find "$run" -type d -user "$(id -u)" ! -name cache -exec chmod 0777 {} + 2>/dev/null || true
 chmod 0700 "$run/worker-ubuntu/cache" "$run/worker-noshell/cache"

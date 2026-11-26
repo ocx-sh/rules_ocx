@@ -51,6 +51,10 @@ def test_v10_private_fetch_leaves_no_secret(workspace: Workspace) -> None:
     assert hits == []
 
 
+def _is_tag_lookup(row: dict) -> bool:
+    return "/manifests/1.0.0" in row["uri"] or "/tags/list" in row["uri"]
+
+
 def test_v15_floating_tag_resolves_from_the_index(workspace: Workspace, log) -> None:
     index = workspace.path / "index"
     ocx(workspace.path.parent / f"{workspace.test_id}-indexhome", "--index", str(index), "index", "update", f"{REGISTRY}/rig/tool")
@@ -60,14 +64,19 @@ def test_v15_floating_tag_resolves_from_the_index(workspace: Workspace, log) -> 
     tag = f"{REGISTRY}/rig/tool:1.0.0"
     floating = f'\nocx.package(name = "floating", package = "{tag}", platforms = ["linux/amd64+libc.glibc"]{{}})\n'
     module.write_text(base + floating.format(""))
-    control = workspace.client("control").run("query", "@@rules_ocx++ocx+floating//:all")
-    assert control.rc != 0 and "rig/tool:1.0.0" in control.out, control.out[-2000:]
+    # Controls, no index. Offline, ocx refuses the unpinned reference and names it (exit 81). Online it resolves the
+    # tag from the registry, and the log shows that lookup: the witness below can see a lookup when there is one.
+    offline = workspace.client("control-offline").run("query", "@@rules_ocx++ocx+floating//:all", "--repo_env=OCX_OFFLINE=1")
+    assert offline.rc != 0 and "rig/tool:1.0.0" in offline.out, offline.out[-2000:]
+    log.mark()
+    online = workspace.client("control-online").run("query", "@@rules_ocx++ocx+floating//:all")
+    assert_ok(online, "floating tag without an index, online")
+    assert [r for r in log.registry() if _is_tag_lookup(r)], "control: the online resolution made no tag lookup"
     module.write_text(base + floating.format(', index = "//:index"'))
     log.mark()
     res = workspace.client("a").run("query", "@@rules_ocx++ocx+floating//:all")
     assert_ok(res, "floating tag with an index")
-    tag_lookups = [r["uri"] for r in log.registry() if "/manifests/1.0.0" in r["uri"] or "/tags/list" in r["uri"]]
-    assert tag_lookups == []
+    assert [r["uri"] for r in log.registry() if _is_tag_lookup(r)] == []
 
 
 def test_v25_no_author_env_syntax_reaches_the_rules(workspace: Workspace) -> None:
@@ -120,14 +129,23 @@ def _ocx_spans(ws: Workspace, since: int) -> list[float]:
 
 def test_v31_v65_measures(workspace: Workspace) -> None:
     c = workspace.client("a")
+    # Priming fetch of a one-file set: it pays Bazel's startup, the module graph and Bazel registry files, the
+    # extension's fact runs and `@ocx_tool`. None of that is the set rule's work, and none of it is in the next fetch.
+    assert_ok(c.run("fetch", "--repo=@tools_linux_amd64_libc_musl"), "priming fetch of a small set")
+    n = len(workspace.ocx_calls())
+    small = c.run("fetch", "--repo=@tools_linux_amd64_libc_glibc")
+    assert_ok(small, "fetch of a second small set")
+    floor = small.seconds - sum(_ocx_spans(workspace, n))
     n = len(workspace.ocx_calls())
     fetch = c.run("fetch", "--repo=@big_linux_amd64")
     assert_ok(fetch, "fetch the 100000-file set")
     ocx_seconds = sum(_ocx_spans(workspace, n))
     files = sum(1 for p in c.external("big_linux_amd64").rglob("*") if p.is_file() or p.is_symlink())
-    # V-65 bound: the rule's own work (decode + BUILD generation + moves) is the fetch minus the ocx runs.
+    # V-65: the rule's own work (decode + BUILD generation + moves) is the second fetch minus its `ocx vendor` run.
+    # What stays is Bazel's per-fetch cost for any set; the small set's own remainder is recorded as `floor_seconds`.
     _record("v65_big_set", {"files": files, "fetch_seconds": round(fetch.seconds, 1), "ocx_seconds": round(ocx_seconds, 1),
-                            "rule_seconds_upper_bound": round(fetch.seconds - ocx_seconds, 1)})  # fmt: skip
+                            "rule_seconds": round(fetch.seconds - ocx_seconds, 1),
+                            "floor_seconds": round(floor, 1)})  # fmt: skip
     batches = {}
     for kind in ("small", "big"):
         res = c.run("build", *[f"//:batch_{kind}_{i}" for i in range(5)], config=CONFIG)

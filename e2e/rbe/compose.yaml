@@ -22,6 +22,11 @@ services:
     # One upstream socket per proxied gRPC stream: a 100000-file upload ran out of the default 1024 descriptors.
     ulimits:
       nofile: {soft: 65536, hard: 65536}
+    # nginx also closes each upstream connection after its stream: 100000 uploads in half a minute exhaust the 28000
+    # default ephemeral ports in TIME_WAIT (connect() "Address not available", 502 on ByteStream/Write).
+    sysctls:
+      net.ipv4.ip_local_port_range: "1024 65535"
+      net.ipv4.tcp_tw_reuse: "1"
     depends_on: [frontend, zot]
 
   zot:

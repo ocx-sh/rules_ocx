@@ -67,7 +67,10 @@ genrule(
     outs = ["cmake_finds_ccache" + suffix + ".txt"],
     cmd = "$(execpath " + hub + ") > $@ && (find -L $(execpath " + hub + ").runfiles -name ccache -type f | grep -q . && echo ccache-found || echo ccache-missing) >> $@",
     tools = [hub],
-) for suffix, hub in [("", "@build//:cmake"), ("_alone", "@cmake_alone//:cmake")]]
+) for suffix, hub in [
+    ("", "@build//:cmake"),
+    ("_alone", "@cmake_alone//:cmake"),
+]]
 
 # BUILD.bazel, its case variant and a nested BUILD stay at their places in the runfiles (V-47).
 genrule(
@@ -82,7 +85,7 @@ genrule(
     name = "envtpl_run",
     outs = ["envtpl_run.txt"],
     cmd = "$(execpath @envtpl//:envtpl) > $@",
-    tools = ["@envtpl//:envtpl"],
+    tools = ["@envtpl"],
 )
 
 # A batch of actions over the big set and over the small tools set (V-31).
@@ -91,4 +94,7 @@ genrule(
     srcs = [setlabel],
     outs = ["batch_{}_{}.txt".format(kind, i)],
     cmd = "echo {} > $@".format(i),
-) for kind, setlabel in [("big", "@big_linux_amd64//:set"), ("small", "@tools_linux_amd64_libc_glibc//:set")] for i in range(5)]
+) for kind, setlabel in [
+    ("big", "@big_linux_amd64//:set"),
+    ("small", "@tools_linux_amd64_libc_glibc//:set"),
+] for i in range(5)]
