@@ -1,7 +1,9 @@
 name: ocx-under-test
 description: >-
   Point rules_ocx at the ocx build named in e2e/rbe/ocx-under-test.txt (a dev package of the ocx repository,
-  signature-verified). No file, no effect: the released pin stays in force.
+  signature-verified) and export OCX_INSTALL_BINARY and OCX_INSTALL_BINARY_SHA256 to the later steps. The
+  template-owned verify-basic and verify-deep workflows get the same effect from the ci:* and deep:* tasks;
+  both run scripts/ocx_under_test.sh. No file, no effect: the released pin stays in force.
 
 inputs:
   token:
@@ -10,12 +12,6 @@ inputs:
       `packages: read` (the owner decides).
     required: false
     default: ${{ github.token }}
-  cache-write:
-    description: >-
-      "true" on the lane that writes the shared Bazel cache; a pin file there is refused, so a dev ocx never
-      lands in that cache.
-    required: false
-    default: "false"
 
 runs:
   using: composite
@@ -24,68 +20,5 @@ runs:
       shell: bash
       env:
         WORKSPACE: ${{ github.workspace }}
-        TEMP_DIR: ${{ runner.temp }}
-        REGISTRY_TOKEN: ${{ inputs.token }}
-        CACHE_WRITE: ${{ inputs.cache-write }}
-        ACTOR: ${{ github.actor }}
-      run: |
-        set -euo pipefail
-        pin="$WORKSPACE/e2e/rbe/ocx-under-test.txt"
-        if [[ ! -f "$pin" ]]; then
-          echo "no e2e/rbe/ocx-under-test.txt: the released ocx pin stays in force"
-          exit 0
-        fi
-        if [[ "$CACHE_WRITE" == true ]]; then
-          echo "::error::e2e/rbe/ocx-under-test.txt is set on the lane that writes the shared Bazel cache; remove it before merging"
-          exit 1
-        fi
-        # `|| true`: a comment-only file must reach the format check below, not die on pipefail.
-        identifier="$(grep -v '^[[:space:]]*\(#.*\)\?$' "$pin" | head -n 1 | tr -d '[:space:]' || true)"
-        # Only the dev package of the ocx repository, addressed by digest.
-        if [[ ! "$identifier" =~ ^ghcr\.io/ocx-sh/dev/cli(:[A-Za-z0-9._-]+)?@sha256:[0-9a-f]{64}$ ]]; then
-          echo "::error::e2e/rbe/ocx-under-test.txt must hold ghcr.io/ocx-sh/dev/cli[:tag]@sha256:<hex>"
-          exit 1
-        fi
-
-        # The dev build is signed by release.yml of the ocx repository on whichever branch was dispatched;
-        # the ref varies, the workflow and the OIDC issuer do not. Trade-off: `refs/heads/.+` means anyone
-        # with push access to the ocx repository can produce a build this step trusts.
-        config="$TEMP_DIR/ocx-under-test.toml"
-        cat > "$config" <<'TOML'
-        [[trust.policy]]
-        scope = "ghcr.io/ocx-sh/dev/*"
-        signers = [
-          { kind = "keyless", identity_regexp = "^https://github\\.com/ocx-sh/ocx/\\.github/workflows/release\\.yml@refs/heads/.+$", oidc_issuer = "https://token.actions.githubusercontent.com" },
-        ]
-        TOML
-
-        export OCX_AUTH_ghcr_io_USER="$ACTOR"
-        export OCX_AUTH_ghcr_io_TOKEN="$REGISTRY_TOKEN"
-        # A policy-covered pull verifies the signature before it downloads and fails closed.
-        root="$(ocx --config "$config" --format json package pull "$identifier" | jq -er '.paths | to_entries[0].value')"
-        binary="$(find "$root/content" -type f \( -name ocx -o -name ocx.exe \) -print -quit)"
-        if [[ -z "$binary" ]]; then
-          echo "::error::no ocx binary in the pulled package"
-          exit 1
-        fi
-        if command -v sha256sum >/dev/null 2>&1; then
-          sha="$(sha256sum "$binary" | cut -d' ' -f1)"
-        else
-          sha="$(shasum -a 256 "$binary" | cut -d' ' -f1)"
-        fi
-        if command -v cygpath >/dev/null 2>&1; then
-          binary="$(cygpath -m "$binary")"
-        fi
-
-        {
-          echo "OCX_INSTALL_BINARY=$binary"
-          echo "OCX_INSTALL_BINARY_SHA256=$sha"
-        } >> "$GITHUB_ENV"
-        # The pair is not in the lockfile, and Bazel hands a repository rule only what --repo_env names.
-        [[ ! -s "$WORKSPACE/.bazelrc.user" || -z "$(tail -c1 "$WORKSPACE/.bazelrc.user")" ]] || echo >> "$WORKSPACE/.bazelrc.user"
-        {
-          echo "common --lockfile_mode=off"
-          echo "common --repo_env=OCX_INSTALL_BINARY"
-          echo "common --repo_env=OCX_INSTALL_BINARY_SHA256"
-        } >> "$WORKSPACE/.bazelrc.user"
-        echo "ocx under test: $identifier (sha256 $sha)"
+        GITHUB_TOKEN: ${{ inputs.token }}
+      run: bash "$WORKSPACE/scripts/ocx_under_test.sh"

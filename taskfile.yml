@@ -43,9 +43,17 @@ tasks:
       - task: guard:check
       - task: guard:test
 
+  # The template-owned workflows cannot carry a step for the ocx build under test, so the Bazel tasks start with
+  # this one. No e2e/rbe/ocx-under-test.txt: it does nothing.
+  ocx-under-test:
+    desc: Point the Bazel runs at the ocx build in e2e/rbe/ocx-under-test.txt (no file, no effect)
+    cmds:
+      - bash scripts/ocx_under_test.sh
+
   ci:test:
     desc: Basic-tier Bazel tests (--config=basic); JUnit copied to target/reports/junit/
     cmds:
+      - task: ocx-under-test
       - defer: { task: junit:collect, vars: { DIR: ".", PREFIX: basic } }
       - "{{.BAZEL}} test --config=basic {{.CI_CFG}} --verbose_test_summary -- //..."
       - task: test:install-binary
@@ -53,6 +61,7 @@ tasks:
   ci:build:
     desc: Build every Bazel target
     cmds:
+      - task: ocx-under-test
       - "{{.BAZEL_BUILD}} build {{.CI_CFG}} -- //..."
 
   ci:docs:
@@ -80,6 +89,7 @@ tasks:
     env:
       USE_BAZEL_VERSION: "{{.BAZEL_VERSION}}"
     cmds:
+      - task: ocx-under-test
       - defer: { task: junit:collect, vars: { DIR: ".", PREFIX: "deep-{{.BAZEL_VERSION}}" } }
       - "{{.BAZEL}} test --config=deep {{.CI_CFG}} --verbose_test_summary -- //..."
 
