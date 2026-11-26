@@ -1,0 +1,4 @@
+# A project of its own: `ocx lock` checks every binding against one platform, and this one has only a
+# windows/amd64 leaf (V-57). The harness locks it with `-p windows/amd64`.
+[group.winonly.tools]
+winonly = "@REGISTRY@/rig/winonly:1.0.0"

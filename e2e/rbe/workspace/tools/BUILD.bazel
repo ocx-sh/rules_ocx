@@ -1,0 +1,11 @@
+# Source files only, no genrule: on the no-shell runner every action that needs /bin/sh fails, so the
+# helpers the no-shell cases use must reach it without one. `capture.bin` is compiled by the harness
+# (tests/conftest.py, `gcc -static`) before the first build; a checkout without that step fails here, loudly.
+package(default_visibility = ["//visibility:public"])
+
+exports_files([
+    "capture.bin",
+    "direct.bzl",
+    # A launcher that needs /bin/sh, as rules_ocx 0.5.1 wrote them: the control of the no-shell runner.
+    "sh_launcher.sh",
+])

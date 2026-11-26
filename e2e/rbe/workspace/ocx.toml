@@ -1,0 +1,28 @@
+# Template: the harness (tests/conftest.py) replaces @REGISTRY@ with the rig registry
+# and runs `ocx lock` over it, because the lock records the registry address, which depends on the rig port.
+# One group per case, so the exposed tool names never collide inside one selection. The windows-only
+# group is its own project (winonly/), because `ocx lock` checks every binding against the lock platform.
+[tools]
+tool = "@REGISTRY@/rig/tool:1.0.0"
+
+[group.build.tools]
+cmake = "@REGISTRY@/rig/cmake:1.0.0"
+ccache = "@REGISTRY@/rig/ccache:1.0.0"
+
+[group.links.tools]
+links = "@REGISTRY@/rig/links:1.0.0"
+
+[group.entry.tools]
+entry = "@REGISTRY@/rig/entry:1.0.0"
+
+[group.envtpl.tools]
+envtpl = "@REGISTRY@/rig/envtpl:1.0.0"
+
+[group.buildfiles.tools]
+buildfiles = "@REGISTRY@/rig/buildfiles:1.0.0"
+
+[group.big.tools]
+big = "@REGISTRY@/rig/big:1.0.0"
+
+[group.private.tools]
+secret = "@REGISTRY@/rig-private/secret:1.0.0"
