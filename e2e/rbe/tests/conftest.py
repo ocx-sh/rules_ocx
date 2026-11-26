@@ -43,6 +43,30 @@ REGISTRY = f"127.0.0.1:{PORT}"
 BAZEL_TIMEOUT = 900
 
 
+def container_bazel() -> str:
+    """The real Bazel binary of `.bazelversion` that the network-less client container can exec.
+
+    `RIG_BAZEL` may be a bare name on the host's PATH, a symlink into an ocx package or a bazelisk launcher; the
+    container sees none of those. A launcher is asked once (into a scratch BAZELISK_HOME under the run
+    directory) to download the pinned Bazel, whose path its metadata names. Fails early with the reason.
+    """
+    found = shutil.which(BAZEL)
+    if found is None:
+        pytest.fail(f"RIG_BAZEL={BAZEL!r} is not an executable on PATH: the offline client needs a real Bazel binary")
+    real = os.path.realpath(found)
+    if "bazelisk" not in os.path.basename(real).lower():
+        return real
+    version = (ROOT / ".bazelversion").read_text().strip()
+    home = RUN / "bazelisk-home"
+    proc = subprocess.run([real, "--version"], env={**os.environ, "BAZELISK_HOME": str(home)}, capture_output=True,
+                          text=True, timeout=BAZEL_TIMEOUT)  # fmt: skip
+    meta = sorted((home / "downloads" / "metadata" / "bazelbuild").glob(f"bazel-{version}-*"))
+    binary = home / "downloads" / "sha256" / meta[0].read_text().strip() / "bin" / "bazel" if meta else None
+    if binary is None or not binary.is_file():
+        pytest.fail(f"bazelisk {real} did not download Bazel {version} into {home}: {proc.stdout}{proc.stderr}")
+    return str(binary)
+
+
 def rc_flags(config: str) -> list[str]:
     """`common`/`build` flags of rig.bazelrc plus `build:<config>`, nested --config expanded, ports rewritten."""
     rows: dict[str, list[str]] = {}

@@ -13,7 +13,7 @@ import shutil
 import subprocess
 
 import pytest
-from conftest import BAZEL, OCX, OUTPUT_ROOT, RBE, REGISTRY, ROOT, RUN, Client, Workspace, assert_ok, ocx, sha256
+from conftest import OCX, OUTPUT_ROOT, RBE, REGISTRY, ROOT, RUN, Client, Workspace, assert_ok, container_bazel, ocx, sha256
 
 PROJECT = os.environ.get("RIG_PROJECT", "rules-ocx-rig")
 
@@ -27,7 +27,8 @@ def offline(client: Client, host: Client, *args: str, timeout: int = 900) -> sub
     """
     client.repo_cache = host.repo_cache
     real_ocx = shutil.which(OCX) or OCX  # the counting wrapper execs it by its host path
-    mounts = {str(RUN), str(ROOT), str(OUTPUT_ROOT), os.path.dirname(os.path.realpath(BAZEL)),
+    bazel_bin = container_bazel()
+    mounts = {str(RUN), str(ROOT), str(OUTPUT_ROOT), os.path.dirname(bazel_bin),
               os.path.dirname(os.path.realpath(real_ocx))}  # fmt: skip
     argv = ["docker", "compose", "-f", str(RBE / "compose.yaml"), "-p", PROJECT, "--profile", "client", "run", "--rm",
             "--no-deps", "--user", f"{os.getuid()}:{os.getgid()}", "-w", str(client.ws.path)]  # fmt: skip
@@ -35,7 +36,7 @@ def offline(client: Client, host: Client, *args: str, timeout: int = 900) -> sub
         argv += ["-v", f"{m}:{m}"]
     for k, v in client.env().items():
         argv += ["-e", f"{k}={v}"]
-    bazel = [*client.startup(), "build", f"--repository_cache={client.repo_cache}", "--repo_contents_cache=",
+    bazel = [bazel_bin, *client.startup()[1:], "build", f"--repository_cache={client.repo_cache}", "--repo_contents_cache=",
              "--lockfile_mode=update",
              f"--repo_env=OCX_INSTALL_BINARY={client.ws.ocx_binary}",
              f"--repo_env=OCX_INSTALL_BINARY_SHA256={sha256(client.ws.ocx_binary)}",
@@ -43,7 +44,7 @@ def offline(client: Client, host: Client, *args: str, timeout: int = 900) -> sub
              "--spawn_strategy=local", "--disk_cache=", "--color=no", "--curses=no",
              "--extra_execution_platforms=//platforms:exec_glibc", *args]  # fmt: skip
     proc = subprocess.run([*argv, "client", *bazel], capture_output=True, text=True, timeout=timeout)
-    subprocess.run([*argv, "client", *client.startup(), "shutdown"], capture_output=True, text=True, timeout=180)
+    subprocess.run([*argv, "client", bazel_bin, *client.startup()[1:], "shutdown"], capture_output=True, text=True, timeout=180)
     return proc
 
 
