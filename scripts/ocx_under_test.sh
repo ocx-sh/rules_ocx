@@ -125,11 +125,10 @@ workspaces=("$root")
 for module in "$root"/examples/*/MODULE.bazel "$root"/e2e/*/MODULE.bazel; do
   [[ -f "$module" ]] && workspaces+=("$(dirname "$module")")
 done
-# Windows: ocx-shim starts its target through a path inside the runfiles tree, and a vendored package sits
-# deep in it (`<output base>\execroot\_main\bazel-out\...\<tool>.exe.runfiles\<repo>\packages\ocx.sh\sha256\..`). On
-# the runner's default output root that path is 267 characters for shellcheck, past MAX_PATH, and the launcher
-# fails with win32 error 3 (path not found). A short output root keeps the CI legs under the limit; a consumer
-# whose output root is long hits the same limit until ocx-shim starts long paths (`\\?\`).
+# Windows: a short output root is standing practice for the CI legs, as it is for any Bazel build on Windows. It
+# keeps a test's working directory (its runfiles tree) and the paths a tool opens below it under MAX_PATH (260).
+# The launcher starts a long program path itself (`\\?\`), but a long working directory and tools opening their
+# own files below a long directory still fail. Users set the line themselves; see docs/guides/cross-platform.md.
 short_root=()
 case "$(uname -s)" in
   MINGW* | MSYS* | CYGWIN*) short_root=("startup --output_user_root=C:/b") ;;
