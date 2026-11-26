@@ -15,12 +15,10 @@ It looks for its files beside itself or in the runfiles tree of the action.
 
 Remote execution is supported.
 
-Buildbarn and NativeLink both ran the rig suite green on 2026-11-26.
-
 ## Require what the build needs
 
-- Bazel 9. The module declares `bazel_compatibility = [">=9.0.0"]` and refuses Bazel 8 and earlier.
-- An `ocx` with the `vendor` command, because the extension and every set repository run it.
+- Bazel 9. The module declares `bazel_compatibility = [">=9.0.0"]` and needs Bazel 9 or newer.
+- A supported `ocx`, because the extension and every set repository run it: see [what ocx is for](../concepts/design.md#what-ocx-is-for).
 - On Windows, `--enable_runfiles`. The launcher looks in the runfiles tree, and without it the launcher exits 78.
 - `platforms` on every tag, naming each platform an executor may have.
 

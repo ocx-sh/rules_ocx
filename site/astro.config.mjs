@@ -25,13 +25,15 @@ export default defineConfig({
             { label: 'Share one toolchain', link: '/guides/pin-toolchain/' },
             { label: 'Fail CI on a stale lock', link: '/guides/ci-reproducible/' },
             { label: 'Build behind a mirror', link: '/guides/offline-mirror/' },
-            { label: 'Use per-platform tools', link: '/guides/cross-platform/' },
-            { label: 'Keep tool bytes out of the cache', link: '/guides/remote-cache/' },
+            { label: 'Use tools for several platforms', link: '/guides/cross-platform/' },
+            { label: 'Windows: path length', link: '/guides/windows-path-length/' },
+            { label: 'Remote execution and caching', link: '/guides/remote-cache/' },
           ],
         },
         {
           label: 'Concepts',
           items: [
+            { label: 'The vendor model', link: '/concepts/design/' },
             { label: 'How rules_ocx works', link: '/concepts/how-it-works/' },
             { label: 'Trust, config and patches', link: '/concepts/trust-and-config/' },
           ],

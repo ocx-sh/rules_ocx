@@ -1,3 +1,5 @@
+Superseded in part by [adr_0002_vendor_tool_sets.md](adr_0002_vendor_tool_sets.md). The decisions that stand: the root-only `ocx.policy` tag and the single classified env table. The sections on `ocx pull`, `ocx env`, `package install`, the lazy launcher and the 0.6.0 floor no longer apply.
+
 # ADR: A root-only `ocx.policy` tag, and env vars classified once
 
 ## Metadata
@@ -13,7 +15,7 @@
 - [ ] OR the deviation is justified in the Rationale section below
 **Domain Tags:** security, integration, infrastructure
 **Supersedes:** N/A
-**Superseded By:** N/A
+**Superseded By:** adr_0002 (in part: the fetch path; the policy tag and env-class decisions stand)
 
 ## Context
 

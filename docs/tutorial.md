@@ -7,8 +7,8 @@ You never install `shellcheck` on your machine.
 It takes about ten minutes.
 
 You need Bazel 9.
-You also need an `ocx` CLI with the `vendor` command to write the lock file ([install it](https://ocx.sh/install/)).
-rules_ocx wraps `ocx`. It downloads a pinned `ocx` build itself and runs it for every fetch.
+You also need the `ocx` CLI to write the lock file ([install it](https://ocx.sh/install/)).
+rules_ocx downloads a pinned `ocx` build itself and runs it for every fetch; read [the vendor model](concepts/design.md) first if you want the whole picture.
 
 ## Pin the tool
 
@@ -36,7 +36,7 @@ Each one must be a platform the lock serves.
 ```starlark
 module(name = "tutorial")
 
-bazel_dep(name = "rules_ocx", version = "0.5.0")
+bazel_dep(name = "rules_ocx", version = "0.5.1")
 bazel_dep(name = "rules_shell", version = "0.6.1")
 
 ocx = use_extension("@rules_ocx//ocx:extensions.bzl", "ocx")
@@ -55,7 +55,7 @@ Pin Bazel 9 by writing `9.2.0` into `.bazelversion`.
 
 On Windows, put `common:windows --enable_runfiles` in a `.bazelrc`.
 The tools look for their files in the runfiles tree, and without it they exit 78.
-If a tool fails to start on a long path, see [Windows: path length](guides/cross-platform.md#windows-path-length).
+If a tool fails to start on a long path, see [Windows: path length](guides/windows-path-length.md).
 
 ## Write the test
 

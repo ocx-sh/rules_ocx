@@ -14,18 +14,18 @@ the `manifest.json` that `ocx vendor` writes. The durable contracts are the
 ## Requirements
 
 - Bazel 9. The module declares `bazel_compatibility = [">=9.0.0"]`.
-- An `ocx` that has the `vendor` command. rules_ocx downloads a pinned `ocx`
-  itself and runs `ocx vendor` for every set.
+- An `ocx` release that has `ocx vendor` and writes manifest schema version 1.
+  rules_ocx downloads a pinned `ocx` itself and runs `ocx vendor` for every set.
 - On Windows, `--enable_runfiles`. The launcher looks for its files in the
   runfiles tree and exits 78 without it. Long paths also matter there: see
-  [Windows: path length](docs/guides/cross-platform.md#windows-path-length).
+  [Windows: path length](docs/guides/windows-path-length.md).
 - `platforms` on every `ocx.project` and `ocx.package` tag.
 
 ## Quick start
 
 ```starlark
 # MODULE.bazel
-bazel_dep(name = "rules_ocx", version = "0.5.0")
+bazel_dep(name = "rules_ocx", version = "0.5.1")
 
 ocx = use_extension("@rules_ocx//ocx:extensions.bzl", "ocx")
 
@@ -94,6 +94,8 @@ target needs, so that a change to an unrelated group leaves its key alone.
 
 ## How it works
 
+The whole model is on one page: [The vendor model](https://ocx.sh/integrations/bazel/concepts/design/).
+
 1. The `ocx` extension creates `@ocx_tool` by downloading the **pinned** ocx
    release listed in the vendored [`dist/dist.json`](dist/dist.json) snapshot
    of `https://setup.ocx.sh/dist.json` (sha256-verified).
@@ -126,13 +128,13 @@ honored by the repository rules:
 Passed through to repo rules as well:
 `OCX_INDEX`, `OCX_OFFLINE`,
 `OCX_FROZEN`, `OCX_REMOTE`, `OCX_JOBS`, `OCX_DEFAULT_REGISTRY`, `OCX_CONFIG`,
-`OCX_NO_CONFIG`, `OCX_MANAGED_CONFIG`, `OCX_PATCHES`, `OCX_PATCH_SNAPSHOT`,
+`OCX_NO_CONFIG`, `OCX_MANAGED_CONFIG`,
 `OCX_SIGSTORE_TRUSTED_ROOT` and `OCX_EXTRA_CA_CERTS` (extra TLS roots, for
 example a corporate proxy CA). Together with `OCX_MIRRORS` and
 `OCX_INSECURE_REGISTRIES` above, that is the whole forwarded set. `OCX_HOME` is
 never forwarded: every `ocx` run gets a fresh scratch `OCX_HOME`.
 
-The three path-valued ones (`OCX_CONFIG`, `OCX_PATCH_SNAPSHOT`,
+The two path-valued ones (`OCX_CONFIG` and
 `OCX_SIGSTORE_TRUSTED_ROOT`) must be **absolute**. A repository rule runs from
 Bazel's own working directory, so a relative value names a different file than
 it does in your shell. Bazel cannot watch it. It is refused rather than
@@ -154,16 +156,15 @@ that signatures are checked against. `OCX_MIRRORS` and
 `OCX_INSECURE_REGISTRIES` redirect the transport. Set `sigstore_trusted_root`
 and pin digests (`ocx.lock`, or an `@sha256:` reference) to close both.
 
-`OCX_PROJECT`, `OCX_GLOBAL`, `OCX_QUIET`, `OCX_NO_PROJECT`,
-`OCX_NO_CONFIG_REFRESH`, `OCX_NO_CONSENT` and `OCX_TOOLCHAIN_DIR` are
+`OCX_PROJECT`, `OCX_GLOBAL`, `OCX_QUIET`, `OCX_NO_PROJECT`
+and `OCX_NO_CONFIG_REFRESH` are
 deliberately *not* passed through. Each carries a fixed value on every
 invocation. Project context comes from the explicit `--project` flag, and
 `--quiet` would suppress the JSON reports the rules parse. `OCX_NO_PROJECT`
 closes the directory walk a fetch would otherwise run from Bazel's own working
 directory.
 
-The managed-config refresh wants a TTY no repo rule has. `OCX_NO_CONSENT` means
-no shell-activation consent stamp is written.
+The managed-config refresh wants a TTY no repo rule has.
 
 ## Weakening posture: `ocx.policy`
 
@@ -187,14 +188,14 @@ Root-only governs the **tag**. The same three attrs also sit on the public
 `ocx_set_repo` rule in `//ocx:defs.bzl`. A module that declares that rule
 directly, instead of going through this extension, sets its own posture.
 
-## Managed config and patches
+## Managed config
 
 Guide: <https://ocx.sh/integrations/bazel/concepts/trust-and-config/>.
 
 ocx layers its site configuration system, user, `$OCX_HOME/config.toml`,
 managed-config snapshot, `OCX_CONFIG` and `--config`. The repository rules run
-inside that chain rather than around it. Whatever mirrors, registries and
-`[patches]` your system and user config declare apply to the fetch. The
+inside that chain rather than around it. Whatever mirrors and
+registries your system and user config declare apply to the fetch. The
 `$OCX_HOME` tiers of your machine do not, because every run has a scratch home.
 
 Because Bazel can only invalidate on inputs it knows, a set repository
@@ -221,23 +222,12 @@ ocx.project(
 
 `config` sets `OCX_CONFIG` and overrides an ambient one. `no_config` sets
 `OCX_NO_CONFIG=1` and drops the system, user and managed tiers. It keeps an
-explicit `config`, and it blanks an ambient `OCX_CONFIG`, `OCX_PATCHES` and
-`OCX_PATCH_SNAPSHOT`. Together the two attrs are the hermetic pattern: the
+explicit `config`, and it blanks an ambient `OCX_CONFIG`. Together the two attrs are the hermetic pattern: the
 build reads exactly the file you committed.
 
-**Patches** are companion packages that a site config composes onto a base
-package's environment. They come from a `[patches]` table, never from the
-project `ocx.toml`. `ocx lock --check` deliberately does not cover them, so
-freeze them explicitly:
-
-```console
-$ ocx patch freeze          # writes patches.snapshot.json next to ocx.lock
-```
-
-Export `OCX_PATCH_SNAPSHOT` as the absolute path of that file to pin the
-companion digests. Without it, companions resolve at fetch time.
-`ocx patch sync` is the only way to refresh the snapshot. It mutates and needs
-the network.
+A patch never reaches a vendored set: the manifest is the same with or
+without `[patches]`, so `OCX_PATCHES` and `OCX_PATCH_SNAPSHOT` change nothing in
+a set.
 
 **Managed config in CI**: a `[managed]` source that is required (the default)
 but has never been synced exits **78 on every ocx command**. The repository
@@ -271,8 +261,6 @@ Guide: <https://ocx.sh/integrations/bazel/guides/remote-cache/>.
 Remote execution is supported. Bazel uploads a set as the inputs of every
 action that uses one of its tools. The native launcher needs nothing else on
 the executor.
-
-Buildbarn and NativeLink both ran the rig suite green on 2026-11-26.
 
 - Only trusted CI lanes write a shared remote repository contents cache. Each
   set is fetched into a scratch `OCX_HOME` from digest-verified blobs, and the

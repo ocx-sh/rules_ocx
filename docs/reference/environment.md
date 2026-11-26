@@ -25,10 +25,10 @@ Pass both with `--repo_env` and add `--lockfile_mode=off`, because the pair is n
 
 ## Forwarded unchanged
 
-`OCX_INDEX`, `OCX_OFFLINE`, `OCX_FROZEN`, `OCX_REMOTE`, `OCX_JOBS`, `OCX_DEFAULT_REGISTRY`, `OCX_CONFIG`, `OCX_NO_CONFIG`, `OCX_MANAGED_CONFIG`, `OCX_PATCHES`, `OCX_PATCH_SNAPSHOT` and `OCX_SIGSTORE_TRUSTED_ROOT`.
+`OCX_INDEX`, `OCX_OFFLINE`, `OCX_FROZEN`, `OCX_REMOTE`, `OCX_JOBS`, `OCX_DEFAULT_REGISTRY`, `OCX_CONFIG`, `OCX_NO_CONFIG`, `OCX_MANAGED_CONFIG` and `OCX_SIGSTORE_TRUSTED_ROOT`.
 Together with the mirror and transport variables above, this is the whole forwarded set.
 
-`OCX_CONFIG`, `OCX_PATCH_SNAPSHOT` and `OCX_SIGSTORE_TRUSTED_ROOT` must be absolute paths.
+`OCX_CONFIG` and `OCX_SIGSTORE_TRUSTED_ROOT` must be absolute paths.
 A relative value is refused, because a repository rule runs from Bazel's own working directory and cannot watch it.
 `file://` is accepted only on `OCX_SIGSTORE_TRUSTED_ROOT`, and the path behind the prefix must be absolute.
 
@@ -43,5 +43,3 @@ A relative value is refused, because a repository rule runs from Bazel's own wor
 | `OCX_QUIET` | `--quiet` would suppress the JSON reports the rules parse. |
 | `OCX_NO_PROJECT` | Fixed, so a fetch cannot walk directories from Bazel's working directory. |
 | `OCX_NO_CONFIG_REFRESH` | Fixed on, because the managed-config refresh needs a TTY. |
-| `OCX_NO_CONSENT` | Fixed on, so no shell-activation consent stamp is written. |
-| `OCX_TOOLCHAIN_DIR` | Fixed empty, which is ocx's "absent", so an exported toolchain root cannot move anything. |

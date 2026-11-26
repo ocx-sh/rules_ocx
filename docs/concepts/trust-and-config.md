@@ -26,8 +26,8 @@ The same three attributes sit on the public `ocx_set_repo` rule, so a module tha
 
 `OCX_NO_VERIFY` and `OCX_ALLOW_YANKED` are never read from the environment.
 rules_ocx writes them on every invocation, so an exported value cannot switch verification off.
-A CI job that used to export `OCX_ALLOW_YANKED` resolves as if it had not, silently.
-Move that intent into `ocx.policy(allow_yanked = True)`.
+An exported `OCX_ALLOW_YANKED` has no effect.
+Ask for yanked releases with `ocx.policy(allow_yanked = True)`.
 
 `OCX_SIGSTORE_TRUSTED_ROOT` is different: it is site-authoritative.
 Without the `sigstore_trusted_root` attribute, an exported value replaces the trust anchor.
@@ -38,7 +38,7 @@ Set `sigstore_trusted_root` and pin digests with `ocx.lock` or an `@sha256:` ref
 
 OCX layers system, user, `$OCX_HOME/config.toml`, the managed-config snapshot, `OCX_CONFIG` and `--config`.
 Every `ocx` run of rules_ocx has a fresh scratch `OCX_HOME`, so the `$OCX_HOME` tiers of your machine do not apply.
-Whatever mirrors, registries and `[patches]` your system and user config declare apply to the fetch.
+Whatever mirrors and registries your system and user config declare apply to the fetch.
 
 Bazel can only invalidate on inputs it knows, so a set repository watches every discovered config path, including paths that do not exist yet.
 Creating a user config file therefore refetches the set repositories.
@@ -60,14 +60,12 @@ ocx.project(
 
 `config` sets `OCX_CONFIG`.
 `no_config` sets `OCX_NO_CONFIG=1` and drops the system, user and managed tiers.
-It also blanks an ambient `OCX_CONFIG`, `OCX_PATCHES` and `OCX_PATCH_SNAPSHOT`.
-A build with `no_config = True` composes no patches, unless the committed `config` declares them.
+It also blanks an ambient `OCX_CONFIG`.
 
 ## Patches
 
-Patches are companion packages that a site config composes onto a base package's environment.
-They come from a `[patches]` table, never from the project `ocx.toml`.
-[Freeze them](../guides/ci-reproducible.md) with `ocx patch freeze`, because `ocx lock --check` does not cover them.
+A patch never reaches a vendored set.
+The manifest of a set is the same with or without `[patches]` in a config, so the rules model no patch companions and `OCX_PATCHES` and `OCX_PATCH_SNAPSHOT` change nothing in a set.
 
 ## Managed config in CI
 

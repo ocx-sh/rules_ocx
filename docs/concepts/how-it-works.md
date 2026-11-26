@@ -15,7 +15,7 @@ A missing capability becomes an issue against [ocx-sh/ocx](https://github.com/oc
 
 ## The steps
 
-1. The `ocx` extension creates `@ocx_tool` by downloading the pinned `ocx` release listed in the vendored `dist/dist.json` snapshot of `https://setup.ocx.sh/dist.json`. The download is sha256-verified. The `ocx` must have the `vendor` command.
+1. The `ocx` extension creates `@ocx_tool` by downloading the pinned `ocx` release listed in the vendored `dist/dist.json` snapshot of `https://setup.ocx.sh/dist.json`. The download is sha256-verified. 
 2. For each `ocx.project` or `ocx.package` tag, the extension needs to know which tools exist on which platform. It runs `ocx vendor --manifest-only` once per listed platform and records the answer as a fact in `MODULE.bazel.lock`. While the fact is current, the extension runs no `ocx` and makes no request.
 3. The extension declares one hub repository named by the tag, and one set repository per platform. A set repository runs `ocx vendor` for its platform and keeps the result: the package files, one launcher per tool and a manifest.
 4. The hub holds one toolchain per platform and one `ocx_tool` target per tool. Bazel picks the toolchain of the platform an action executes on, so a build fetches only that platform's set repository.

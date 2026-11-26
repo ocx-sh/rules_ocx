@@ -50,5 +50,5 @@ Only the latest release is supported with security updates.
   `OCX_PATCH_SNAPSHOT` change nothing in the vendored environment. Mirrors,
   registries and the trust policy do apply. `OCX_NO_CONFIG` alone prunes only
   the *discovered* tiers; the `no_config = True` attr additionally blanks
-  `OCX_CONFIG`, `OCX_PATCHES` and `OCX_PATCH_SNAPSHOT`, and pairs with
+  an ambient `OCX_CONFIG`, and pairs with
   `config` to pin exactly what the build reads.

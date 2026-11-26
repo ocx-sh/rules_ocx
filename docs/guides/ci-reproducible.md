@@ -1,8 +1,8 @@
 <!-- doc_type: how-to -->
 <!-- doc_tier: everyday -->
-# Fail CI on a stale lock and freeze packages and patches
+# Fail CI on a stale lock and freeze packages
 
-This guide makes CI fail when a tool pin is stale and keeps ad-hoc packages and site patches from drifting.
+This guide makes CI fail when a tool pin is stale and keeps ad-hoc packages from drifting.
 It assumes you already provision tools with [`ocx.project`](pin-toolchain.md).
 
 ## Rely on the lock check
@@ -55,19 +55,6 @@ ocx.package(
     platforms = ["linux/amd64", "darwin/arm64"],
 )
 ```
-
-## Freeze site patches
-
-`ocx lock --check` does not cover patches.
-If your site config composes patch packages, freeze them next to the lock file.
-
-```console
-$ ocx patch freeze
-```
-
-Commit `patches.snapshot.json` and export `OCX_PATCH_SNAPSHOT` as its absolute path.
-Without the snapshot, patch companions resolve at fetch time.
-Only `ocx patch sync` refreshes the snapshot, and it needs the network.
 
 ## Check the result
 
