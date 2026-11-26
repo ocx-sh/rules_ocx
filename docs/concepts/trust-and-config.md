@@ -1,6 +1,6 @@
 <!-- doc_type: explanation -->
 <!-- doc_tier: integration -->
-# Trust, config and patches
+# Trust and config
 
 A fetch runs inside OCX's configuration chain rather than around it.
 This page explains who can change what a fetch accepts, and which knobs close those paths.

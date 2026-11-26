@@ -47,7 +47,7 @@ rules_ocx needs Bazel 9 and a recent `ocx`; see the [requirements](https://githu
 
 - [The vendor model](concepts/design.md): manifest, tool sets, facts, launcher and remote execution
 - [How rules_ocx works](concepts/how-it-works.md): the fetch steps and what a vendored set is
-- [Trust and config](concepts/trust-and-config.md): policy, managed config and why patches never apply
+- [Trust and config](concepts/trust-and-config.md): policy, managed config and the config chain
 - [Environment variables](reference/environment.md): which ones reach the repository rules
 - [Rules and macros](defs.md): `ocx_set_repo`, `ocx_hub_repo` and the rest of `defs.bzl`
 - [Module extension](extensions.md): `project`, `package`, `download` and `policy` tags

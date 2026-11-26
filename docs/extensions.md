@@ -51,7 +51,7 @@ Overrides the ocx CLI bootstrap. Root module only; at most one.
 | :------------- | :------------- | :------------- | :------------- | :------------- |
 | <a id="ocx.download-dist_manifest"></a>dist_manifest |  dist.json release manifest snapshot to resolve the download from.   | <a href="https://bazel.build/concepts/labels">Label</a> | optional |  `"@rules_ocx//dist:dist.json"`  |
 | <a id="ocx.download-triple"></a>triple |  Exact release target triple, overriding host detection.   | String | optional |  `""`  |
-| <a id="ocx.download-version"></a>version |  Exact ocx version (default: the version pinned with this rules_ocx release). Must be 0.6.8 or newer, the first ocx release with `ocx vendor` and manifest schema version 1. The floor is checked before any download.   | String | optional |  `""`  |
+| <a id="ocx.download-version"></a>version |  Exact ocx version (default: the version pinned with this rules_ocx release; until a release with `ocx vendor` is listed, the default is below the floor and the download fails with a message saying so). Must be 0.6.8 or newer, the first ocx release with `ocx vendor` and manifest schema version 1. The floor is checked before any download.   | String | optional |  `""`  |
 
 <a id="ocx.package"></a>
 

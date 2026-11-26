@@ -7,7 +7,7 @@ The environment variables that reach the rules_ocx repository rules, and the one
 
 | Variable | Effect |
 | --- | --- |
-| `OCX_INSTALL_BINARY` | Absolute path of an `ocx` binary to use instead of the release. Needs `OCX_INSTALL_BINARY_SHA256`. |
+| `OCX_INSTALL_BINARY` | Absolute path of an `ocx` binary to use instead of the release. Needs `OCX_INSTALL_BINARY_SHA256`. The binary must meet the [minimum `ocx`](../concepts/design.md#what-ocx-is-for). |
 | `OCX_INSTALL_BINARY_SHA256` | Digest of that file, 64 lowercase hex characters. A wrong digest fails the fetch, and a later edit of the file changes nothing. |
 
 Pass both with `--repo_env` and add `--lockfile_mode=off`, because the pair is not part of the lock file.

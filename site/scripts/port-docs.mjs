@@ -22,7 +22,7 @@ const PAGES = [
   hand('guides/remote-cache.md', 'Build with remote execution and a remote cache', 'Run vendored tools on remote executors that have no network and no ocx, and keep the actions cacheable.'),
   hand('concepts/design.md', 'The vendor model', 'The manifest contract, tool sets, facts, the native launcher and remote execution.'),
   hand('concepts/how-it-works.md', 'How rules_ocx works', 'How rules_ocx builds a tool set from ocx vendor, and what is shared between Bazel and the shell.'),
-  hand('concepts/trust-and-config.md', 'Trust, config and patches', 'How verification posture and host config reach a fetch, and why patches never apply.'),
+  hand('concepts/trust-and-config.md', 'Trust and config', 'How verification posture and host config reach a fetch.'),
   hand('reference/environment.md', 'Environment variables', 'Which OCX environment variables reach the repository rules and which never do.'),
   generated('extensions.md', 'Module extension', 'API reference for the ocx module extension and its tag classes.', `${SOURCE}ocx/extensions.bzl`),
 ];

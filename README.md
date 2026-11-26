@@ -120,7 +120,7 @@ honored by the repository rules:
 | --- | --- |
 | `OCX_INSTALL_DIST_URL` | Fetch the release manifest from your mirror instead of the vendored snapshot. The mirrored manifest is itself verified when it is named `<sha256>.json` (the form the setup.ocx.sh installers write); any other name is fetched unverified. |
 | `OCX_INSTALL_MIRROR_URL` | Rewrite the ocx binary download to `<mirror>/<tag>/<filename>`. The artifact sha256 is enforced either way. A mirror can move bytes, not change them. |
-| `OCX_INSTALL_BINARY`, `OCX_INSTALL_BINARY_SHA256` | Use a local `ocx` binary instead of a release. Both are required together. A wrong digest fails the fetch. Pass them with `--repo_env` and `--lockfile_mode=off`. |
+| `OCX_INSTALL_BINARY`, `OCX_INSTALL_BINARY_SHA256` | Use a local `ocx` binary instead of a release. Both are required together. A wrong digest fails the fetch, and the binary must meet the [minimum `ocx`](#requirements). Pass them with `--repo_env` and `--lockfile_mode=off`. |
 | `OCX_MIRRORS` | JSON map `{"ocx.sh": "https://mirror.corp/ocx"}`. Package pulls go to the mirror. `ocx.lock` digests stay keyed to the upstream host, so lockfiles are portable. |
 | `OCX_INSECURE_REGISTRIES` | Allow plain-HTTP mirrors (comma list). |
 | `OCX_AUTH_<REGISTRY>_{TYPE,USER,TOKEN}` | Registry credentials (also: docker config). Not enumerable by Bazel, so run `bazel fetch --force` after changing auth. |
@@ -224,10 +224,6 @@ ocx.project(
 `OCX_NO_CONFIG=1` and drops the system, user and managed tiers. It keeps an
 explicit `config`, and it blanks an ambient `OCX_CONFIG`. Together the two attrs are the hermetic pattern: the
 build reads exactly the file you committed.
-
-A patch never reaches a vendored set: the manifest is the same with or
-without `[patches]`, so `OCX_PATCHES` and `OCX_PATCH_SNAPSHOT` change nothing in
-a set.
 
 **Managed config in CI**: a `[managed]` source that is required (the default)
 but has never been synced exits **78 on every ocx command**. The repository

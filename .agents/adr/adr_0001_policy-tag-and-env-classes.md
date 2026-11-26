@@ -319,8 +319,7 @@ ocx.download(
 
 One table in `repo_utils.bzl`, keyed by environment variable name, each row
 carrying its class plus the attr it reads (translucent, explicit), the fixed
-value it writes (pinned), and whether `no_config` blanks it. Detailed contracts
-live in the plan (`.agents/plans/plan_ocx-0-6-0-adoption.md`).
+value it writes (pinned), and whether `no_config` blanks it.
 
 ## Implementation Plan
 

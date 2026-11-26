@@ -35,7 +35,7 @@ export default defineConfig({
           items: [
             { label: 'The vendor model', link: '/concepts/design/' },
             { label: 'How rules_ocx works', link: '/concepts/how-it-works/' },
-            { label: 'Trust, config and patches', link: '/concepts/trust-and-config/' },
+            { label: 'Trust and config', link: '/concepts/trust-and-config/' },
           ],
         },
         {

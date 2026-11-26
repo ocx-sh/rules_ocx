@@ -54,6 +54,7 @@ ocx.project(
 
 To run an `ocx` that is not a release, set `OCX_INSTALL_BINARY` to its absolute path and `OCX_INSTALL_BINARY_SHA256` to its digest.
 Both are required together.
+The binary must meet the [minimum `ocx`](../concepts/design.md#what-ocx-is-for): its `ocx version` is checked before anything else runs.
 Bazel copies the file through its downloader, so a wrong digest fails the fetch and a later edit of the file changes nothing.
 Pass both with `--repo_env`, and add `--lockfile_mode=off`, because the pair is not part of the lock file.
 

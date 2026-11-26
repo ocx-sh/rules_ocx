@@ -12,6 +12,7 @@ The manifest has a `schema_version`, and rules_ocx reads version 1.
 It is the one `ocx` document the rules parse.
 The rules read what the manifest lists (packages, tools, links, the environment each tool needs and the platforms available) and nothing else about the store or the registry.
 A manifest with another schema version fails the fetch and names the version it carries.
+A patch configured in `ocx` never reaches a vendored set: the manifest is the same with or without it (see [Trust and config](trust-and-config.md#patches)).
 
 ## Tool sets
 
@@ -53,7 +54,7 @@ Inputs are content-addressed, so a tool pinned by digest gives the same action k
 
 ## What ocx is for
 
-`ocx` runs only when Bazel fetches a repository: once per tag to compute a fact, once per set repository to vendor it.
+`ocx` runs only when Bazel fetches a repository: once per listed platform of a tag, and only when its fact is missing, to compute that fact, and once per set repository to vendor it.
 No action runs `ocx`, and a build with the repositories already fetched needs neither the binary nor the network.
 The extension downloads the `ocx` release it needs, pinned in the module and checked against its sha256.
 That release must have `ocx vendor` and write manifest schema version 1.
@@ -61,4 +62,4 @@ That release must have `ocx vendor` and write manifest schema version 1.
 ## Related pages
 
 - [How rules_ocx works](how-it-works.md): the fetch steps, what a set contains and what is shared with the shell.
-- [Trust, config and patches](trust-and-config.md): who decides what a fetch may accept.
+- [Trust and config](trust-and-config.md): who decides what a fetch may accept.

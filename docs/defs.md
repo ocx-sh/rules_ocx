@@ -152,7 +152,7 @@ and manifest schema version 1, the manifest this ruleset reads.
 | <a id="ocx_download-name"></a>name |  A unique name for this repository.   | <a href="https://bazel.build/concepts/labels#target-names">Name</a> | required |  |
 | <a id="ocx_download-dist_manifest"></a>dist_manifest |  Release manifest snapshot (dist.json schema 1).   | <a href="https://bazel.build/concepts/labels">Label</a> | optional |  `"@rules_ocx//dist:dist.json"`  |
 | <a id="ocx_download-triple"></a>triple |  Escape hatch: exact release target triple, e.g. 'x86_64-unknown-linux-gnu' to prefer the glibc build. Defaults to host detection (Linux maps to musl).   | String | optional |  `""`  |
-| <a id="ocx_download-version"></a>version |  Exact ocx version to download, e.g. '0.6.6'. Must be 0.6.8 or newer.   | String | required |  |
+| <a id="ocx_download-version"></a>version |  Exact ocx version to download, e.g. '0.6.8'. Must be 0.6.8 or newer.   | String | required |  |
 
 
 <a id="ocx_hub_repo"></a>
