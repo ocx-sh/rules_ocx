@@ -1,5 +1,10 @@
 # Windows runners check out with autocrlf; CRLF shebangs break sh_test.
 *.sh text eol=lf
+# Starlark tests compare multi-line string literals with generated text (set_repo_test.bzl's golden BUILD file);
+# a CRLF checkout on Windows makes the literal differ from the generator's LF output.
+*.bzl text eol=lf
+*.bazel text eol=lf
+BUILD text eol=lf
 
 ocx.lock merge=union
 MODULE.bazel.lock merge=union linguist-generated=true
