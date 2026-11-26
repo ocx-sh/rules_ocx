@@ -2,11 +2,12 @@
 set -euo pipefail
 
 # V-27c: the darwin/arm64 launcher reaches this workspace byte for byte, so it ships with a valid ad-hoc
-# signature and starts on Apple Silicon. Positive: `codesign --verify` passes and the launcher runs to its own
-# exit 78 (it finds no sidecar beside it). Control A: a copy with one byte changed no longer verifies. Control B:
-# a copy with its signature removed is refused at start. The hosted runner does not kill a *modified* page of an
-# ad-hoc linker-signed binary (the page hash is checked lazily, if at all), so that exit code is printed and
-# never asserted. Every number the verdict rests on is printed, so a failed run names its own cause.
+# signature. Positive: `codesign --verify` passes and the launcher runs to its own exit 78 (no sidecar beside
+# it). Control A: a copy with one byte changed fails `codesign --verify`. Control B: a copy after
+# `codesign --remove-signature` fails `codesign --verify`. Only `codesign` is asserted. The hosted macOS arm64
+# runner starts an unsigned arm64 binary (observed: exit 78, not 137), so it does not enforce code signatures,
+# and the run exit codes of the changed and the unsigned copy say nothing about the launcher. They are printed,
+# never asserted: do not add a kill assertion.
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
@@ -51,7 +52,7 @@ run() {
 intact="$(run "$work/intact")"
 flipped="$(run "$work/flipped")"
 echo "codesign --verify: intact $verify_intact, flipped $verify_flipped"
-echo "run: intact exit $intact, flipped exit $flipped (printed only: the kernel's page check is not asserted)"
+echo "run: intact exit $intact, flipped exit $flipped (printed only: this host may not enforce code signatures)"
 
 # Positive: valid signature, and the launcher itself ran (exit 78).
 test "$verify_intact" -eq 0
@@ -59,14 +60,17 @@ test "$intact" -eq 78
 # Control A (deterministic): the changed copy does not verify.
 test "$verify_flipped" -ne 0
 
-# Control B: without a signature an arm64 binary is refused at start (SIGKILL, 137, "Killed: 9"). Not yet
-# observed on a hosted runner, so the verdict below is last and the log shows what happened first.
+# Control B: a copy without its signature does not verify. Assert on verify, not on the run.
 cp -L "$JQ_BIN" "$work/stripped"
 chmod +x "$work/stripped"
 codesign --remove-signature "$work/stripped"
 echo "--- codesign -dvvv stripped"
 codesign -dvvv "$work/stripped" 2>&1 || true
+verify_stripped=0
+codesign --verify --verbose=2 "$work/stripped" || verify_stripped=$?
 stripped="$(run "$work/stripped")"
-echo "run: stripped exit $stripped (expected 137)"
-test "$stripped" -ne 78
+echo "codesign --verify: stripped $verify_stripped"
+echo "run: stripped exit $stripped (printed only)"
+echo "note: if the unsigned copy runs, this host does not enforce code signatures, so the run results say nothing about the launcher"
+test "$verify_stripped" -ne 0
 echo "launcher signature OK"
