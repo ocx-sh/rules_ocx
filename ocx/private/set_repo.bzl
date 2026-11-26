@@ -158,8 +158,9 @@ def cross_check(manifest, expected):
 
     Args:
         manifest: the parse_manifest() manifest.
-        expected: struct(tools = [[name, kind], ...], available_platforms = [...])
-            for this set's platform, taken from the fact.
+        expected: struct(platform, tools = [[name, kind], ...], available_platforms = [...])
+            for this set's platform, taken from the fact; `platform` is the
+            one the repository was asked to vendor.
 
     Returns:
         error string, "" when they agree. The text names
@@ -170,6 +171,8 @@ def cross_check(manifest, expected):
     actual_platforms = sorted(manifest.available_platforms)
     wanted_platforms = sorted(expected.available_platforms)
     problems = []
+    if manifest.platform != expected.platform:
+        problems.append("the manifest is for platform {} where {} was requested".format(manifest.platform, expected.platform))
     if actual_tools != wanted_tools:
         problems.append("tools are {} where the fact recorded {}".format(actual_tools, wanted_tools))
     if actual_platforms != wanted_platforms:
@@ -181,6 +184,32 @@ def cross_check(manifest, expected):
         manifest.platform,
         "; ".join(problems),
     )
+
+def tool_conflict_error(manifest):
+    """Refuses two selections that declare one tool name for different targets (pure).
+
+    The hub names a tool once, so the second launcher would be unreachable.
+
+    Args:
+        manifest: the parse_manifest() manifest.
+
+    Returns:
+        error string naming the tool and both selections, "" when fine.
+    """
+    first = {}
+    for tool in manifest.tools:
+        seen = first.get(tool.name)
+        if seen == None:
+            first[tool.name] = tool
+        elif seen.target_path != tool.target_path:
+            return "tool '{}' is declared by selection '{}' and by selection '{}' with different targets ('{}' and '{}'); bind it from one selection only".format(
+                tool.name,
+                seen.selection,
+                tool.selection,
+                seen.target_path,
+                tool.target_path,
+            )
+    return ""
 
 def windows_link_error(manifest):
     """Refuses a windows platform whose manifest lists links (pure; C-RO-13, V-49).
@@ -350,13 +379,16 @@ def _ocx_set_repo_impl(rctx):
     err = windows_link_error(manifest)
     if err:
         fail("rules_ocx: " + err)
-    if attrs.expected_tools or attrs.expected_available_platforms:
-        err = cross_check(manifest, struct(
-            tools = [row.split(":", 1) for row in attrs.expected_tools],
-            available_platforms = attrs.expected_available_platforms,
-        ))
-        if err:
-            fail("rules_ocx: " + err)
+    err = cross_check(manifest, struct(
+        platform = attrs.platform,
+        tools = [row.split(":", 1) for row in attrs.expected_tools],
+        available_platforms = attrs.expected_available_platforms,
+    ))
+    if err:
+        fail("rules_ocx: " + err)
+    err = tool_conflict_error(manifest)
+    if err:
+        fail("rules_ocx: " + err)
 
     stashed = reserved_moves(manifest)
     if stashed.error:

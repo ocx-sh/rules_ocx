@@ -5,7 +5,7 @@
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
 load("//ocx/private:repo_utils.bzl", "make_isolated_ocx_env")
-load("//ocx/private:set_repo.bzl", "build_file_content", "cross_check", "package_pinned", "reserved_moves", "vendor_args", "vendor_failure", "windows_link_error")
+load("//ocx/private:set_repo.bzl", "build_file_content", "cross_check", "package_pinned", "reserved_moves", "tool_conflict_error", "vendor_args", "vendor_failure", "windows_link_error")
 load("//ocx/private:set_rules.bzl", "OcxSetInfo", "make_ocx_tool_rule", "ocx_set", "ocx_set_toolchain")
 load("//ocx/private:vendor_manifest.bzl", "parse_manifest")
 load(":testdata/vendor_manifest_example.bzl", "EXAMPLE")
@@ -145,16 +145,40 @@ def _failure_test_impl(ctx):
 def _cross_check_test_impl(ctx):
     env = unittest.begin(ctx)
     m = _manifest()
-    ok = struct(tools = [["cmake", "binary"]], available_platforms = m.available_platforms)
+    ok = struct(platform = m.platform, tools = [["cmake", "binary"]], available_platforms = m.available_platforms)
     asserts.equals(env, "", cross_check(m, ok))
-    tampered = struct(tools = [["cmak3", "binary"]], available_platforms = m.available_platforms)
+    tampered = struct(platform = m.platform, tools = [["cmak3", "binary"]], available_platforms = m.available_platforms)
     asserts.true(env, "bazel mod deps --lockfile_mode=update" in cross_check(m, tampered))
-    kind = struct(tools = [["cmake", "entrypoint"]], available_platforms = m.available_platforms)
+    kind = struct(platform = m.platform, tools = [["cmake", "entrypoint"]], available_platforms = m.available_platforms)
     asserts.true(env, "bazel mod deps --lockfile_mode=update" in cross_check(m, kind), "a kind difference")
-    platforms = struct(tools = [["cmake", "binary"]], available_platforms = ["darwin/arm64"])
+    platforms = struct(platform = m.platform, tools = [["cmake", "binary"]], available_platforms = ["darwin/arm64"])
     asserts.true(env, "bazel mod deps --lockfile_mode=update" in cross_check(m, platforms), "available_platforms difference")
-    unsorted = struct(tools = [["cmake", "binary"]], available_platforms = list(reversed(m.available_platforms)))
+    unsorted = struct(platform = m.platform, tools = [["cmake", "binary"]], available_platforms = list(reversed(m.available_platforms)))
     asserts.equals(env, "", cross_check(m, unsorted), "order is not part of the fact")
+
+    # The manifest must be for the platform asked for, not the one it claims.
+    other = struct(platform = "darwin/arm64", tools = [["cmake", "binary"]], available_platforms = m.available_platforms)
+    asserts.true(env, "darwin/arm64" in cross_check(m, other) and m.platform in cross_check(m, other), "a manifest for another platform")
+
+    # An empty record is a record: a manifest holding tools disagrees with it.
+    empty = struct(platform = m.platform, tools = [], available_platforms = [])
+    asserts.true(env, cross_check(m, empty) != "", "empty expectations are still checked")
+    return unittest.end(env)
+
+def _tool_conflict_test_impl(ctx):
+    env = unittest.begin(ctx)
+    asserts.equals(env, "", tool_conflict_error(_manifest()), "control: one selection")
+
+    def second(target_path):
+        def mutate(raw):
+            raw["selections"].append(dict(raw["selections"][0], id = "extra"))
+            raw["tools"].append(dict(raw["tools"][0], selection = "extra", target_path = target_path, launcher_path = "selections/extra/shells/default/bin/cmake"))
+
+        return tool_conflict_error(_manifest(_mutated(mutate)))
+
+    err = second(_PKG + "/content/bin/other")
+    asserts.true(env, "cmake" in err and "'default'" in err and "'extra'" in err, "names the tool and both selections: " + err)
+    asserts.equals(env, "", second(_PKG + "/content/bin/cmake"), "the same target twice is not a conflict")
     return unittest.end(env)
 
 def _windows_link_test_impl(ctx):
@@ -224,6 +248,7 @@ build_file_golden_test = unittest.make(_build_file_golden_test_impl)
 build_file_reserved_test = unittest.make(_build_file_reserved_test_impl)
 build_file_quoting_test = unittest.make(_build_file_quoting_test_impl)
 cross_check_test = unittest.make(_cross_check_test_impl)
+tool_conflict_test = unittest.make(_tool_conflict_test_impl)
 pinned_test = unittest.make(_pinned_test_impl)
 failure_test = unittest.make(_failure_test_impl)
 windows_link_test = unittest.make(_windows_link_test_impl)
@@ -348,6 +373,7 @@ def set_repo_test_suite(name):
         build_file_reserved_test,
         build_file_quoting_test,
         cross_check_test,
+        tool_conflict_test,
         pinned_test,
         failure_test,
         windows_link_test,
