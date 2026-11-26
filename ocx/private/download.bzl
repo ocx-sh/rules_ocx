@@ -93,6 +93,7 @@ def fetch_ocx_binary(ctx, version, triple = "", dist_manifest = None):
     if request.url:
         local = "local/" + bin_name
         ctx.download(request.url, local, sha256 = request.sha256, executable = True)
+
         # The same scratch environment as every other ocx run: no ambient OCX_* and a fresh OCX_HOME.
         env = manifest_env(str(ctx.path("local_version_home")), "", True, False, False, "")
         reported = ctx.execute([ctx.path(local), "version"], environment = env, timeout = 30)
