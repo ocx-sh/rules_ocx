@@ -40,7 +40,6 @@ jobs:
           bazel-cache: read
           cache-read-auth: ${{ secrets.BAZEL_CACHE_READ_AUTH }}
           otel-auth: ${{ secrets.OTEL_OTLP_AUTH }}
-      - uses: ./.github/actions/ocx-under-test
       - run: task ci:deep
       - name: Push JUnit telemetry
         if: always()

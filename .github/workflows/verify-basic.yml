@@ -48,7 +48,6 @@ jobs:
         with:
           groups: default,test
           otel-auth: ${{ secrets.OTEL_OTLP_AUTH }}
-      - uses: ./.github/actions/ocx-under-test
       - run: task ci:test
       - name: Push JUnit telemetry
         if: always()
@@ -82,9 +81,6 @@ jobs:
           cache-read-auth: ${{ !(github.event_name == 'push' && github.ref == 'refs/heads/main') && secrets.BAZEL_CACHE_READ_AUTH || '' }}
           cache-write-auth: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') && secrets.BAZEL_CACHE_WRITE_AUTH || '' }}
           otel-auth: ${{ secrets.OTEL_OTLP_AUTH }}
-      - uses: ./.github/actions/ocx-under-test
-        with:
-          cache-write: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
       - run: task ci:build
 
   docs:
