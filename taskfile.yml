@@ -164,8 +164,16 @@ tasks:
     cmds:
       - "{{.BAZEL}} fetch @dev_tools//:actionlint"
       - cmd: |
-          if OCX_OFFLINE=1 {{.BAZEL}} fetch --force @dev_tools//:actionlint; then
+          # Offline, the fact is recomputed (the recorded one is not read with --lockfile_mode=off) and ocx
+          # reports the package absent from the empty scratch home: `ocx vendor --manifest-only` exit 79.
+          out=$(mktemp)
+          if OCX_OFFLINE=1 {{.BAZEL}} fetch --force @dev_tools//:actionlint > "$out" 2>&1; then
             echo "expected the offline refetch without a store to fail" >&2
+            exit 1
+          fi
+          if ! grep -q "ocx vendor --manifest-only for '.*' failed (exit 79)" "$out"; then
+            echo "the offline refetch failed, but not as ocx vendor exit 79:" >&2
+            tail -n 30 "$out" >&2
             exit 1
           fi
           echo "offline failure mode OK"
