@@ -9,7 +9,10 @@
 - buildifier clean (`task format` / CI check). Attribute docs on every attr.
 - Repository rules own all host/env interaction: `repository_ctx.getenv`
   for every env var consulted (Bazel tracks invalidation), `watch()` labels
-  they read. Module extension impls stay pure: no os, no env, no downloads.
+  they read. Module extension impls read `module_ctx.os`, the tag's `ocx.lock`
+  and the `OCX_INSTALL_*` variables, download ocx and run
+  `ocx vendor --manifest-only`, only to compute facts that miss; nothing else
+  (AGENTS.md invariant 3).
 - Parse only documented ocx `--format json` shapes. Never parse plain-text
   output, never read OCX_HOME layout directly. Three exceptions: execing
   rendered absolute paths returned by the CLI; the config tiers

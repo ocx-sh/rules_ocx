@@ -176,7 +176,7 @@ bundle_tag = "latest"
 [[rule]]
 name = "starlark"
 path = "./agent-config/starlark.md"
-hash = "sha256:b6cee0322d4ac4b690aba9361c79ed0213fbda48115484a5f329bb5622f88d02"
+hash = "sha256:44766987a7600adcaf1ce96e485ec2fa3258c42958e6ef3b3f016d31f9778316"
 
 [[rule]]
 name = "typescript-packaging"
