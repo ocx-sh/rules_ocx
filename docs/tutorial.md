@@ -55,6 +55,7 @@ Pin Bazel 9 by writing `9.2.0` into `.bazelversion`.
 
 On Windows, put `common:windows --enable_runfiles` in a `.bazelrc`.
 The tools look for their files in the runfiles tree, and without it they exit 78.
+If a tool fails to start on a long path, see [Windows: path length](guides/cross-platform.md#windows-path-length).
 
 ## Write the test
 

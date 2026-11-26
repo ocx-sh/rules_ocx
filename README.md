@@ -17,7 +17,8 @@ the `manifest.json` that `ocx vendor` writes. The durable contracts are the
 - An `ocx` that has the `vendor` command. rules_ocx downloads a pinned `ocx`
   itself and runs `ocx vendor` for every set.
 - On Windows, `--enable_runfiles`. The launcher looks for its files in the
-  runfiles tree and exits 78 without it.
+  runfiles tree and exits 78 without it. Long paths also matter there: see
+  [Windows: path length](docs/guides/cross-platform.md#windows-path-length).
 - `platforms` on every `ocx.project` and `ocx.package` tag.
 
 ## Quick start
