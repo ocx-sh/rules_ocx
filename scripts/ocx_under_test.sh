@@ -56,7 +56,16 @@ if [[ -n "${GITHUB_TOKEN:-}" ]]; then
   export OCX_AUTH_ghcr_io_TOKEN="$GITHUB_TOKEN"
 fi
 # A policy-covered pull verifies the signature before it downloads and fails closed.
-pulled="$("${OCX:-ocx}" --config "$config" --format json package pull "$identifier" | jq -er '.paths | to_entries[0].value')"
+status=0
+report="$("${OCX:-ocx}" --config "$config" --format json package pull "$identifier")" || status=$?
+# The report maps the identifier to the package root: flat in ocx 0.6.5, under `paths` from 0.6.6. A failed pull
+# prints an error document instead, so read the key by identifier, never the first entry.
+pulled="$(printf '%s' "$report" | jq -r --arg id "$identifier" '(.paths // .)[$id] // empty' 2> /dev/null || true)"
+if [[ "$status" -ne 0 || -z "$pulled" ]]; then
+  detail="$(printf '%s' "$report" | jq -r '.error.message // empty' 2> /dev/null || true)"
+  echo "::error::ocx package pull of $identifier (exit $status) gave no package root; expected a JSON report mapping the identifier to a directory${detail:+: $detail}" >&2
+  exit 1
+fi
 binary="$(find "$pulled/content" -type f \( -name ocx -o -name ocx.exe \) -print -quit)"
 if [[ -z "$binary" ]]; then
   echo "::error::no ocx binary in the pulled package" >&2
