@@ -1,0 +1,48 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The OCX Authors
+
+"""The vendor manifest example of the system design, as text (parity-checked against the .json)."""
+
+visibility(["//ocx/tests"])
+
+EXAMPLE = """{
+  "schema_version": 1,
+  "content": "present",
+  "platform": "linux/amd64+libc.glibc",
+  "available_platforms": ["darwin/arm64", "linux/amd64+libc.glibc", "windows/amd64"],
+  "vendor_id": "sha256:0b5f2a4e9c7d3b1a0b5f2a4e9c7d3b1a0b5f2a4e9c7d3b1a0b5f2a4e9c7d3b1a",
+  "dir_token": "@VENDOR_DIR@",
+  "packages": [
+    {
+      "identifier": "ocx.sh/kitware/cmake:3.31.6@sha256:1f2e3d4c5b6a79881f2e3d4c5b6a79881f2e3d4c5b6a79881f2e3d4c5b6a7988",
+      "digest": "sha256:1f2e3d4c5b6a79881f2e3d4c5b6a79881f2e3d4c5b6a79881f2e3d4c5b6a7988",
+      "package_dir": "packages/ocx.sh/sha256/1f/2e3d4c5b6a79881f2e3d4c5b6a7988",
+      "content_dir": "packages/ocx.sh/sha256/1f/2e3d4c5b6a79881f2e3d4c5b6a7988/content",
+      "dependencies": [],
+      "names_declared": true,
+      "entrypoints": [],
+      "tree": {
+        "files": [{"path": "packages/ocx.sh/sha256/1f/2e3d4c5b6a79881f2e3d4c5b6a7988/content/bin/cmake", "executable": true}],
+        "links": [{"path": "packages/ocx.sh/sha256/1f/2e3d4c5b6a79881f2e3d4c5b6a7988/content/bin/cmake3", "target": "cmake"}],
+        "link_free_dirs": ["packages/ocx.sh/sha256/1f/2e3d4c5b6a79881f2e3d4c5b6a7988/content/share"]
+      }
+    }
+  ],
+  "environments": [
+    {
+      "id": "selection:default",
+      "scope": {"type": "selection", "selection": "default"},
+      "items": [
+        {"key": "PATH", "value": "@VENDOR_DIR@/packages/ocx.sh/sha256/1f/2e3d4c5b6a79881f2e3d4c5b6a7988/content/bin", "kind": "path"},
+        {"key": "CMAKE_ROOT", "value": "@VENDOR_DIR@/packages/ocx.sh/sha256/1f/2e3d4c5b6a79881f2e3d4c5b6a7988/content/share/cmake-3.31", "kind": "constant"}
+      ]
+    }
+  ],
+  "selections": [
+    {"id": "default", "groups": [], "bindings": ["cmake"], "roots": ["sha256:1f2e3d4c5b6a79881f2e3d4c5b6a79881f2e3d4c5b6a79881f2e3d4c5b6a7988"], "environment": "selection:default", "launcher_dir": "selections/default/shells/default/bin"}
+  ],
+  "tools": [
+    {"name": "cmake", "selection": "default", "kind": "binary", "package": "sha256:1f2e3d4c5b6a79881f2e3d4c5b6a79881f2e3d4c5b6a79881f2e3d4c5b6a7988", "environment": "selection:default", "target_path": "packages/ocx.sh/sha256/1f/2e3d4c5b6a79881f2e3d4c5b6a7988/content/bin/cmake", "launcher_path": "selections/default/shells/default/bin/cmake"}
+  ]
+}
+"""

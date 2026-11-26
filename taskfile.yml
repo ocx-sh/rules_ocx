@@ -5,6 +5,10 @@ includes:
   baseline:
     taskfile: ./taskfiles/baseline.taskfile.yml
     flatten: true
+  rig:
+    taskfile: ./taskfiles/rig.taskfile.yml
+  guard:
+    taskfile: ./taskfiles/guard.taskfile.yml
 
 vars:
   # bazelisk lives in both the test and build groups (the verify-basic test and build jobs pull one each).
@@ -12,14 +16,10 @@ vars:
   BAZEL_BUILD: ocx exec -g build -- bazelisk
   EXAMPLES: examples/project examples/package examples/cross_platform
   # Bazel versions the deep tier covers; rolling is forward-compat early warning only (never blocks).
-  BAZEL_VERSIONS: 8.7.0 9.x
+  BAZEL_VERSIONS: 9.x
   # Remote-cache tuning (--config=ci) only on CI; a laptop keeps its own output base settings.
   CI_CFG:
     sh: if [ -n "${CI:-}" ]; then echo --config=ci; fi
-  # Docs freshness (//docs) only matches the pinned dev Bazel: stardoc emits an extra `repo_mapping`
-  # row per repository rule on Bazel 9 and not on 8, so it is excluded on any other USE_BAZEL_VERSION.
-  DOCS_EXCLUDE:
-    sh: case "${USE_BAZEL_VERSION:-9}" in 9*) ;; *) echo "-//docs/..." ;; esac
 
 tasks:
   default:
@@ -40,18 +40,20 @@ tasks:
     desc: Lint and format check (buildifier, license headers, links, dist snapshot, guards)
     cmds:
       - task: lint
-      - task: pins:check
+      - task: guard:check
+      - task: guard:test
 
   ci:test:
     desc: Basic-tier Bazel tests (--config=basic); JUnit copied to target/reports/junit/
     cmds:
       - defer: { task: junit:collect, vars: { DIR: ".", PREFIX: basic } }
-      - "{{.BAZEL}} test --config=basic {{.CI_CFG}} --verbose_test_summary -- //... {{.DOCS_EXCLUDE}}"
+      - "{{.BAZEL}} test --config=basic {{.CI_CFG}} --verbose_test_summary -- //..."
+      - task: test:install-binary
 
   ci:build:
     desc: Build every Bazel target
     cmds:
-      - "{{.BAZEL_BUILD}} build {{.CI_CFG}} -- //... {{.DOCS_EXCLUDE}}"
+      - "{{.BAZEL_BUILD}} build {{.CI_CFG}} -- //..."
 
   ci:docs:
     desc: Site build and checks, budget unit test and the Lighthouse gate
@@ -61,7 +63,7 @@ tasks:
       - task: site:lighthouse
 
   ci:deep:
-    desc: Nightly tier — full tests per Bazel version, examples, BCR parity, pin completeness, offline determinism
+    desc: Nightly tier — full tests per Bazel version, examples, BCR parity, offline determinism
     cmds:
       - for: { var: BAZEL_VERSIONS }
         task: deep:test
@@ -71,31 +73,23 @@ tasks:
         ignore_error: true
       - task: deep:examples
       - task: deep:bcr-parity
-      - task: pins:check
       - task: deep:offline
 
   deep:test:
     internal: true
     env:
       USE_BAZEL_VERSION: "{{.BAZEL_VERSION}}"
-    vars:
-      DOCS_EXCLUDE:
-        sh: case "{{.BAZEL_VERSION}}" in 9*) ;; *) echo "-//docs/..." ;; esac
     cmds:
       - defer: { task: junit:collect, vars: { DIR: ".", PREFIX: "deep-{{.BAZEL_VERSION}}" } }
-      - "{{.BAZEL}} test --config=deep {{.CI_CFG}} --verbose_test_summary -- //... {{.DOCS_EXCLUDE}}"
+      - "{{.BAZEL}} test --config=deep {{.CI_CFG}} --verbose_test_summary -- //..."
 
-  # Live ocx.sh registry; Bazel 9 examples run on Linux only (bounds the registry fan-out).
+  # Live ocx.sh registry.
   deep:examples:
     internal: true
     cmds:
       - for: { var: EXAMPLES }
         task: deep:example
-        vars: { EXAMPLE: "{{.ITEM}}", BAZEL_VERSION: 8.7.0 }
-      - for: { var: EXAMPLES }
-        task: deep:example
         vars: { EXAMPLE: "{{.ITEM}}", BAZEL_VERSION: 9.x }
-        if: '{{eq OS "linux"}}'
 
   deep:example:
     internal: true
@@ -138,27 +132,6 @@ tasks:
       - curl -fsSL -o "${RUNNER_TEMP:-/tmp}/bazelisk-x64" https://github.com/bazelbuild/bazelisk/releases/download/v1.29.0/bazelisk-darwin-amd64
       - chmod +x "${RUNNER_TEMP:-/tmp}/bazelisk-x64"
       - arch -x86_64 "${RUNNER_TEMP:-/tmp}/bazelisk-x64" build //...
-
-  # Deterministic, arch-independent guard for the class of bug that broke the BCR macOS presubmit: every
-  # ocx.package `pins` map must list all four BCR platforms.
-  pins:check:
-    desc: Every ocx.package pins map in e2e/bzlmod and examples/package covers all four BCR platforms
-    cmds:
-      - |
-        rc=0
-        for f in e2e/bzlmod/MODULE.bazel examples/package/MODULE.bazel; do
-          blocks=$(grep -c 'pins = {' "$f")
-          for p in darwin/amd64 darwin/arm64 linux/amd64 windows/amd64; do
-            # `.` stands for the quote: an embedded " in a grep argument is lost on Windows (Git's grep).
-            n=$(grep -c "^ *.$p.:" "$f") || n=0
-            if [ "$n" -ne "$blocks" ]; then
-              echo "FAIL $f: platform '$p' appears $n time(s), expected $blocks (one per pins block)"
-              rc=1
-            fi
-          done
-          [ "$rc" -ne 0 ] || echo "OK $f ($blocks pins block(s), all four platforms present)"
-        done
-        exit "$rc"
 
   # Hermetic offline behaviour; a network-backed cache would mask it. Linux only (one runner is enough).
   deep:offline:
@@ -252,6 +225,11 @@ tasks:
     desc: Unit tests + docs freshness (no network)
     cmds:
       - "{{.BAZEL}} test //..."
+
+  test:install-binary:
+    desc: Local-ocx install path (V-51) — hash check, copy, immunity to later edits (Linux only)
+    cmds:
+      - BAZEL=bazelisk ocx exec -g test -- bash e2e/install_binary/run.sh
 
   test:examples:
     desc: Example workspaces — integration tests against live ocx.sh

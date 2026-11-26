@@ -4,7 +4,7 @@
 """Unit tests for ocx/private/platforms.bzl."""
 
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
-load("//ocx/private:platforms.bzl", "host_info", "ocx_platform_constraints", "slug")
+load("//ocx/private:platforms.bzl", "host_info", "slug")
 
 def _host_info_test_impl(ctx):
     env = unittest.begin(ctx)
@@ -31,30 +31,15 @@ def _host_info_test_impl(ctx):
 
     return unittest.end(env)
 
-def _mappings_test_impl(ctx):
+def _slug_test_impl(ctx):
     env = unittest.begin(ctx)
     asserts.equals(env, "linux_arm64", slug("linux/arm64"))
     asserts.equals(env, "linux_arm64_libc_musl", slug("linux/arm64+libc.musl"))
     asserts.equals(env, "linux_amd64", slug("Linux//AMD64__"))  # lower + collapse + strip
-    asserts.equals(
-        env,
-        ["@platforms//os:linux", "@platforms//cpu:aarch64"],
-        ocx_platform_constraints("linux/arm64+libc.musl"),
-    )
-    asserts.equals(
-        env,
-        ["@platforms//os:osx", "@platforms//cpu:x86_64"],
-        ocx_platform_constraints("darwin/amd64"),
-    )
-    asserts.equals(
-        env,
-        ["@platforms//os:windows", "@platforms//cpu:x86_64"],
-        ocx_platform_constraints("windows/amd64"),
-    )
     return unittest.end(env)
 
 host_info_test = unittest.make(_host_info_test_impl)
-mappings_test = unittest.make(_mappings_test_impl)
+slug_test = unittest.make(_slug_test_impl)
 
 def platforms_test_suite(name):
     """Instantiates the platforms.bzl test suite.
@@ -65,5 +50,5 @@ def platforms_test_suite(name):
     unittest.suite(
         name,
         host_info_test,
-        mappings_test,
+        slug_test,
     )

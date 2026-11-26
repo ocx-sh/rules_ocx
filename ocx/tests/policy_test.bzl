@@ -2,16 +2,13 @@
 # Copyright 2026 The OCX Authors
 
 """Unit tests for the `ocx.policy` tier: the classified env-var table, the
-root-only policy reducer, and the pure argv builders that carry its decisions
-into `ocx package install`, `ocx pull` and the lazy project launcher."""
+root-only policy reducer, and the kwargs that carry its decisions into every
+repository rule."""
 
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
-load("//ocx/private:package.bzl", "install_args")
-load("//ocx/private:project.bzl", "env_args", "lazy_project_command", "pull_args")
 load(
     "//ocx/private:repo_utils.bzl",
     "CONFIG_ATTRS",
-    "EAGER_LAZY_MODE",
     "OCX_ENV_CLASSES",
     "POLICY_ATTRS",
     "POLICY_DUPLICATE_MSG",
@@ -64,8 +61,8 @@ def _env_classes_table_test_impl(ctx):
     asserts.equals(env, _CLASS_SIZES, counts)
     asserts.equals(env, _HERMETIC, hermetic)
 
-    # OCX_HOME is resolved, never classified: it is computed from the host and
-    # `isolated_home`, and a row here would make it forwardable.
+    # OCX_HOME is resolved, never classified: it is always a directory inside
+    # the repository being fetched, and a row here would make it forwardable.
     asserts.false(env, "OCX_HOME" in OCX_ENV_CLASSES, "OCX_HOME belongs to no class")
     return unittest.end(env)
 
@@ -153,10 +150,9 @@ def _resolve_policy_test_impl(ctx):
 def _policy_kwargs_test_impl(ctx):
     """C-004/C-006: the resolved policy reaches every repo rule, whole.
 
-    extensions.bzl splats this dict at all three ocx_project_repo /
-    ocx_package_repo declarations, so a policy attr the dict forgets is an
-    attr no repository ever receives — and, since every default is the safe
-    value, a silent one.
+    extensions.bzl splats this dict at every repository declaration that runs
+    ocx, so a policy attr the dict forgets is an attr no repository ever
+    receives — and, since every default is the safe value, a silent one.
     """
     env = unittest.begin(ctx)
 
@@ -186,126 +182,10 @@ def _policy_kwargs_test_impl(ctx):
     )
     return unittest.end(env)
 
-# The argv prefix `_ocx_package_repo_impl` hands install_args(): root flags,
-# the JSON format selector, then the `package` subcommand group.
-_JSON_PKG = ["--format", "json", "package"]
-
-_PKG = "ocx.sh/jqlang/jq:latest@sha256:" + "a" * 64
-
-def _install_args_test_impl(ctx):
-    """C-007: `ocx package install` carries no verify flag, under any policy.
-
-    The posture rides on OCX_NO_VERIFY, which `make_ocx_env()` writes on every
-    invocation — ocx's own documented equivalent of `--no-verify`.
-    """
-    env = unittest.begin(ctx)
-
-    # The platform selector sits before the reference: anything placed after
-    # the positional would be read as part of it.
-    asserts.equals(
-        env,
-        _JSON_PKG + ["install", _PKG],
-        install_args(_JSON_PKG, [], _PKG),
-    )
-    asserts.equals(
-        env,
-        _JSON_PKG + ["install", "-p", "linux/amd64", _PKG],
-        install_args(_JSON_PKG, ["-p", "linux/amd64"], _PKG),
-    )
-
-    # Neither spelling of the flag ever appears — the exact-argv assertions
-    # above already pin that, but this fails loudly if the builder grows one.
-    for platform_arg in [[], ["-p", "linux/amd64"]]:
-        argv = install_args(_JSON_PKG, platform_arg, _PKG)
-        asserts.false(env, "--no-verify" in argv, "install argv carries --no-verify")
-        asserts.false(env, "--verify" in argv, "install argv carries --verify")
-    return unittest.end(env)
-
-def _pull_args_test_impl(ctx):
-    """C-007: `ocx pull` carries no verify flag at all.
-
-    The project tier's posture is the pinned OCX_NO_VERIFY instead, attached
-    once on the shared manager in ocx's own Context::try_init.
-    """
-    env = unittest.begin(ctx)
-    project = ["--project", "/w/ocx.toml"]
-    asserts.equals(env, project + ["pull"] + EAGER_LAZY_MODE, pull_args(project, [], []))
-
-    # Groups stay behind the lazy-mode refusal, one comma-joined -g.
-    asserts.equals(
-        env,
-        project + ["pull", "--platform", "linux/amd64"] + EAGER_LAZY_MODE + ["-g", "dev,ci"],
-        pull_args(project, ["--platform", "linux/amd64"], ["dev", "ci"]),
-    )
-    return unittest.end(env)
-
-def _env_args_test_impl(ctx):
-    """0.6.1+: the eager `ocx env` composes store paths, never toolchain links.
-
-    Without `--pinned` a project `env` answers with
-    `<project>/.ocx/toolchain/links/…` — a tree nothing renders beside the
-    user's ocx.toml here, so every baked launcher would point at nothing.
-    """
-    env = unittest.begin(ctx)
-    project = ["--project", "/w/ocx.toml"]
-    asserts.equals(
-        env,
-        ["--format", "json"] + project + ["env", "--pinned"] + EAGER_LAZY_MODE,
-        env_args(project, [], []),
-    )
-    asserts.equals(
-        env,
-        ["--format", "json"] + project + ["env", "--pinned", "--platform", "linux/arm64"] +
-        EAGER_LAZY_MODE + ["-g", "dev,ci"],
-        env_args(project, ["--platform", "linux/arm64"], ["dev", "ci"]),
-    )
-    return unittest.end(env)
-
-def _lazy_project_command_test_impl(ctx):
-    """C-015: the lazy project launcher re-enters `ocx exec`, not `ocx run`."""
-    env = unittest.begin(ctx)
-
-    # POSIX arm: runfiles-resolved fragments, so the script text is identical
-    # on every machine. The builder quotes nothing — the caller already did.
-    posix = lazy_project_command(
-        '"$(rlocation r+ocx_tool/ocx)"',
-        '"$(rlocation r+proj/ocx.toml)"',
-        ["-g", "'dev,ci'"],
-        "shellcheck",
-    )
-    asserts.equals(env, [
-        '"$(rlocation r+ocx_tool/ocx)"',
-        "--project",
-        '"$(rlocation r+proj/ocx.toml)"',
-        "exec",
-        "--pinned",
-        "-g",
-        "'dev,ci'",
-        "--",
-        "shellcheck",
-    ], posix)
-
-    # Windows arm: baked absolute paths, no groups.
-    asserts.equals(env, [
-        '"C:\\repo\\ocx.exe"',
-        "--project",
-        '"C:\\repo\\ocx.toml"',
-        "exec",
-        "--pinned",
-        "--",
-        "shellcheck",
-    ], lazy_project_command('"C:\\repo\\ocx.exe"', '"C:\\repo\\ocx.toml"', [], "shellcheck"))
-
-    return unittest.end(env)
-
 env_classes_table_test = unittest.make(_env_classes_table_test_impl)
 policy_exports_test = unittest.make(_policy_exports_test_impl)
 resolve_policy_test = unittest.make(_resolve_policy_test_impl)
 policy_kwargs_test = unittest.make(_policy_kwargs_test_impl)
-install_args_test = unittest.make(_install_args_test_impl)
-pull_args_test = unittest.make(_pull_args_test_impl)
-env_args_test = unittest.make(_env_args_test_impl)
-lazy_project_command_test = unittest.make(_lazy_project_command_test_impl)
 
 def policy_test_suite(name):
     """Instantiates the ocx.policy tier test suite.
@@ -319,8 +199,4 @@ def policy_test_suite(name):
         policy_exports_test,
         resolve_policy_test,
         policy_kwargs_test,
-        install_args_test,
-        pull_args_test,
-        env_args_test,
-        lazy_project_command_test,
     )

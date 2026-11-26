@@ -8,7 +8,7 @@ from repository rules — it never re-implements OCX internals in Starlark.
 module(
     name = "rules_ocx",
     version = "0.5.1",
-    bazel_compatibility = [">=8.0.0"],
+    bazel_compatibility = [">=9.0.0"],
 )
 
 bazel_dep(name = "bazel_skylib", version = "1.9.0")
@@ -30,5 +30,16 @@ ocx_dev.project(
     groups = ["lint"],
     ocx_lock = "//:ocx.lock",
     ocx_toml = "//:ocx.toml",
+    # The exec platforms the CI lanes run dev_tools_test on (ubuntu, macos-arm, windows).
+    platforms = [
+        "darwin/arm64",
+        "linux/amd64",
+        "windows/amd64",
+    ],
 )
 use_repo(ocx_dev, "dev_tools")
+
+register_toolchains(
+    "@dev_tools//:all",
+    dev_dependency = True,
+)
