@@ -26,7 +26,8 @@ package manager (https://ocx.sh, source at `../ocx`).
   cross-checks its real manifest against the fact (platform, tools, available
   platforms) and fails naming `bazel mod deps --lockfile_mode=update`.
 - **`@ocx_tool`**: pinned ocx binary, downloaded per the vendored
-  `dist/dist.json` (snapshot of https://setup.ocx.sh/dist.json),
+  `dist/dist.json` (snapshot of https://setup.ocx.sh/dist.json, releases
+  at or above the floor only; empty until the first release with `ocx vendor`),
   sha256-enforced. `MIN_OCX_VERSION` is the floor, the first ocx release
   whose `ocx vendor` writes manifest schema version 1; below it
   `ocx.download(version = …)` fails before any download. Mirror knobs (site
