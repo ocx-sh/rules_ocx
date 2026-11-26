@@ -1,0 +1,148 @@
+# Copyright 2026 The OCX Authors
+# SPDX-License-Identifier: Apache-2.0
+#
+# The remote-execution rig. Seeded from the S-B spike (images pinned by digest). Only nginx publishes ports;
+# executors (`runner-*`, the NativeLink worker) have no route to the registry. Run state lives under RIG_RUN_DIR
+# (default ./.run, gitignored); `rig:up` creates that tree (prepare_run_dir.sh) before compose starts.
+name: ${RIG_PROJECT:-rules-ocx-rig}
+
+x-bb-storage: &bb-storage ghcr.io/buildbarn/bb-storage:20261102T091443Z-ca3d8b4@sha256:fecab707a842ee1915f2eea06810a1eb2eacc876d498648c67ba32230717f212
+x-bb-worker: &bb-worker ghcr.io/buildbarn/bb-worker:20261102T094740Z-c9ba98c@sha256:ba07db89d5cd6ae750497a38037abe127426c771a55c8a3da48c4205b929a32a
+x-ubuntu: &ubuntu ghcr.io/catthehacker/ubuntu:act-22.04@sha256:dd7654ffb01d5b7b54b23b9ce928a1f7f2d08c7b3d7e320b6574b55d7ccde78b
+
+services:
+  nginx:
+    image: nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de
+    ports:
+      - "127.0.0.1:${RIG_PORT:-18500}:80"
+      - "127.0.0.1:${RIG_PORT_NL:-18502}:82"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ${RIG_RUN_DIR:-./.run}/logs:/logs
+    # One upstream socket per proxied gRPC stream: a 100000-file upload ran out of the default 1024 descriptors.
+    ulimits:
+      nofile: {soft: 65536, hard: 65536}
+    depends_on: [frontend, zot]
+
+  zot:
+    image: ghcr.io/project-zot/zot-linux-amd64:v2.1.23@sha256:b68f727fe35c1eb45b2ae91519dfb0e33192d69b5104882c3e7809b7146c4a02
+    expose: ["5000"]
+    volumes:
+      - ./zot/config.json:/etc/zot/config.json:ro
+      - ${RIG_RUN_DIR:-./.run}/state:/state:ro
+      - ${RIG_RUN_DIR:-./.run}/zot:/var/lib/zot
+
+  # ---- Buildbarn ----
+  frontend:
+    image: *bb-storage
+    command: [/config/frontend.jsonnet]
+    expose: ["8980", "9980"]
+    volumes: ["./buildbarn:/config:ro"]
+    depends_on: [storage-0, storage-1, scheduler]
+
+  storage-0: &storage
+    image: *bb-storage
+    command: [/config/storage.jsonnet]
+    expose: ["8981", "9980"]
+    volumes:
+      - ./buildbarn:/config:ro
+      - ${RIG_RUN_DIR:-./.run}/storage-0/ac:/storage-ac
+      - ${RIG_RUN_DIR:-./.run}/storage-0/cs:/storage-cs
+      - ${RIG_RUN_DIR:-./.run}/storage-0/cms:/storage-cms
+      - ${RIG_RUN_DIR:-./.run}/storage-0/fsac:/storage-fsac
+
+  storage-1:
+    <<: *storage
+    volumes:
+      - ./buildbarn:/config:ro
+      - ${RIG_RUN_DIR:-./.run}/storage-1/ac:/storage-ac
+      - ${RIG_RUN_DIR:-./.run}/storage-1/cs:/storage-cs
+      - ${RIG_RUN_DIR:-./.run}/storage-1/cms:/storage-cms
+      - ${RIG_RUN_DIR:-./.run}/storage-1/fsac:/storage-fsac
+
+  scheduler:
+    image: ghcr.io/buildbarn/bb-scheduler:20261102T094740Z-c9ba98c@sha256:50789bdae47ee83905c059f88adbf22c9253139883723f76fbed27def8b0c566
+    command: [/config/scheduler.jsonnet]
+    expose: ["8982", "8983", "8984", "9980"]
+    volumes: ["./buildbarn:/config:ro"]
+
+  # One-shot: copies bb_runner into /bb for both runners, then exits.
+  runner-installer:
+    image: ghcr.io/buildbarn/bb-runner-installer:20261102T094740Z-c9ba98c@sha256:3242e966d6de8a8d514db34e9e741b08f242200f23ad6094295915906acc26d5
+    volumes: ["${RIG_RUN_DIR:-./.run}/bb:/bb"]
+
+  worker-hardlinking:
+    image: *bb-worker
+    command: [/config/worker-ubuntu.jsonnet]
+    volumes:
+      - ./buildbarn:/config:ro
+      - ${RIG_RUN_DIR:-./.run}/worker-ubuntu:/worker
+    depends_on: [storage-0, storage-1, scheduler]
+
+  # No route anywhere: the runner reaches its worker through the unix socket in /worker.
+  runner-ubuntu:
+    image: *ubuntu
+    command: [sh, -c, "while ! test -f /bb/installed; do sleep 1; done; exec /bb/bb_runner /config/runner.jsonnet"]
+    network_mode: none
+    volumes:
+      - ./buildbarn:/config:ro
+      - ${RIG_RUN_DIR:-./.run}/bb:/bb:ro
+      - ${RIG_RUN_DIR:-./.run}/worker-ubuntu:/worker
+    depends_on: [runner-installer]
+
+  worker-noshell:
+    image: *bb-worker
+    command: [/config/worker-noshell.jsonnet]
+    volumes:
+      - ./buildbarn:/config:ro
+      - ${RIG_RUN_DIR:-./.run}/worker-noshell:/worker
+    depends_on: [storage-0, storage-1, scheduler]
+
+  # distroless/static has no shell, so bb_runner is the entrypoint itself and an action can only exec a static file.
+  runner-noshell:
+    image: gcr.io/distroless/static@sha256:8ce6dd87e9823c5b48dcfb2c8604714ccb351ce59607327bcc4957448da279b5
+    entrypoint: [/bb/bb_runner, /config/runner.jsonnet]
+    user: "0:0"
+    network_mode: none
+    volumes:
+      - ./buildbarn:/config:ro
+      - ${RIG_RUN_DIR:-./.run}/bb:/bb:ro
+      - ${RIG_RUN_DIR:-./.run}/worker-noshell:/worker
+    depends_on:
+      runner-installer:
+        condition: service_completed_successfully
+
+  # ---- NativeLink (compose profile `nativelink`) ----
+  nativelink:
+    profiles: [nativelink]
+    image: ghcr.io/tracemachina/nativelink:v1.9.0@sha256:581034ad4a180951f98585b0355922c8d5a4bc5b22fd6936517f1cd371302737
+    command: [/config/server.json5]
+    expose: ["50051", "50061"]
+    volumes:
+      - ./nativelink/server.json5:/config/server.json5:ro
+      - ${RIG_RUN_DIR:-./.run}/nativelink:/data
+    networks: [default, nl-exec]
+
+  # Runs actions itself, so a plain `network_mode: none` cannot reach the scheduler. It sits on an `internal: true`
+  # network shared with `nativelink` alone: no gateway, zot and nginx are not on it.
+  nativelink-worker:
+    profiles: [nativelink]
+    build: {context: ./nativelink, dockerfile: Dockerfile.worker}
+    command: [/config/worker.json5]
+    volumes:
+      - ./nativelink/worker.json5:/config/worker.json5:ro
+      - ${RIG_RUN_DIR:-./.run}/nativelink-worker:/worker
+    networks: [nl-exec]
+    depends_on: [nativelink]
+
+  # The offline legs (tests/test_offline.py) run Bazel here with the run tree mounted. No route anywhere.
+  # Ubuntu 24.04 (glibc 2.39): a locally built, glibc-linked ocx under test needs more than the 22.04 runner has.
+  client:
+    profiles: [client]
+    image: ubuntu:24.04@sha256:562111b88caa79c71391c0c4d3c2114a7d5c35915c20561fd893cb1e07929e6b
+    command: [sleep, infinity]
+    network_mode: none
+
+networks:
+  nl-exec:
+    internal: true

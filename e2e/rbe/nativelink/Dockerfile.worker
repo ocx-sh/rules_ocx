@@ -1,0 +1,5 @@
+# The worker runs actions itself, so it needs a userland (sh, find, curl for the no-route proof) beside the binary.
+FROM ghcr.io/tracemachina/nativelink:v1.9.0@sha256:581034ad4a180951f98585b0355922c8d5a4bc5b22fd6936517f1cd371302737 AS nl
+FROM ghcr.io/catthehacker/ubuntu@sha256:dd7654ffb01d5b7b54b23b9ce928a1f7f2d08c7b3d7e320b6574b55d7ccde78b
+COPY --from=nl /nix/store/lyizg8n9gsp1wg37xwn89fjd6f5mnv01-nativelink-x86_64-unknown-linux-musl-1.9.0/bin/nativelink /usr/local/bin/nativelink
+ENTRYPOINT ["/usr/local/bin/nativelink"]

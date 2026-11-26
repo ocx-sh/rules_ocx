@@ -1,0 +1,36 @@
+# Copyright 2026 The OCX Authors
+# SPDX-License-Identifier: Apache-2.0
+# Baseline workspace: rules_ocx 0.5.1 from its release archive over the seeded fixtures.
+# run_baseline.py renders this template into the run directory, filling the @...@ placeholders
+# (registry address, manifest pins from fixtures.json); nothing here is built in place.
+
+module(name = "rbe_baseline")
+
+bazel_dep(name = "rules_ocx", version = "0.5.1")
+
+# The release archive, not a local path: this column measures what a user of 0.5.1 gets.
+archive_override(
+    module_name = "rules_ocx",
+    integrity = "sha256-xG3IfMvniaQrOGlVoFE03MYbzzu8SRghwQwvyzIbWEA=",
+    strip_prefix = "rules_ocx-0.5.1",
+    urls = ["https://github.com/ocx-sh/rules_ocx/releases/download/v0.5.1/rules_ocx-v0.5.1.tar.gz"],
+)
+
+ocx = use_extension("@rules_ocx//ocx:extensions.bzl", "ocx")
+
+# Eager provisioning, one tag per platform so each platform's registry traffic is measured on its own.
+# isolated_home keeps the store inside the repository: 0.5.1 rejects it together with `bins`.
+@EAGER_TAGS@
+
+# Lazy provisioning (`bins`): launchers re-enter `ocx package exec` on whatever machine runs the action.
+# No isolated_home here: 0.5.1 rejects it together with bins ("rules_ocx: bins (lazy provisioning) is
+# incompatible with isolated_home — the store must be resolvable on whatever machine executes the launcher").
+# The lazy launcher's home is the scratch OCX_HOME run_baseline.py passes through --repo_env.
+ocx.package(
+    name = "lazy",
+    package = "@REGISTRY@/rig/tool:1.0.0",
+    bins = ["tool"],
+    pins = {"linux/amd64+libc.glibc": "@PIN_GLIBC@"},
+    platforms = ["linux/amd64+libc.glibc"],
+)
+use_repo(ocx, "lazy", "lazy_linux_amd64_libc_glibc", "ocx_tool", @EAGER_REPOS@)

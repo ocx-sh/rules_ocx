@@ -1,0 +1,18 @@
+# Copyright 2026 The OCX Authors
+# SPDX-License-Identifier: Apache-2.0
+
+# Eager: the tool's files are action inputs; nothing on the executor needs ocx or a registry.
+genrule(
+    name = "eager",
+    srcs = ["@eager_lg//:content"],
+    outs = ["eager.txt"],
+    cmd = "cat $(SRCS) | md5sum > $@",
+)
+
+# Lazy: the launcher runs ocx on the executor, which has to reach the registry.
+genrule(
+    name = "lazy",
+    outs = ["lazy.txt"],
+    cmd = "$(location @lazy//:tool) > $@",
+    tools = ["@lazy//:tool"],
+)
