@@ -5,6 +5,13 @@ load("@bazel_skylib//:bzl_library.bzl", "bzl_library")
 
 package(default_visibility = ["//visibility:public"])
 
+# The stardoc extraction in //docs names the two public files directly. Bazel 11 no longer exports a source file
+# implicitly, so say it.
+exports_files([
+    "defs.bzl",
+    "extensions.bzl",
+])
+
 bzl_library(
     name = "defs",
     srcs = ["defs.bzl"],
