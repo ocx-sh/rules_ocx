@@ -44,8 +44,10 @@ const escapeBareTags = (line) =>
     .join('');
 
 // Stardoc writes `<a id="X"></a>` above `## X`; the heading already carries id X, and a second
-// element with the same id is invalid HTML. Anchors whose id differs from the heading stay.
-const dropDuplicateAnchors = (text) => text.replace(/^<a id="([^"]+)"><\/a>\n+(?=#+ \1$)/gm, '');
+// element with the same id is invalid HTML. Anchors whose id differs from the heading stay, and so does one
+// with capitals (`OcxSetInfo`): the heading's own id is lowercased, so the anchor is the only element with it.
+const dropDuplicateAnchors = (text) =>
+  text.replace(/^(<a id="([^"]+)"><\/a>\n+)(?=#+ \2$)/gm, (m, anchor, id) => (id === id.toLowerCase() ? '' : m));
 
 export function port(page, text) {
   // Hand-written sources keep their H1 for GitHub; the front matter title renders it on the site.
@@ -77,15 +79,15 @@ export function splitDefs(text) {
   const parts = rules.map((body) => {
     const name = body.match(/^## (.+)$/m)[1];
     const lead = body.split('</pre>')[1]?.trim().split('\n')[0].replace(/[`*]/g, '').trim() || `Reference for ${name}.`;
-    return { name, body, lead };
+    return { name, slug: name.toLowerCase(), body, lead };
   });
   const home = new Map(); // anchor id -> page slug
-  for (const { name, body } of parts) for (const [, id] of body.matchAll(/<a id="([^"]+)"/g)) home.set(id, name);
+  for (const { slug, body } of parts) for (const [, id] of body.matchAll(/<a id="([^"]+)"/g)) home.set(id, slug);
   const fix = (slug, body) => body.replace(/(href="|\]\()#([^"')]+)/g, (m, pre, id) => (home.get(id) && home.get(id) !== slug ? `${pre}${BASE}defs/${home.get(id)}/#${id}` : m));
-  const list = parts.map(({ name, lead }) => `- [\`${name}\`](${BASE}defs/${name}/): ${lead}`).join('\n');
+  const list = parts.map(({ name, slug, lead }) => `- [\`${name}\`](${BASE}defs/${slug}/): ${lead}`).join('\n');
   return [
     { to: 'defs/index.md', title: 'Rules and macros', description: 'API reference for defs.bzl: the public repository rules and macros of rules_ocx.', text: `${intro.trimEnd()}\n\n${list}\n` },
-    ...parts.map(({ name, body, lead }) => ({ to: `defs/${name}.md`, title: name, description: lead.slice(0, 160), text: fix(name, body) })),
+    ...parts.map(({ name, slug, body, lead }) => ({ to: `defs/${slug}.md`, title: name, description: lead.slice(0, 160), text: fix(slug, body) })),
   ];
 }
 

@@ -45,7 +45,7 @@ export default defineConfig({
               collapsed: true,
               items: [
                 { label: 'Overview', link: '/defs/' },
-                ...['ocx_platform_constraints', 'ocx_download', 'ocx_package_hub', 'ocx_package_repo', 'ocx_project_repo'].map((n) => ({ label: n, link: `/defs/${n}/` })),
+                ...['ocx_set', 'ocx_set_toolchain', 'OcxSetInfo', 'make_ocx_tool_rule', 'ocx_download', 'ocx_hub_repo', 'ocx_set_repo'].map((n) => ({ label: n, link: `/defs/${n.toLowerCase()}/` })),
               ],
             },
             { label: 'Module extension', link: '/extensions/' },
