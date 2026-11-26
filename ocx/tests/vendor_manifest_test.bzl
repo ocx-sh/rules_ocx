@@ -286,6 +286,93 @@ tool_name_test = unittest.make(_tool_name_test_impl)
 tag_name_test = unittest.make(_tag_name_test_impl)
 link_chain_test = unittest.make(_link_chain_test_impl)
 
+# ---- Run 2 contract (C-RO-23): schema 2, record beside launcher, no fixed prefixes, index inputs. ----
+
+_PKG2 = "p/1f2e3d4c5b6a7988"
+
+def _v2_test_impl(ctx):
+    env = unittest.begin(ctx)
+    result = parse_manifest(EXAMPLE)
+    asserts.equals(env, "", result.error, "the schema 2 fixture parses")
+    m = result.manifest
+    asserts.equals(env, 2, m.schema_version)
+    asserts.equals(env, 2, len(m.packages))
+    asserts.equals(env, _PKG2 + "/c", m.packages[0].content_dir, "the short layout has no packages/ prefix")
+    asserts.equals(env, "sha256:9c8b7a6f5e4d3c2b9c8b7a6f5e4d3c2b9c8b7a6f5e4d3c2b9c8b7a6f5e4d3c2b", m.packages[0].index_digest)
+    asserts.equals(env, None, m.index_lookups, "no index_lookups without --index")
+    asserts.equals(env, "l", m.selections[0].launcher_dir)
+    return unittest.end(env)
+
+def _record_path_test_impl(ctx):
+    env = unittest.begin(ctx)
+    m = parse_manifest(EXAMPLE).manifest
+    tool = m.tools[0]
+    asserts.equals(env, "l/cmake", tool.launcher_path)
+    asserts.equals(env, "l/cmake.launch", tool.record_path, "the record path is read verbatim")
+    entry = m.packages[1].entrypoints[0]
+    asserts.equals(env, "p/5a0c1e9d2b7f3a4c/e/npm", entry.launcher_path)
+    asserts.equals(env, "p/5a0c1e9d2b7f3a4c/e/npm.launch", entry.record_path)
+
+    def without_launcher(raw):
+        raw["tools"][0].pop("launcher_path")
+        raw["tools"][0].pop("record_path")
+
+    bare = parse_manifest(_mutated(without_launcher))
+    asserts.equals(env, "", bare.error, "a tool may have neither")
+    asserts.equals(env, "", bare.manifest.tools[0].record_path, "no launcher, no record")
+    return unittest.end(env)
+
+def _record_beside_launcher_test_impl(ctx):
+    env = unittest.begin(ctx)
+    asserts.equals(env, "", parse_manifest(EXAMPLE).error, "control: the fixture parses")
+    moved = parse_manifest(_mutated(lambda raw: raw["tools"][0].update({"record_path": "l/sub/cmake.launch"})))
+    asserts.true(env, "record" in moved.error and "launcher" in moved.error, "a record outside its launcher's directory: " + moved.error)
+    alone = parse_manifest(_mutated(lambda raw: raw["tools"][0].pop("record_path")))
+    asserts.true(env, "record" in alone.error, "a launcher without its record: " + alone.error)
+    return unittest.end(env)
+
+def _v1_x5_test_impl(ctx):
+    env = unittest.begin(ctx)
+    result = parse_manifest(EXAMPLE.replace('"schema_version": 2', '"schema_version": 1'))
+    asserts.equals(env, "unsupported vendor manifest schema_version 1: this rules_ocx reads 2 — pin an ocx and rules_ocx pair that agree", result.error, "X5")
+    asserts.equals(env, None, result.manifest)
+    return unittest.end(env)
+
+def _no_fixed_prefix_test_impl(ctx):
+    env = unittest.begin(ctx)
+    asserts.equals(env, "", parse_manifest(EXAMPLE).error, "control")
+
+    # Every path moves under another top-level name: the parser relates fields to each other, it names no prefix.
+    moved = parse_manifest(EXAMPLE.replace('"p/', '"v/'))
+    asserts.equals(env, "", moved.error, "a package directory under another top-level name parses: " + moved.error)
+    outside = parse_manifest(_mutated(lambda raw: raw["packages"][0].update({"content_dir": "p/elsewhere/c"})))
+    asserts.true(env, outside.error != "" and "content_dir" in outside.error, "content_dir must stay under package_dir: " + outside.error)
+    return unittest.end(env)
+
+def _index_lookups_test_impl(ctx):
+    env = unittest.begin(ctx)
+    asserts.equals(env, "", parse_manifest(EXAMPLE).error, "control")
+    missing = parse_manifest(EXAMPLE, index_name = "tool")
+    asserts.equals(env, "rules_ocx: 'tool': the manifest lists no index inputs; rules_ocx needs an ocx that reports them (MR-9)", missing.error, "X9")
+
+    def with_lookups(path):
+        return _mutated(lambda raw: raw.update({"index_lookups": [{"path": path, "found": True}, {"path": "registry.example/config.json", "found": False}]}))
+
+    ok = parse_manifest(with_lookups("registry.example/p/rig/tool.json"), index_name = "tool")
+    asserts.equals(env, "", ok.error)
+    asserts.equals(env, [struct(path = "registry.example/p/rig/tool.json", found = True), struct(path = "registry.example/config.json", found = False)], ok.manifest.index_lookups)
+    asserts.equals(env, "", parse_manifest(with_lookups("registry.example/p/rig/tool.json")).error, "without an index name the field is optional")
+    bad = parse_manifest(with_lookups("../x"), index_name = "tool")
+    asserts.equals(env, "rules_ocx: 'tool': the manifest names the snapshot path '../x', which is not a plain relative path", bad.error, "X8")
+    return unittest.end(env)
+
+v2_test = unittest.make(_v2_test_impl)
+record_path_test = unittest.make(_record_path_test_impl)
+record_beside_launcher_test = unittest.make(_record_beside_launcher_test_impl)
+v1_x5_test = unittest.make(_v1_x5_test_impl)
+no_fixed_prefix_test = unittest.make(_no_fixed_prefix_test_impl)
+index_lookups_test = unittest.make(_index_lookups_test_impl)
+
 def vendor_manifest_test_suite(name):
     """Instantiates the vendor_manifest.bzl test suite.
 
@@ -308,4 +395,10 @@ def vendor_manifest_test_suite(name):
         tool_name_test,
         tag_name_test,
         link_chain_test,
+        v2_test,
+        record_path_test,
+        record_beside_launcher_test,
+        v1_x5_test,
+        no_fixed_prefix_test,
+        index_lookups_test,
     )

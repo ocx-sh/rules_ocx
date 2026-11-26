@@ -242,6 +242,92 @@ def _vendor_args_test_impl(ctx):
     asserts.true(env, vendor_args(struct(tier = "package", out = "o", platform = "p", groups = [], bindings = [], package = "")).error != "")
     return unittest.end(env)
 
+# ---- Run 2 contract (C-RO-21, C-RO-22): the root digest clause, per-kind tails, empty expected values, vendor argv per kind. ----
+
+_ROOT = "sha256:1f2e3d4c5b6a79881f2e3d4c5b6a79881f2e3d4c5b6a79881f2e3d4c5b6a7988"
+_OTHER = "sha256:" + "a" * 64
+
+def _one_root(raw):
+    # The root digest is the only root of the only selection.
+    raw["selections"][0]["roots"] = [_ROOT]
+
+def _root_manifest():
+    return _manifest(_mutated(_one_root))
+
+def _expect(m, kind, digest = _ROOT, available = None, hub = "jq"):
+    return struct(
+        platform = m.platform,
+        tools = [["cmake", "binary"], ["node", "binary"], ["npm", "entrypoint"]],
+        available_platforms = m.available_platforms if available == None else available,
+        digest = digest,
+        kind = kind,
+        hub = hub,
+    )
+
+def _root_digest_test_impl(ctx):
+    env = unittest.begin(ctx)
+    m = _root_manifest()
+    asserts.equals(env, "", cross_check(m, _expect(m, "tag", available = [])), "control: the recorded digest matches")
+    clause = "the root package is {} where the fact recorded {}".format(_ROOT, _OTHER)
+    for kind in ["tag", "pinned"]:
+        err = cross_check(m, _expect(m, kind, digest = _OTHER, available = []))
+        asserts.true(env, clause in err, "{}: the clause is named: {}".format(kind, err))
+        asserts.true(env, err.endswith("run bazel run @jq//:update"), "{} tail: {}".format(kind, err))
+        asserts.false(env, "mod deps" in err, "a tag fact reuses a stale value under mod deps")
+    index = cross_check(m, _expect(m, "index", digest = _OTHER, hub = "tool"))
+    asserts.true(env, clause in index, index)
+    asserts.true(env, index.endswith("the snapshot changed outside the update: run bazel run @tool//:update or restore the snapshot"), "index tail: " + index)
+    project = cross_check(m, _expect(m, "project", digest = _OTHER))
+    asserts.true(env, project.endswith("run bazel mod deps --lockfile_mode=update"), "project tail: " + project)
+    head = "the vendored set for {} disagrees with the fact in MODULE.bazel.lock: ".format(m.platform)
+    asserts.true(env, head in cross_check(m, _expect(m, "tag", digest = _OTHER, available = [])), "the head is kept")
+    return unittest.end(env)
+
+def _empty_expected_test_impl(ctx):
+    env = unittest.begin(ctx)
+    m = _root_manifest()
+
+    # A `tag` set reports available_platforms ["any"]; the fact records none for it, so that clause is skipped.
+    bare = parse_manifest(_mutated(lambda raw: (_one_root(raw), raw.update({"available_platforms": ["any"]}))))
+    asserts.equals(env, "", bare.error)
+    asserts.equals(env, "", cross_check(bare.manifest, _expect(m, "tag", available = [])), "a tag set with [\"any\"] passes")
+    asserts.equals(env, "", cross_check(m, _expect(m, "project", digest = "")), "an empty digest is skipped")
+    asserts.true(env, cross_check(m, _expect(m, "index", available = ["darwin/arm64"])) != "", "control: a recorded list is still compared")
+    return unittest.end(env)
+
+def _vendor_argv_kinds_test_impl(ctx):
+    env = unittest.begin(ctx)
+    digest_package = "ghcr.io/acme/jq@" + _ROOT
+
+    def argv(kind, package, **extra):
+        return vendor_args(struct(
+            tier = "package",
+            kind = kind,
+            expected_digest = _ROOT,
+            out = "out",
+            platform = "linux/amd64",
+            groups = [],
+            bindings = [],
+            package = package,
+            **extra
+        ))
+
+    common = ["-o", "out", "-p", "linux/amd64", "--omit-links"]
+    for kind in ["tag", "pinned"]:
+        planned = argv(kind, digest_package, index = "/w/routing")
+        asserts.equals(env, "", planned.error)
+        asserts.equals(env, ["--format", "json", "--index", "/w/routing", "package", "vendor"] + common + [digest_package], planned.args, "{}: the pin with -p, routing index, no --remote, no --frozen".format(kind))
+        asserts.false(env, "--remote" in planned.args or "--frozen" in planned.args, kind)
+    indexed = argv("index", "ghcr.io/acme/jq:1.8", index = "/w/snapshot")
+    asserts.equals(env, ["--format", "json", "--frozen", "--index", "/w/snapshot", "package", "vendor"] + common + ["ghcr.io/acme/jq:1.8"], indexed.args, "index keeps --index --frozen")
+    bad = argv("tag", "-x")
+    asserts.true(env, "must start with a letter or digit" in bad.error and "-x" in bad.error, "X7: a value starting with - never reaches argv: '{}'".format(bad.error))
+    return unittest.end(env)
+
+root_digest_test = unittest.make(_root_digest_test_impl)
+empty_expected_test = unittest.make(_empty_expected_test_impl)
+vendor_argv_kinds_test = unittest.make(_vendor_argv_kinds_test_impl)
+
 reserved_moves_test = unittest.make(_reserved_moves_test_impl)
 build_file_test = unittest.make(_build_file_test_impl)
 build_file_golden_test = unittest.make(_build_file_golden_test_impl)
@@ -378,6 +464,9 @@ def set_repo_test_suite(name):
         windows_link_test,
         vendor_args_test,
         isolated_env_test,
+        root_digest_test,
+        empty_expected_test,
+        vendor_argv_kinds_test,
     )
     native.test_suite(
         name = name,

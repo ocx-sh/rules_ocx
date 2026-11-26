@@ -66,10 +66,28 @@ tool_bzl_test = unittest.make(_tool_bzl_test_impl)
 content_error_test = unittest.make(_content_error_test_impl)
 platform_error_test = unittest.make(_platform_error_test_impl)
 
+def _update_alias_test_impl(ctx):
+    env = unittest.begin(ctx)
+    content = hub_build_content(_SETS, ["jq"], name = "jq")
+    asserts.true(env, 'name = "update"' in content, "the hub carries an update alias")
+    asserts.true(env, '"@ocx_update//:hub_jq"' in content, "aliasing the update repository's target for this hub")
+    asserts.true(env, "alias(" in content)
+    return unittest.end(env)
+
+def _update_reserved_test_impl(ctx):
+    env = unittest.begin(ctx)
+    asserts.equals(env, "", hub_content_error(_SETS, ["jq"]), "control")
+    err = hub_content_error(_SETS, ["jq", "update"])
+    asserts.true(env, "'update'" in err, "a tool named update collides with the alias: " + err)
+    return unittest.end(env)
+
+update_alias_test = unittest.make(_update_alias_test_impl)
+update_reserved_test = unittest.make(_update_reserved_test_impl)
+
 def hub_test_suite(name):
     """Instantiates the hub.bzl test suite.
 
     Args:
         name: name of the test suite target.
     """
-    unittest.suite(name, build_content_test, build_content_shape_test, tool_bzl_test, content_error_test, platform_error_test)
+    unittest.suite(name, build_content_test, build_content_shape_test, tool_bzl_test, content_error_test, platform_error_test, update_alias_test, update_reserved_test)

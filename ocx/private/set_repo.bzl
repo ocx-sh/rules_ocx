@@ -399,11 +399,19 @@ The repository holds the vendored tree, the generated `BUILD.bazel` and the
         "expected_available_platforms": attr.string_list(
             doc = "available_platforms recorded in the fact; cross-checked against the manifest.",
         ),
+        "expected_digest": attr.string(
+            doc = "Root platform manifest digest recorded in the fact; empty skips the check.",
+        ),
         "expected_tools": attr.string_list(
             doc = "`name:kind` rows recorded in the fact for this platform; cross-checked against the manifest.",
         ),
         "groups": attr.string_list(doc = "ocx.toml groups to vendor (project tier)."),
+        "hub": attr.string(doc = "Name of the hub this set belongs to, for the update hint."),
         "index": attr.label(doc = "Optional index passed as `--index`."),
+        "kind": attr.string(
+            values = ["", "tag", "pinned", "index", "project"],
+            doc = "The declaration kind, which decides the check tail and the vendor flags.",
+        ),
         "ocx": attr.label(
             default = "@ocx_tool//:ocx",
             allow_single_file = True,

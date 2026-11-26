@@ -173,3 +173,85 @@ def manifest_env(home, config, no_config, allow_unverified, allow_yanked, truste
         env["OCX_SIGSTORE_TRUSTED_ROOT"] = trusted_root
     env.update(policy_exports(allow_unverified, allow_yanked))
     return env
+
+# buildifier: disable=unused-variable
+def declaration_kind(tag):
+    """Classifies one declaration (pure).
+
+    Order: `ocx.project` is `project`; an `ocx.package` whose identifier ends
+    in `@sha256:<64 lowercase hex>` is `pinned`; one with an `index` is
+    `index`; any other is `tag`.
+
+    Args:
+        tag: struct(kind = "project"|"package", name, identifier, index), with
+            `index` "" when the declaration gives none.
+
+    Returns:
+        struct(kind, error). `error` is "" or X7
+        (`rules_ocx: '<name>': the identifier '<identifier>' must start with a letter or digit`)
+        for an identifier whose first character is not `A-Za-z0-9`.
+    """
+    fail("unimplemented")
+
+# buildifier: disable=unused-variable
+def fact_value_v2(tag, kind, available_platforms, tools, pins = {}, snapshot_files = None):
+    """The JSON text stored for a declaration, `"v": 2`.
+
+    Args:
+        tag: as in fact_key(); `tag.kind` is the declaration kind.
+        kind: the declaration kind, `project`, `pinned`, `index` or `tag`.
+        available_platforms: platforms the first resolve reported.
+        tools: dict platform -> list of [name, kind], one key per platform.
+        pins: dict platform -> bare platform manifest digest (never an image index).
+        snapshot_files: for kind `index`, [[path, length, hash], ...].
+
+    Returns:
+        JSON string.
+    """
+    fail("unimplemented")
+
+# buildifier: disable=unused-variable
+def fact_decode_v2(stored):
+    """Decodes a stored v2 fact.
+
+    Args:
+        stored: the string from the lockfile.
+
+    Returns:
+        the decoded dict, or None on a miss: `v` is not 2, a pin is not a
+        `sha256:<64 lowercase hex>` digest, or a snapshot path breaks the
+        path rules.
+    """
+    fail("unimplemented")
+
+# buildifier: disable=unused-variable
+def index_inputs(name, paths, read):
+    """The snapshot inputs of a fact of kind `index` (pure).
+
+    Args:
+        name: the declaration name, for the message.
+        paths: the manifest's `index_lookups` paths.
+        read: function path -> the file text, or None when the path is absent.
+
+    Returns:
+        struct(files, error). `files` is [[path, length, hash], ...] with
+        length -1 and hash 0 for an absent path; `error` is "" or X8
+        (`rules_ocx: '<name>': the manifest names the snapshot path '<path>', which is not a plain relative path`)
+        for a path that is absolute, holds `..`, an empty segment, a backslash or a drive letter.
+    """
+    fail("unimplemented")
+
+# buildifier: disable=unused-variable
+def same_index_check(name, manifests):
+    """Step 8: every platform's root came from one image index (pure).
+
+    Args:
+        name: the declaration name.
+        manifests: one parse_manifest() manifest per platform. The root is the
+            package whose digest is `selections[0].roots[0]`.
+
+    Returns:
+        "" when all roots share one `index_digest` or none has one, else X3
+        (`rules_ocx: the tag of '<name>' moved while it was resolved; run the update again`).
+    """
+    fail("unimplemented")
