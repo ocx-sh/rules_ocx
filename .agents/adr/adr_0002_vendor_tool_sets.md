@@ -21,7 +21,7 @@ rules_ocx provisions tools through the `ocx` binary and never re-implements OCX 
 A tool must run in a local action and on a remote executor that has no network, no `ocx` and no `OCX_HOME`.
 The ruleset needs one stable thing to read from `ocx`, so that a change in how `ocx` stores packages or reports state cannot break it.
 
-`ocx vendor` writes that thing for one platform: the package files, one native launcher per tool and a `manifest.json` (`schema_version` 1; 2 with the short layout, ADR 0003).
+`ocx vendor` writes that thing for one platform: the package files, one native launcher per tool and a `manifest.json` (`schema_version` 2, ADR 0003).
 The manifest lists packages, tools, links, the environment each tool needs and the platforms available.
 
 ## Decision Drivers
@@ -80,11 +80,11 @@ The extension computes the tool list once per tag and platform with `ocx vendor 
 ### Contract
 
 - `ocx vendor -o <dir> -p <platform> --omit-links [-g …] [names…]` for a project, `ocx package vendor` for a package. A package declared by tag without an index, or by digest, is vendored as `repo@<platform manifest digest>` from its fact ([ADR 0003](adr_0003_package_locking.md)).
-- Output: `manifest.json` and what it lists. The layout of ocx issue 785 is `l/NAME` (selection launchers), `p/HEX16/c/` (package content), `p/HEX16/e/NAME` (entry-point launchers), and one record file beside each launcher (proposed name `NAME.launch`, JSON with a `kind` key). It replaces `packages/`, `selections/` and the `.direct` sidecar.
+- Output: `manifest.json` and what it lists. The layout of ocx issue 785 is `l/NAME` (selection launchers), `p/HEX16/c/` (package content), `p/HEX16/e/NAME` (entry-point launchers), and one record file `NAME.launch` beside each launcher (JSON; `kind` is `direct` in a vendored tree). It replaces `packages/`, `selections/` and the `.direct` sidecar.
 - `manifest.json` is the one file name rules_ocx knows. The set repository moves every top-level entry of the output directory into the repository; it takes every launcher path and every record path from the manifest (`tools[].launcher_path`, `tools[].record_path`, `entrypoints[].launcher_path`, `entrypoints[].record_path`) and derives no `.exe`, no sidecar name and no directory name. The required fields are MR-1 to MR-14 of ADR 0003.
 - `_ocx_reserved` stays rules_ocx's own stash name for Bazel-reserved file names (`ocx/private/set_repo.bzl:16`); ocx never writes it.
 - Each tag declares a hub repository named by the tag and one set repository per entry of `platforms`.
-- A launcher finds its record beside itself, then in the runfiles tree, then through Bazel's runfiles manifest; with none of them it exits 78.
+- A launcher finds its record beside the path it was started by, and its root through the runfiles tree, then through Bazel's runfiles manifest; with neither it exits 78.
 
 ### Runfiles
 
@@ -117,3 +117,4 @@ Windows: `--enable_runfiles` defaults to off there, and only the manifest is wri
 | 2026-11-26 | owner | Initial record |
 | 2026-11-26 | owner | Amended by ADR 0003: short layout (`l/`, `p/HEX16/c/`, `p/HEX16/e/`), launcher and record paths read from the manifest, the § Runfiles position with its measured cost and reasons, `--omit-links` reasons, the runfiles-manifest lookup for Windows |
 | 2026-11-26 | owner | review round 1 applied: a digest-pinned package is also vendored by its platform manifest digests |
+| 2026-11-26 | goal loop | reconciled with the ocx record `adr_unified_launcher.md`: `schema_version` 2 only, record `NAME.launch` decided, record found beside the started path and the root through tree then manifest |

@@ -2,7 +2,7 @@
 
 ## Metadata
 
-**Status:** Proposed
+**Status:** Accepted (accepted under goal-loop authority, 2026-11-26; the owner may revisit)
 **Date:** 2026-11-26
 **Deciders:** owner
 **Issue/Ticket:** https://github.com/ocx-sh/rules_ocx/issues/37, https://github.com/ocx-sh/ocx/issues/785
@@ -49,7 +49,7 @@ Three more facts shape the design.
 
 - rules_ocx still derives names: `_TOP_LEVEL` (`ocx/private/set_repo.bzl:19`), `_sidecar()` (`set_repo.bzl:24-27`), the `.exe` and `.direct` names of `ocx_tool` (`ocx/private/set_rules.bzl:109-113`), and the `packages`/`selections` prefix checks (`ocx/private/vendor_manifest.bzl:290,385,401,404`). `read`.
 - A tag on a fresh `OCX_HOME` fails today, because the extension runs `ocx vendor --manifest-only` without `--remote` (`observed`, research `research_launcher-atomic-publish-and-runfiles.md` § 6).
-- What ocx reports as `available_platforms` for a platform manifest digest is unsettled. The ocx source reads as `["any"]` for a flat manifest (`read`, ocx `crates/ocx_package_manager/src/tasks/vendor.rs:298-315`). The earlier real-ocx prototype contradicts that reading: its sets vendored `registry/repo@<platform digest>` with `-p` and the unchanged `cross_check`, and they built (`observed`, `proto/EVIDENCE.md` T10). The design depends on neither: a set that vendors a pin does not compare `available_platforms`.
+- What ocx reports for a platform manifest digest is settled by the ocx record (`adr_unified_launcher.md` R-U9, ocx repository): `ocx` vendors a bare platform manifest for the requested `-p P`, reports `platform = P` and `available_platforms = ["any"]`, and refuses nothing, because a bare manifest records no platform (`read`, ocx `crates/ocx_package_manager/src/tasks/vendor.rs:310-312`). The earlier prototype agrees: its sets vendored `registry/repo@<platform digest>` with `-p` and built (`observed`, `proto/EVIDENCE.md` T10). A set that vendors a pin therefore does not compare `available_platforms`, and the platform check is rules_ocx's, at resolve time (step 9).
 
 ### What Bazel guarantees (research `research_bazel-extension-facts-lock.md`)
 
@@ -156,8 +156,9 @@ K3 lets a merge combine platforms from two different resolves, which breaks "a p
 
 - The facts documentation speaks of "universally true facts". A fact for a moving tag stretches that wording, although each recorded digest is immutable. Mitigation: the set checks its vendored root digest against the fact.
 - Old platform manifests survive a tag move only while something keeps them. `ocx package push` writes keep tags (`__ocx.keep.<algorithm>-<hex>`), which is an ocx convention, not an OCI guarantee. When one is gone, the set fetch fails with X6, which names the update.
-- A signature or attestation attached to the image index only is checked when the tag is resolved (a miss or an update), not when a set vendors the pin (see the open point below).
-- A `toolchain_dir` in the user's `config.toml` makes `ocx update` render the scratch project's toolchain home under that root (`read`, ocx `crates/ocx_cli/src/command/update.rs:164-186`, where `toolchain_render_scope` and `commit_and_render` run). The render leaves an unused directory there.
+- A signature or attestation attached to the image index only is checked when the tag is resolved (a miss or an update), not when a set vendors the pin (see Decided points).
+- `ocx update --no-pull` on the scratch copy renders a toolchain into `<copy>/.ocx/toolchain` and writes project state under `$OCX_HOME/state/projects/<key>` (`read`, ocx `crates/ocx_cli/src/command/update.rs:164-186`, where `toolchain_render_scope` and `commit_and_render` run). Both land in the scratch copy and the scratch `OCX_HOME` of the run (§ The `update` targets, steps) and go with them. A `toolchain_dir` in the user tier of `config.toml` (`HOME` is inherited) moves the render outside the scratch; it then leaves an unused directory under that root.
+- A fact edited by hand to name another platform's manifest for P vendors that manifest, because `ocx` does not check a bare digest against `-p` (MR-6). The fact is committed text and shows in `git diff`; a pin is trusted like an `ocx.lock` pin (§ Decided points), and `cross_check`'s root-digest clause only compares the vendored root with the fact.
 - Whether `--noblock_for_lock` on the nested call counts as a startup option that restarts the server is `not established`; a restart costs time, not correctness.
 
 **Reversibility:** medium. The `update` names and the `RULES_OCX_UPDATE` switch are user-facing. The fact schema can move again with a `v` bump, at the cost of one miss per declaration.
@@ -183,7 +184,7 @@ An identifier whose first character is not `A-Za-z0-9` fails with X7 before any 
 - Every field under "inputs" below is compared exactly with the tag; any difference is a miss. Changing `platforms` or the identifier is a declaration edit, so the whole declaration resolves again, every platform (`observed`, `proto/EVIDENCE.md` T6).
 - `tools` is `{platform: [[name, kind], ...]}` with exactly one key per entry of `platforms`. `kind` is `binary` or `entrypoint` (ocx `crates/ocx_package/src/vendor/selection.rs:45-53`).
 - `schema_version` is the manifest's, 2.
-- `pins` maps each listed platform to a bare digest, `sha256:<64 lowercase hex>`, of the root platform manifest (MR-5). Decoding checks each value with the existing `is_sha256` test (`set_repo.bzl:6`); a non-digest value makes the whole fact a decode error, which is a miss. No image index digest is stored anywhere.
+- `pins` maps each listed platform to a bare digest, `sha256:<64 lowercase hex>`, of the root platform manifest (MR-5). Decoding checks each value with the existing `is_sha256` test (`set_repo.bzl:6`); a non-digest value makes the whole fact a decode error, which is a miss. No image index digest is stored anywhere: the manifest's `packages[].index_digest` is read once, in step 8, and dropped.
 - The set builds the identifier it vendors from the identifier in `MODULE.bazel`: the tag and any digest are removed, and `@<pin>` is added. A tampered pin can therefore only name another digest of the declared repository.
 
 Kind `tag`. Inputs: `kind`, `name`, `identifier`, `platforms`. `config`, `no_config`, `blob_dirs` and the ocx version are not inputs on purpose: a digest is a content address, and a mirror or another ocx does not change it. A user who changed a mirror and wants the tag read again runs the update.
@@ -296,9 +297,9 @@ For each declaration, after the existing name, platform and duplicate checks (`e
    - `--remote` for kind `tag` only. The resolve must read the live tag, and on a fresh home it fails without it (MR-12).
    - `--frozen` for kind `index` only, so a snapshot that lacks the tag fails instead of falling back to the registry (ocx `crates/ocx_cli/src/app/context_options.rs:73-84`).
    - Kinds `pinned` and `project` get neither flag. A `pinned` resolve names the declared digest.
-7. From each manifest record `tools`; from the first record `available_platforms`; for package kinds record `pins[platform]` = the root digest (MR-5); for kind `index` record `snapshot.files` from MR-9.
-8. For kind `tag`, check that every platform's root came from the same image index (MR-8). On a mismatch, resolve the whole declaration once more; a second mismatch fails with X3.
-9. Run `hub_platform_error(platforms, available_platforms)` (`ocx/private/hub.bzl:116-135`) on the recorded value.
+7. From each manifest record `tools`; from the first record `available_platforms`; for package kinds record `pins[platform]` = the root digest (MR-5); for kind `index` record `snapshot.files` from `index_lookups` (MR-9).
+8. For kind `tag`, read the root's `packages[].index_digest` of every platform (MR-8) and check that all platforms came from one image index. On a mismatch, resolve the whole declaration once more; a second mismatch fails with X3. A root with no `index_digest` (the identifier named a platform manifest) skips the check. The value is never stored.
+9. Run `hub_platform_error(platforms, available_platforms)` (`ocx/private/hub.bzl:116-135`) on the recorded value. This is the platform check of MR-6, and it is rules_ocx's: `ocx` cannot decide whether a bare platform manifest serves P, so rules_ocx decides here, while the identifier still goes through the image index. `ocx` selects the leaf for `-p P` from that index, `available_platforms` is the index's platform list, and step 8 shows every leaf came from one index. The set later vendors the bare digest, and the `platform = P` that `ocx` reports for it says nothing about the digest.
 10. Declare one set per platform and the hub.
 11. Print the result lines of § Output lines.
 
@@ -316,11 +317,11 @@ When `RULES_OCX_UPDATE` is set, every evaluation prints the warning W1, so a var
 | `index` | the identifier as declared | `--index SNAPSHOT --frozen` | `pins[platform]` | the fact's list |
 | `project` | none (`--project`) | as today | empty: not checked | the fact's list |
 
-A `tag` or `pinned` set vendors `repo@<platform manifest digest>` with `-p PLATFORM` (MR-6). It needs no `--remote`. Its identifier is digest-pinned, so `package_pinned` (`set_repo.bzl:273-282`) already makes it reproducible.
+A `tag` or `pinned` set vendors `repo@<platform manifest digest>` with `-p PLATFORM` (MR-6): `ocx` reports `platform = PLATFORM` and `available_platforms = ["any"]` and does not check the digest against the platform. It needs no `--remote`. Its identifier is digest-pinned, so `package_pinned` (`set_repo.bzl:273-282`) already makes it reproducible.
 
 An index set keeps watching the snapshot with `watch_tree` (`set_repo.bzl:300-307`), as today.
 
-A set fetch of kind `tag` or `pinned` that fails adds the X6 hint.
+A set fetch of kind `tag` or `pinned` that fails adds the X6 hint, except when `ocx` exits 65: a full run refuses a package whose declared binary its content lacks, where the extension's `--manifest-only` run succeeded (MR-10). That text names the package and its cause, and the X6 hint would mislead. rules_ocx does not retry it and does not change the fact; the publisher corrects the package.
 
 ### Set and hub checks
 
@@ -349,7 +350,7 @@ The set repository gains the hub name and the kind as attributes for this text.
 
 The hub keeps `hub_platform_error` against the fact's `available_platforms`. For kinds `tag` and `pinned` that list comes from the first resolve of the declared identifier, never from a set that vendors a pin.
 
-A declaration whose identifier names a single platform manifest (kind `tag` or `pinned`) keeps today's behaviour, whatever the first run reports. If the report does not list a requested platform, the hub refuses with today's text: `rules_ocx: platform '<platform>' is not served by the lock (available: <list>); pick one of them, or lock a leaf for it` (`hub.bzl:133-134`). Changing that is out of scope.
+A declaration whose identifier names a single platform manifest (kind `tag` or `pinned`) keeps today's behaviour. `ocx` reports `["any"]` for it (MR-6), which lists no requested platform, so the hub refuses with today's text: `rules_ocx: platform '<platform>' is not served by the lock (available: <list>); pick one of them, or lock a leaf for it` (`hub.bzl:133-134`), and the list reads `any`. rules_ocx does not treat `any` as a platform. Changing that is out of scope.
 
 ### Paths from the manifest
 
@@ -410,7 +411,7 @@ Steps, in this order:
    - Kind `pinned`: print E4. Nothing else runs for it.
    - A lock or snapshot outside the main repository: print E5. Nothing else runs for it.
    - The write target is `$BUILD_WORKSPACE_DIRECTORY/<package>/<name>`, computed at run time. When its real path lies outside the real path of `BUILD_WORKSPACE_DIRECTORY`, print E12 and skip it.
-   - Kind `project`: copy `ocx.toml` and `ocx.lock` into the scratch directory. Run `ocx --project SCRATCH/ocx.toml update --no-pull ARGS`. Publish `SCRATCH/ocx.lock` over the workspace `ocx.lock` (§ Publishing `ocx.lock`). The copy keeps `ocx update`'s render, consent stamp and pull out of the workspace and the real home (`update.rs:164-198`: render 164-186, consent stamp 191, pull 198).
+   - Kind `project`: copy `ocx.toml` and `ocx.lock` into the scratch directory. Run `ocx --project SCRATCH/ocx.toml update --no-pull ARGS`. Publish `SCRATCH/ocx.lock` over the workspace `ocx.lock` (§ Publishing `ocx.lock`). The copy, with a scratch `OCX_HOME`, keeps `ocx update`'s render (`<copy>/.ocx/toolchain`), its project state (`$OCX_HOME/state/projects/<key>`), its consent stamp and its pull out of the workspace and the user's own home (`update.rs:164-198`: render 164-186, consent stamp 191, pull 198; MR-14). `--no-pull` still resolves live; a `--frozen --index` or `--offline` in the user's ARGS stops that.
    - Kind `index`: run `ocx --index <snapshot dir> index update <identifier>`. ocx writes the snapshot itself.
    - Kind `tag`: no ocx step; the nested call resolves it.
    - Every `ocx` run gets a fresh scratch `OCX_HOME`, the pinned rows of `OCX_ENV_CLASSES` (`ocx/private/repo_utils.bzl:81-85`), the policy pair and the tag's `config`/`no_config`. `HOME` is inherited, as in the extension.
@@ -499,19 +500,19 @@ Under `--lockfile_mode=error` a miss fails with Bazel's own text after ocx ran; 
 For reconciliation with the parallel ocx design. "Today" means ocx at `9c9e32d4`.
 
 - **MR-1** `schema_version` is 2. rules_ocx reads exactly 2 and refuses 1 with X5.
-- **MR-2** Every manifest path is relative to the output directory, uses `/`, and names what a full vendor writes. No path segment and no top-level entry is `_ocx_reserved`.
-- **MR-3** A tool has `launcher_path` and `record_path` together, or neither. An entry point has both. A record sits in the same directory as its launcher.
-- **MR-4** A launcher finds its record from its own file name. Linking both files under their manifest basenames into one directory keeps that relation, on every platform.
-- **MR-5** `ocx package vendor` writes exactly one selection with exactly one root. The root's `packages[]` entry has `digest`, a platform manifest digest and never an image index digest.
-- **MR-6** `ocx package vendor -p P registry/repo@<platform manifest digest>` vendors that manifest. It succeeds and reports `platform = P` when the manifest serves P, and exits 65 when it does not. `not established` today; T10 saw it work in a prototype with an older manifest.
-- **MR-7** When the identifier resolves through an image index, `available_platforms` lists that index's platforms (today, `vendor.rs:298-315`).
-- **MR-8** A top-level field names the image index digest the root was selected from, and is absent when the identifier named a platform manifest. rules_ocx uses it only to check that every platform of one declaration came from one index, and never stores it. If the ocx design rejects the field, the fallback is a bracket check: resolve every platform, then resolve the first platform again last and require the same digest. The bracket misses a tag that moves and moves back between the two reads.
-- **MR-9** With `--index DIR`, a field lists every path under DIR that the resolution looked up, relative to DIR, each marked found or absent.
-- **MR-10** `--manifest-only` writes the same fields as a full vendor, with `content` `absent`.
+- **MR-2** Every manifest path is relative to the output directory, uses `/`, and names what a full vendor writes. No path segment and no top-level entry is `_ocx_reserved`; `ocx` refuses a package path holding that segment with exit 65 (ocx C-025).
+- **MR-3** A tool has `launcher_path` and `record_path` together, or neither. An entry point has both. A record sits in the same directory as its launcher and is named `NAME.launch` (the launcher's basename, minus one `.exe`, plus `.launch`).
+- **MR-4** A launcher finds its record from the name it was started by. Linking both files under their manifest basenames into one directory keeps that relation, on every platform. rules_ocx derives neither name.
+- **MR-5** `ocx package vendor` writes exactly one selection, `default`, with exactly one root. The root's `packages[]` entry has `digest`, a platform manifest digest and never an image index digest.
+- **MR-6** (refused as written; ocx R-U9) `ocx package vendor -p P registry/repo@<platform manifest digest>` vendors that manifest for P, reports `platform = P` and `available_platforms = ["any"]`, and refuses nothing: a bare platform manifest records no platform, so `ocx` cannot decide that it serves P, and it exits 65 for no such case. The platform check stays in rules_ocx, at resolve time, through the image index: the `-p P` resolve selects the leaf, `available_platforms` is the index's platform list (MR-7) and `packages[].index_digest` shows the leaves share one index (MR-8). A lock holds platform manifest digests only, never an index digest; `index_digest` is read and never stored.
+- **MR-7** When the identifier resolves through an image index, `available_platforms` lists that index's platforms (today, `vendor.rs:304-309`).
+- **MR-8** The field is `packages[].index_digest`, per package, optional: the image index digest the root was selected from. It is absent when the identifier named a platform manifest or the package was reached by digest, and on every dependency. rules_ocx uses it only to check that every platform of one declaration came from one index (step 8), and never stores it.
+- **MR-9** With `--index DIR`, the top-level field `index_lookups[]`, each `{path, found}`, lists every path under DIR that the resolution read, relative to DIR and `/`-separated, sorted and without duplicates. It is absent without `--index`.
+- **MR-10** `--manifest-only` writes the same fields as a full vendor except `content` (`absent`) and `packages[].tree`. A full run can refuse where `--manifest-only` succeeds: a package whose declared binary its content lacks is refused with exit 65 (ocx R-U1, today node 26.13.1). The extension records the fact from the manifest-only run; the set fetch then fails with ocx's own text and no X6 hint, rules_ocx does not retry or edit the fact, and the package publisher corrects the claim (§ Set repository per kind).
 - **MR-11** `--omit-links` writes no link and lists every omitted link in `tree.links` with its target (today).
-- **MR-12** `--remote` resolves a tag live on a fresh `OCX_HOME`. `--frozen` with `--index` never fetches a tag the snapshot lacks (exit 81), and a vendor writes nothing into the `--index` directory.
-- **MR-13** The launcher finds its record and its set through the runfiles tree, then through the runfiles manifest (`RUNFILES_MANIFEST_FILE`, `ARGV0.runfiles/MANIFEST`, `ARGV0.runfiles_manifest`), and decodes the escaped line form of Bazel 8 and later (research § 5). It exits 78 only when neither exists.
-- **MR-14** `ocx update --no-pull` against a scratch project copy writes `ocx.lock` beside that copy and nothing beside the workspace's `ocx.toml`, and keeps its exit codes 64, 65 and 78 (`update.rs:94-122,271-327`).
+- **MR-12** `--remote` resolves a tag live on a fresh `OCX_HOME`. `--frozen` with `--index` never fetches a tag the snapshot lacks (exit 81), and a vendor run writes nothing into the `--index` directory. Today a vendor run can write there (ocx `tasks/vendor.rs:379`, `:1011-1017`, a digest-addressed resolve through the writable manager); the ocx plan fixes it with a read-only view (ocx R-U10, C-030). This ADR depends on that fix: `test_set_fetch_leaves_the_snapshot_unchanged` is red against an `ocx` without it, so the `ocx` build the pins name must carry it.
+- **MR-13** The launcher finds its record beside the path it was started by, never through a manifest. It finds its root through the runfiles tree (`ARGV0.runfiles`, `RUNFILES_DIR` when the path lies under it), then through the runfiles manifest: `ARGV0.runfiles/MANIFEST`, `ARGV0.runfiles_manifest`, then `RUNFILES_MANIFEST_FILE` only when it lists the started path. It takes the root from the line whose key ends `/<name>.launch`, decodes the escaped line form of Bazel 7.4 and later (research § 5), and exits 78 only when neither a tree nor a manifest gives a root.
+- **MR-14** `ocx update --no-pull` against a scratch project copy writes `ocx.lock` beside that copy and nothing beside the workspace's `ocx.toml`, and keeps its exit codes 64, 65 and 78 (`update.rs:94-122,271-327`). It also renders a toolchain into `<copy>/.ocx/toolchain` and writes project state under `$OCX_HOME/state/projects/<key>`; the update program runs it in a scratch directory with a fresh scratch `OCX_HOME` (§ The `update` targets, steps), so both land in the scratch and the user's own home is never written. `--no-pull` still resolves live.
 
 ### Versions
 
@@ -598,7 +599,9 @@ e2e on the zot rig, new module `e2e/rbe/tests/test_package_lock.py`, using the c
 | `test_rules_ocx_update_all_and_named` | mutation: names are ignored | all, then only the named one, change |
 | `test_error_mode_moved_tag_passes_update_fails` | mutation: the extension ignores the switch | build passes; switch run fails with Bazel's text |
 | `test_fresh_home_tag_resolves` | observed today: fails without `--remote` (research § 6) | resolves on a fresh home |
-| `test_tag_lock_vendors_the_platform_digest` | mutation: the set vendors the declared identifier instead of `<repo>@<pin>`; after the tag moved, the root-digest clause of `cross_check` fails | set vendors `<repo>@<pin>` with `-p`; platform and root checks pass after the tag moved; settles MR-6 |
+| `test_tag_lock_vendors_the_platform_digest` | mutation: the set vendors the declared identifier instead of `<repo>@<pin>`; after the tag moved, the root-digest clause of `cross_check` fails | set vendors `<repo>@<pin>` with `-p`; the manifest reports `platform = P` and `available_platforms = ["any"]`; root checks pass after the tag moved (MR-6) |
+| `test_platform_outside_the_index_is_refused` | mutation: the hub check skips kinds `tag` and `pinned` | a `platforms` entry the index does not list gives `hub_platform_error`'s text at resolve time, with no set fetch; a bare platform manifest identifier gives the same text with `available: any` |
+| `test_full_vendor_refusal_is_not_hinted_as_gone` | mutation: the X6 hint is added for exit 65 | a package whose declared binary is missing from its content: the extension's fact is written, the set fetch fails with ocx's text and exit 65, no X6 hint |
 | `test_snapshot_refresh_invalidates_the_fact` | mutation: drop `snapshot` from the inputs | `ocx index update`, then a build, re-resolves |
 | `test_set_fetch_leaves_the_snapshot_unchanged` | mutation: drop `--frozen`, and remove the tag's row from the snapshot: the fetch resolves live | snapshot bytes equal before and after; the missing row gives X4 |
 | `test_project_update_writes_only_ocx_lock` | mutation: `ocx update` runs on the workspace `ocx.toml` | only `ocx.lock` and `MODULE.bazel.lock` change; no `.ocx/` |
@@ -630,9 +633,9 @@ Platforms (claims until these run):
 - A Linux twin in `verify-basic.yml`: `bazel test --noenable_runfiles --spawn_strategy=local` of the same target. Red today: exit 78, `no vendored root found` (`observed`, research `research_launcher-atomic-publish-and-runfiles.md` § 5). Green after MR-13.
 - `windows-update-target` in `verify-deep.yml`, in a copy of `e2e/bzlmod` under a path with a space: `bazel run @jq//:update` through `update.bat` exits 0 and prints the `unchanged` line, and a project update replaces `ocx.lock`. Red: mutation of the generated `update.bat` that drops the quotes around one expansion; the same run fails. The same job runs `bazel run @dev_tools//:update -- -g "a&b"` and expects E13 with exit 64 (red: mutation that drops the E13 check, after which cmd splits the argument), and `RULES_OCX_BAZEL` set to a missing file, expecting E8 (red: mutation that drops the probe, after which cmd prints its own error and exits 9009).
 
-### Open point
+### Decided points
 
-1. [NEEDS CLARIFICATION: how far is a pin in `MODULE.bazel.lock` trusted, given that a signature or attestation attached to the image index only is not checked when a set vendors the pin?] Recommended: trust it like an `ocx.lock` pin — at build, the set's digest vendor runs the committed and operator policies (`signer_rounds_for_pinned`, ocx `crates/ocx_package_manager/src/tasks/auto_verify.rs:354-367,406-410`), and the publisher checks from the index run at resolve (a miss or an update); the pin rule limits a tampered pin to another digest of the declared repository. Reason: it is the model the project tier already uses, and it needs no new ocx requirement.
+1. **How far a pin in `MODULE.bazel.lock` is trusted.** Decided under goal-loop authority, 2026-11-26 (no human answered in this run; the owner may revisit): a pin is trusted like an `ocx.lock` pin. At build, the set's digest vendor runs the committed and operator policies (`signer_rounds_for_pinned`, ocx `crates/ocx_package_manager/src/tasks/auto_verify.rs:354-367,406-410`), and the publisher checks from the index run at resolve (a miss or an update). The pin rule limits a tampered pin to another digest of the declared repository. Reason: it is the model the project tier already uses, and it needs no new ocx requirement. A signature or attestation attached to the image index only is therefore not checked when a set vendors the pin.
 
 ## Links
 
@@ -651,3 +654,4 @@ Platforms (claims until these run):
 | 2026-11-26 | owner | Initial record (Proposed) |
 | 2026-11-26 | owner | review round 1 applied |
 | 2026-11-26 | owner | re-validation warns applied (identifier is an input, refusal exits, test rows for E8, E12-E14, X8) |
+| 2026-11-26 | goal loop | reconciled with the ocx record `adr_unified_launcher.md`: MR-6 refused (platform check stays here), MR-8 `packages[].index_digest`, MR-9 `index_lookups[]`, MR-10, MR-12, MR-13, MR-14 statements; pin trust decided; Accepted under goal-loop authority |
