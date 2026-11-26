@@ -212,6 +212,10 @@ tasks:
       # bump_ocx.py's supply-chain guards: setup.ocx.sh must not be able to
       # choose our pin, move it backwards, or rewrite a committed sha256.
       - python3 scripts/bump_ocx_test.py
+      # A dev-ocx pin must not outlive its pull request: red on the default branch and in a merge group,
+      # silent on a pull request (e2e/rbe/ocx-under-test.txt).
+      - bash scripts/ocx_under_test.sh --guard
+      - bash scripts/ocx_under_test_test.sh
 
   # make-location (buildifier >= 9) flags every `$(location)` in the examples and tests; the old
   # buildifier_prebuilt 8.2 gate did not, so it stays off until those call sites are migrated on purpose.

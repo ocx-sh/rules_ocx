@@ -14,18 +14,26 @@
 # lands in that cache.
 #
 # Environment: OCX (the ocx to pull with, default `ocx`), GITHUB_TOKEN and GITHUB_ACTOR (pull credentials when
-# the dev package is private), GITHUB_EVENT_NAME and GITHUB_REF (cache-write lane detection).
+# the dev package is private), GITHUB_EVENT_NAME and GITHUB_REF (lane detection), OCX_UNDER_TEST_ROOT (the
+# checkout to read the pin from; the self-test sets it).
+#
+# `--guard`: only the lane check, no pull. The lint task runs it, so a pin left in place fails on the default
+# branch and in a merge group, and stays silent on a pull request and locally.
 set -euo pipefail
 
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+root="${OCX_UNDER_TEST_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 pin="$root/e2e/rbe/ocx-under-test.txt"
 if [[ ! -f "$pin" ]]; then
-  echo "no e2e/rbe/ocx-under-test.txt: the released ocx pin stays in force"
+  [[ "${1:-}" == --guard ]] || echo "no e2e/rbe/ocx-under-test.txt: the released ocx pin stays in force"
   exit 0
 fi
-if [[ "${GITHUB_EVENT_NAME:-}" == push && "${GITHUB_REF:-}" == refs/heads/main ]]; then
-  echo "::error::e2e/rbe/ocx-under-test.txt is set on the lane that writes the shared Bazel cache; remove it before merging" >&2
+# The default branch writes the shared Bazel cache and a merge group is the last gate before it.
+if [[ ( "${GITHUB_EVENT_NAME:-}" == push && "${GITHUB_REF:-}" == refs/heads/main ) || "${GITHUB_EVENT_NAME:-}" == merge_group ]]; then
+  echo "::error::e2e/rbe/ocx-under-test.txt is set on the default branch or in a merge group; remove it before merging" >&2
   exit 1
+fi
+if [[ "${1:-}" == --guard ]]; then
+  exit 0
 fi
 
 # `|| true`: a comment-only file must reach the format check below, not die on pipefail.
@@ -54,6 +62,17 @@ TOML
 if [[ -n "${GITHUB_TOKEN:-}" ]]; then
   export OCX_AUTH_ghcr_io_USER="${GITHUB_ACTOR:-token}"
   export OCX_AUTH_ghcr_io_TOKEN="$GITHUB_TOKEN"
+else
+  # ocx 0.6.5 answers a 401 on ghcr.io's referrers endpoint with an error instead of retrying with the anonymous
+  # challenge, so the signature lookup fails on a public package. A pull-scoped bearer token from ghcr.io's token
+  # service is the documented OCX_AUTH_<REGISTRY>_TOKEN form and reads it; it lives in this process only.
+  anon="$(curl -fsS --retry 3 'https://ghcr.io/token?scope=repository:ocx-sh/dev/cli:pull' | jq -er '.token' || true)"
+  if [[ -z "$anon" ]]; then
+    echo "::error::no anonymous pull token from ghcr.io and no GITHUB_TOKEN: the pull cannot be authenticated" >&2
+    exit 1
+  fi
+  [[ -z "${GITHUB_ACTIONS:-}" ]] || echo "::add-mask::$anon"
+  export OCX_AUTH_ghcr_io_TYPE=bearer OCX_AUTH_ghcr_io_TOKEN="$anon"
 fi
 # A policy-covered pull verifies the signature before it downloads and fails closed.
 status=0
@@ -103,4 +122,18 @@ if [[ -n "${GITHUB_ENV:-}" ]]; then
     echo "OCX_INSTALL_BINARY_SHA256=$sha"
   } >> "$GITHUB_ENV"
 fi
+# The pull above already verified the signature against the policy; this prints who signed, from the same
+# registry data, so the log names the identity that was trusted.
+case "$(uname -s)" in
+  Linux) host_os=linux ;;
+  Darwin) host_os=darwin ;;
+  *) host_os=windows ;;
+esac
+case "$(uname -m)" in
+  arm64 | aarch64) host_arch=arm64 ;;
+  *) host_arch=amd64 ;;
+esac
+signer="$("${OCX:-ocx}" --config "$config" --format json package verify -p "$host_os/$host_arch" "$identifier" 2> /dev/null |
+  jq -er '(.data // .) | select(.certificate_identity != null) | "\(.certificate_identity) (issuer \(.certificate_oidc_issuer))"' 2> /dev/null || true)"
+echo "ocx under test: signed by ${signer:-<identity not reported by this ocx; the pull verified it against the release.yml policy>}"
 echo "ocx under test: $identifier (sha256 $sha)"
