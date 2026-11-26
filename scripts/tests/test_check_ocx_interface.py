@@ -4,7 +4,7 @@
 """Self-test for check_ocx_interface.py. Run: python3 scripts/tests/test_check_ocx_interface.py
 
 Each fixture is a one-file tree under a temp dir; the guard runs as a
-subprocess so the exit code is the real one (V-18: planted `env` call -> 1).
+subprocess so the exit code is the real one (a planted `env` call -> 1).
 Every red case asserts the exact set of classes, so a wrong class is caught.
 """
 

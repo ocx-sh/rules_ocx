@@ -19,7 +19,7 @@ platform(
     ],
 )
 
-# Matches no toolchain of any hub (V-02 control).
+# Matches no toolchain of any hub.
 platform(
     name = "exec_none",
     constraint_values = [

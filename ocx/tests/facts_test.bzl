@@ -94,7 +94,6 @@ def _manifest_env_test_impl(ctx):
     full = manifest_env("/h", "/c.toml", True, True, True, "/root.json")
     asserts.equals(env, "/c.toml", full["OCX_CONFIG"])
     asserts.equals(env, "1", full["OCX_NO_CONFIG"])
-    asserts.equals(env, "", full["OCX_PATCHES"], "no_config blanks the hermetic rows")
     asserts.equals(env, "1", full["OCX_NO_VERIFY"])
     asserts.equals(env, "1", full["OCX_ALLOW_YANKED"])
     asserts.equals(env, "/root.json", full["OCX_SIGSTORE_TRUSTED_ROOT"])

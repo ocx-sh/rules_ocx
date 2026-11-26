@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 The OCX Authors
 
-"""Unit tests for the platform-string -> constraint mapping of ocx/private/platforms.bzl (C-RO-09)."""
+"""Unit tests for the platform-string -> constraint mapping of ocx/private/platforms.bzl."""
 
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 load("//ocx/private:platforms.bzl", "platform_constraints")

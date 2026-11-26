@@ -13,7 +13,7 @@ generated BUILD file, so each one is checked before it reaches a caller.
 
 visibility(["//ocx", "//ocx/tests"])
 
-# Windows reserved device names (design 4.1), matched on the stem.
+# Windows reserved device names matched on the stem.
 _DEVICES = ["CON", "PRN", "AUX", "NUL"] + [
     "COM" + str(n)
     for n in range(1, 10)
@@ -45,7 +45,7 @@ def _bad_segment(segment, windows):
     return ""
 
 def _path_error(path, what, windows, under = "", allow_equal = False):
-    """Checks the design 4.1 rules of a manifest path field, "" when it holds.
+    """Checks the rules of a manifest path field, "" when it holds.
 
     `under` demands the path lie below that directory (or equal it, with
     `allow_equal`): every path becomes a label of the set repository, so one
@@ -182,7 +182,7 @@ def _tool_name_error(name, windows):
     """A tool or entry-point name becomes a file name and a label: one safe segment.
 
     A reserved name is refused too: a launcher called `BUILD` would turn its
-    directory into a package, and only `tree.files` are stashed (C-RO-05).
+    directory into a package, and only `tree.files` are stashed.
     """
     why = _bad_segment(name, windows)
     if not why and name.lower() in RESERVED_NAMES:
@@ -194,7 +194,7 @@ def _tree_conflicts(packages):
 
     Compared exactly: package content may hold paths that differ only by case
     (terminfo's `E/Eterm` and `e/eterm`). The tree is already on the client's
-    disk when this runs, and C-RO-05 keeps `BUILD.bazel` beside `build`.
+    disk when this runs, and `BUILD.bazel` stays beside `build`.
     """
     seen = {}
     dirs = []
@@ -332,7 +332,7 @@ def parse_manifest(text):
 
     Errors the real body raises (returned, not raised): `schema_version != 1`;
     a link target that is absolute or resolves outside its package's
-    `content_dir` (C-RO-03); a missing or mistyped field; a path field with an
+    `content_dir`; a missing or mistyped field; a path field with an
     empty, `.` or `..` segment, a leading `/`, or a character outside label-safe
     ASCII (on a `windows/*` platform also a device-name segment or one ending
     in `.` or a space); a file, link or `link_free_dirs` entry outside its

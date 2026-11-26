@@ -42,7 +42,7 @@ def hub_content_error(sets, tools):
     return ""
 
 def hub_build_content(sets, tools):
-    """The hub's BUILD.bazel text (pure; C-RO-08).
+    """The hub's BUILD.bazel text.
 
     Toolchains are listed musl first and named `ocx_toolchain_<nnn>_<slug>`
     so declaration order, name order and registration order agree: a musl
@@ -114,7 +114,7 @@ def hub_tool_bzl():
     ])
 
 def hub_platform_error(platforms, available_platforms):
-    """Refuses a requested platform the lock cannot serve (pure; C-RO-08b, V-50).
+    """Refuses a requested platform the lock cannot serve.
 
     Nothing is dropped silently: the first unavailable platform is named,
     together with what the lock does offer.

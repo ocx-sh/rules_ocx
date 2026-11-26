@@ -25,9 +25,9 @@ server does not serve.
 
 **No.** NativeLink serves only the instance names its config lists. `main/a` is refused at
 `GetCapabilities` (exit 34, above). Buildbarn admits any `hardlinking/<suffix>`, since its worker's
-`instanceNamePrefix` is a prefix (S-B spike).
+`instanceNamePrefix` is a prefix .
 
-**Fallback applied** (plan R1 step 2): on NativeLink the silo is `--action_env=OCX_RIG_SILO=<test-id>`,
+**Fallback applied**: on NativeLink the silo is `--action_env=OCX_RIG_SILO=<test-id>`,
 which changes every action key. Three fresh output bases against `main`:
 
 | Leg | Salt | Result |
@@ -49,54 +49,26 @@ A scratch workspace (not committed) with `srcs = ["d"]`, where `d/` holds `f.txt
 | nested `sub/BUILD` | error: `Directory artifact d crosses package boundary into package rooted at d/sub` | same error | same error |
 | empty directory `empty/` (no BUILD below `d`) | kept | **dropped** | **dropped** |
 
-**Neither is kept** on a remote executor. **Fallback applied** (plan R1 step 3): no change to the rules.
-C-RO-04 already gives directories that hold a reserved name file labels, and C-RO-05 moves the files.
-The docs sentence "empty directories are not visible to actions" stays in R9's list.
+**Neither is kept** on a remote executor. **Fallback applied**: no change to the rules.
+The set repository already gives directories that hold a reserved name file labels and moves those files.
+The docs state that empty directories are not visible to actions.
 
-## Baseline: rules_ocx 0.5.1
+## Measures
 
-`task rig:baseline` (`baseline/run_baseline.py`). 0.5.1 from its release archive. Eager tags with
-`isolated_home`, one per platform. A lazy `bins` tag for the network-less leg. Registry numbers are the
-nginx `/v2/` lines of each leg. Each client has its own output base, repository cache and `OCX_HOME`.
-
-<!-- baseline:begin -->
-| measure | buildbarn | nativelink |
-|---|---|---|
-| ocx bootstrap download, @ocx_tool (s) | 14.6 | 6.7 |
-| cold client fetch, all six platforms (s) | 1.4 | 1.3 |
-| registry requests / bytes, linux/amd64+libc.glibc | 6 / 330471 | 6 / 330471 |
-| registry requests / bytes, linux/amd64+libc.musl | 6 / 330463 | 6 / 330463 |
-| registry requests / bytes, linux/arm64+libc.glibc | 6 / 330473 | 6 / 330473 |
-| registry requests / bytes, linux/arm64+libc.musl | 6 / 330463 | 6 / 330463 |
-| registry requests / bytes, darwin/arm64 | 6 / 5555 | 6 / 5555 |
-| registry requests / bytes, windows/amd64 | 6 / 5563 | 6 / 5563 |
-| second fresh client: registry requests / bytes | 6 / 330471 | 6 / 330471 |
-| second fresh client: processes | {'total': 2, 'remote': 0, 'remote_cache_hit': 1} | {'total': 2, 'remote': 0, 'remote_cache_hit': 1} |
-| builds on network-less executors | FAIL: warning: Could not fetch '127.0.0.1:18600/rig/tool:1.0.0@sha256:79a98505a6de92d42ee989a2ad42b03b708db6d325806355f0127d75467b3196' from chained source: transient registry failure: error sending request for url (http://127.0.0.1:18600/v2/) | FAIL: warning: Could not fetch '127.0.0.1:18600/rig/tool:1.0.0@sha256:79a98505a6de92d42ee989a2ad42b03b708db6d325806355f0127d75467b3196' from chained source: transient registry failure: error sending request for url (http://127.0.0.1:18600/v2/) |
-<!-- baseline:end -->
-
-The lazy launcher builds locally (client with a route) on both backends. On the executors it fails as
-shown: 0.5.1 ships `ocx` as an action input and the launcher re-enters it, and the registry is out of
-reach. That run is V-01's red. Every second fresh client pulled the set again: 6 requests, the same
-bytes. The repository rule ran once per client.
-
-## New rules (R8)
-
-Measured 2026-11-26 with `task rig:up rig:seed rig:baseline rig:test`, one rig per backend: Buildbarn 30 passed,
-NativeLink 29 passed and 1 skipped (the no-shell runner is a Buildbarn worker). `<run-dir>/measures.json`:
+Measured 2026-11-26 with `task rig:up rig:seed rig:test`, one rig per backend
+(the no-shell runner is a Buildbarn worker, so one test is skipped on NativeLink). `<run-dir>/measures.json`:
 
 | measure | buildbarn | nativelink |
 |---|---|---|
-| V-31: 5 actions over a one-file set, remote (s) | 0.8 | 1.0 |
-| V-31: 5 actions over the 100006-file set, remote, files uploaded (s) | 58.0 | 104.5 |
-| V-65: fetch of the 100006-file set (s) | 27.6 | 27.6 |
-| V-65: of that, `ocx vendor` (s) | 22.2 | 22.3 |
-| V-65: rule work, fetch minus `ocx vendor` (s), budget 10 | 5.4 | 5.3 |
-| V-65: the same subtraction for a one-file set (s) | 0.1 | 0.1 |
+| 5 actions over a one-file set, remote (s) | 0.8 | 1.0 |
+| 5 actions over the 100006-file set, remote, files uploaded (s) | 58.0 | 104.5 |
+| fetch of the 100006-file set (s) | 27.6 | 27.6 |
+| of that, `ocx vendor` (s) | 22.2 | 22.3 |
+| rule work, fetch minus `ocx vendor` (s), budget 10 | 5.4 | 5.3 |
+| the same subtraction for a one-file set (s) | 0.1 | 0.1 |
 
-V-65: the rule's `json.decode`, BUILD generation and moves cost 5.4 s and 5.3 s, inside the budget. The 12 s
-the first measure reported counted the first fetch of a client, which also pays Bazel's module graph and registry
-files and the extension's fact runs. The measure now fetches a small set first and times the big fetch alone; the
-bound still includes Bazel's own per-fetch work, which the one-file row puts at 0.1 s. V-31: the 100000-file
-batch takes 58.0 s and 104.5 s against 0.8 s and 1.0 s for the one-file set; each test starts on an empty
-instance name, so the batch includes the upload of every file.
+The rule's `json.decode`, BUILD generation and moves cost 5.4 s and 5.3 s, inside the budget. The measure fetches a
+small set first and times the big fetch alone, so it excludes a client's first fetch (Bazel's module graph, registry
+files and the extension's fact runs); the bound still includes Bazel's own per-fetch work, which the one-file row puts
+at 0.1 s. The 100000-file batch takes 58.0 s and 104.5 s against 0.8 s and 1.0 s for the one-file set; each test
+starts on an empty instance name, so the batch includes the upload of every file.

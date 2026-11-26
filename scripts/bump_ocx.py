@@ -28,7 +28,7 @@ from urllib.parse import unquote, urlsplit
 DIST_URL = "https://setup.ocx.sh/dist.json"
 EXPECTED_TARGETS = 8
 # Keep in sync with archive_type() in ocx/private/manifest.bzl.
-KNOWN_EXTS = (".zip", ".tar.gz", ".tar.xz")
+KNOWN_EXTS = (".zip", ".tar.gz")
 # artifact_url() in manifest.bzl returns row["url"] verbatim, so these two are
 # the only thing standing between a fabricated row and an attacker-chosen host.
 # Mirrors are unaffected: OCX_INSTALL_MIRROR_URL rewrites at download time.
@@ -240,8 +240,7 @@ def check_row(r, where):
         die(
             f"{where}: filename {filename!r} has no extension known to archive_type() "
             f"in ocx/private/manifest.bzl (known: {', '.join(KNOWN_EXTS)}). Teach "
-            f"archive_type() the new format first — it silently falls back to tar.xz, "
-            f"which would fail at extraction."
+            f"archive_type() the new format first — it fails on an unknown one."
         )
 
 

@@ -1,7 +1,7 @@
 # Copyright 2026 The OCX Authors
 # SPDX-License-Identifier: Apache-2.0
-"""Remote execution on network-less executors: V-01, V-02, V-06, V-07, V-08, V-12, V-13, V-28, V-29, V-30, V-34,
-V-41, V-47. Each test carries its control case; the mutation rows (V-12, V-13, V-30, V-47) are R8's."""
+"""Remote execution on network-less executors. Each test carries its control case; the control that the executors
+really have no network is test_executor_has_no_route."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 
 import pytest
-from conftest import BACKEND, RUN, Workspace, assert_ok, fixtures, output
+from conftest import BACKEND, Workspace, assert_ok, fixtures, output
 
 CONFIG = BACKEND  # buildbarn | nativelink
 
@@ -18,10 +18,9 @@ def manifest(client, repo: str) -> dict:
     return json.loads((client.external(repo) / "manifest.json").read_text(encoding="utf-8"))
 
 
-def test_v01_build_passes_on_network_less_executors(workspace: Workspace) -> None:
-    # Control: rules_ocx 0.5.1 on the same executors (task rig:baseline) fails, its launcher re-entering ocx.
-    base = json.loads((RUN / "baseline.json").read_text(encoding="utf-8"))["backends"][BACKEND]["network_less"]
-    assert base["local_pass"] and not base["remote_pass"], base
+def test_build_passes_on_network_less_executors(workspace: Workspace) -> None:
+    # The control that "no network" holds is test_executor_has_no_route: the same probe reports a default route
+    # on the client and none on the executor.
     c = workspace.client("a")
     res = c.run("build", "//:tool_run", config=CONFIG)
     assert_ok(res, "tool_run")
@@ -29,7 +28,19 @@ def test_v01_build_passes_on_network_less_executors(workspace: Workspace) -> Non
     assert output(c, "tool_run.txt").strip() == "tool platform=linux/amd64 libc=glibc"
 
 
-def test_v02_exec_platform_selects_its_set(workspace: Workspace, log) -> None:
+def test_executor_has_no_route(workspace: Workspace) -> None:
+    """Red control of the whole file: an action run on the executor finds no default route, the same action run locally does."""
+    c = workspace.client("a")
+    local = c.run("build", "//:executor_net", "--spawn_strategy=local", "--action_env=RIG_PROBE=local", config=CONFIG)
+    assert_ok(local, "executor_net, local")
+    assert output(c, "executor_net.txt").strip() == "default-route=yes", "the probe cannot see a route even where one exists"
+    remote = c.run("build", "//:executor_net", "--action_env=RIG_PROBE=remote", config=CONFIG)
+    assert_ok(remote, "executor_net, remote")
+    assert remote.processes().get("remote", 0) >= 1, remote.processes()
+    assert output(c, "executor_net.txt").strip() == "default-route=none"
+
+
+def test_exec_platform_selects_its_set(workspace: Workspace, log) -> None:
     c = workspace.client("a")
     # The host platform is always an execution platform too; making it exec_none leaves no platform a toolchain fits.
     control = c.run("build", "//:tool_run", "--extra_execution_platforms=//platforms:exec_none",
@@ -49,7 +60,7 @@ def _inputs_named_ocx(res) -> list[str]:
     return [i["path"] for s in res.spawns() for i in s.get("inputs", []) if Path(i["path"]).name in ("ocx", "ocx.exe")]
 
 
-def test_v06_no_ocx_among_action_inputs(workspace: Workspace) -> None:
+def test_no_ocx_among_action_inputs(workspace: Workspace) -> None:
     c = workspace.client("a")
     control = c.run("build", "//:ocx_input_control", config=CONFIG)
     assert_ok(control, "ocx_input_control")
@@ -60,7 +71,7 @@ def test_v06_no_ocx_among_action_inputs(workspace: Workspace) -> None:
 
 
 @pytest.mark.skipif(BACKEND != "buildbarn", reason="the no-shell runner is a Buildbarn worker (compose runner-noshell)")
-def test_v07_v28_direct_start_on_shell_less_runner(workspace: Workspace) -> None:
+def test_direct_start_on_shell_less_runner(workspace: Workspace) -> None:
     c = workspace.client("a")
     control = c.run("build", "//:sh_direct_control", config="buildbarn_noshell")
     assert control.rc != 0 and "no such file or directory" in control.out.lower(), control.out[-2000:]
@@ -71,7 +82,7 @@ def test_v07_v28_direct_start_on_shell_less_runner(workspace: Workspace) -> None
     assert_ok(genrule, "tool_run on the shell runner")
 
 
-def test_v08_wasm_package_is_an_action_input(workspace: Workspace) -> None:
+def test_wasm_package_is_an_action_input(workspace: Workspace) -> None:
     c = workspace.client("a")
     res = c.run("build", "//:wasm_read", config=CONFIG)
     assert_ok(res, "wasm_read")
@@ -91,7 +102,7 @@ def _manifest_links(m: dict) -> dict[str, str]:
     return out
 
 
-def test_v12_links_are_links_with_their_targets(workspace: Workspace) -> None:
+def test_links_are_links_with_their_targets(workspace: Workspace) -> None:
     c = workspace.client("a")
     res = c.run("build", "//:links_read", config=CONFIG)
     assert_ok(res, "links_read")
@@ -102,14 +113,14 @@ def test_v12_links_are_links_with_their_targets(workspace: Workspace) -> None:
 
 
 @pytest.mark.parametrize(("platform", "libc"), [("exec_glibc", "glibc"), ("exec_musl", "musl")])
-def test_v13_libc_leaf(workspace: Workspace, platform: str, libc: str) -> None:
+def test_libc_leaf(workspace: Workspace, platform: str, libc: str) -> None:
     c = workspace.client("a")
     res = c.run("build", "//:tool_run", f"--extra_execution_platforms=//platforms:{platform}", config=CONFIG)
     assert_ok(res, f"tool_run on {platform}")
     assert output(c, "tool_run.txt").strip() == f"tool platform=linux/amd64 libc={libc}"
 
 
-def test_v29_v30_entry_point_without_ocx(workspace: Workspace) -> None:
+def test_entry_point_without_ocx(workspace: Workspace) -> None:
     c = workspace.client("a")
     res = c.run("build", "//:entry_run", config=CONFIG)
     assert_ok(res, "entry_run")
@@ -117,7 +128,7 @@ def test_v29_v30_entry_point_without_ocx(workspace: Workspace) -> None:
     assert not _inputs_named_ocx(res)
 
 
-def test_v34_directory_labels_give_the_file_label_input_list(workspace: Workspace) -> None:
+def test_directory_labels_give_the_file_label_input_list(workspace: Workspace) -> None:
     c = workspace.client("a")
     res = c.run("build", "//:set_inputs", config=CONFIG)
     assert_ok(res, "set_inputs")
@@ -135,14 +146,14 @@ def test_v34_directory_labels_give_the_file_label_input_list(workspace: Workspac
 
 
 @pytest.mark.parametrize(("target", "want"), [("cmake_finds_ccache", "ccache-found"), ("cmake_finds_ccache_alone", "ccache-missing")])
-def test_v41_a_tool_brings_its_whole_set(workspace: Workspace, target: str, want: str) -> None:
+def test_a_tool_brings_its_whole_set(workspace: Workspace, target: str, want: str) -> None:
     c = workspace.client("a")
     res = c.run("build", f"//:{target}", config=CONFIG)
     assert_ok(res, target)
     assert output(c, f"{target}.txt").split() == ["cmake", want]
 
 
-def test_v47_reserved_names_at_their_places(workspace: Workspace) -> None:
+def test_reserved_names_at_their_places(workspace: Workspace) -> None:
     c = workspace.client("a")
     res = c.run("build", "//:buildfiles_read", config=CONFIG)
     assert_ok(res, "buildfiles_read")

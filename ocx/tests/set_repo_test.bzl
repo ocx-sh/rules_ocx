@@ -279,7 +279,6 @@ def _isolated_env_test_impl(ctx):
         attr = struct(
             no_config = False,
             config = None,
-            patch_snapshot = None,
             sigstore_trusted_root = None,
             allow_unverified = False,
             allow_yanked = False,

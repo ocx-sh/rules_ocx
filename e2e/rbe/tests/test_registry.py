@@ -1,7 +1,6 @@
 # Copyright 2026 The OCX Authors
 # SPDX-License-Identifier: Apache-2.0
-"""Registry-facing rows and measures: V-10, V-15, V-25, V-57, V-71 (isolated-home half), V-31, V-65.
-V-31 and V-65 write `<run-dir>/measures.json`, which R8 folds into RESULTS.md."""
+"""Registry-facing rows and measures. test_measures writes `<run-dir>/measures.json`, which RESULTS.md reports."""
 
 from __future__ import annotations
 
@@ -35,7 +34,7 @@ def _files_holding(root: Path, needles: list[bytes]) -> list[str]:
     return hits
 
 
-def test_v10_private_fetch_leaves_no_secret(workspace: Workspace) -> None:
+def test_private_fetch_leaves_no_secret(workspace: Workspace) -> None:
     creds = credentials()
     needles = [creds["password"].encode(), base64.b64encode(f"{creds['user']}:{creds['password']}".encode())]
     c = workspace.client("a")
@@ -55,7 +54,7 @@ def _is_tag_lookup(row: dict) -> bool:
     return "/manifests/1.0.0" in row["uri"] or "/tags/list" in row["uri"]
 
 
-def test_v15_floating_tag_resolves_from_the_index(workspace: Workspace, log) -> None:
+def test_floating_tag_resolves_from_the_index(workspace: Workspace, log) -> None:
     index = workspace.path / "index"
     ocx(workspace.path.parent / f"{workspace.test_id}-indexhome", "--index", str(index), "index", "update", f"{REGISTRY}/rig/tool")
     (workspace.path / "BUILD.bazel").write_text((workspace.path / "BUILD.bazel").read_text() + '\nexports_files(["index"])\n')
@@ -79,7 +78,7 @@ def test_v15_floating_tag_resolves_from_the_index(workspace: Workspace, log) -> 
     assert [r["uri"] for r in log.registry() if _is_tag_lookup(r)] == []
 
 
-def test_v25_no_author_env_syntax_reaches_the_rules(workspace: Workspace) -> None:
+def test_no_author_env_syntax_reaches_the_rules(workspace: Workspace) -> None:
     c = workspace.client("a")
     res = c.run("build", "//:envtpl_run", config=CONFIG)
     assert_ok(res, "envtpl_run")
@@ -90,7 +89,7 @@ def test_v25_no_author_env_syntax_reaches_the_rules(workspace: Workspace) -> Non
     assert [v for v in values if "${" in v] == []
 
 
-def test_v57_set_with_no_linux_leaf_from_a_linux_client(workspace: Workspace) -> None:
+def test_set_with_no_linux_leaf_from_a_linux_client(workspace: Workspace) -> None:
     out = workspace.path / ".winonly-out"
     control = ocx(workspace.path.parent / f"{workspace.test_id}-vhome", "vendor", "-o", str(out), "-g", "winonly",
                   cwd=workspace.path / "winonly", check=False)  # fmt: skip
@@ -101,7 +100,7 @@ def test_v57_set_with_no_linux_leaf_from_a_linux_client(workspace: Workspace) ->
     assert '"project|winonly|' in (workspace.path / "MODULE.bazel.lock").read_text()
 
 
-def test_v71_isolated_home_ignores_a_tampered_client_home(workspace: Workspace) -> None:
+def test_client_ocx_home_is_never_used(workspace: Workspace) -> None:
     home = workspace.path.parent / f"{workspace.test_id}-clienthome"
     ocx(home, "package", "pull", "-p", "linux/amd64+libc.glibc", f"{REGISTRY}/rig/tool:1.0.0", check=True)
     tools = [p for p in (home / "home").rglob("bin/tool") if p.is_file()]
@@ -127,7 +126,7 @@ def _ocx_spans(ws: Workspace, since: int) -> list[float]:
     return spans
 
 
-def test_v31_v65_measures(workspace: Workspace) -> None:
+def test_measures(workspace: Workspace) -> None:
     c = workspace.client("a")
     # Priming fetch of a one-file set: it pays Bazel's startup, the module graph and Bazel registry files, the
     # extension's fact runs and `@ocx_tool`. None of that is the set rule's work, and none of it is in the next fetch.
@@ -141,7 +140,7 @@ def test_v31_v65_measures(workspace: Workspace) -> None:
     assert_ok(fetch, "fetch the 100000-file set")
     ocx_seconds = sum(_ocx_spans(workspace, n))
     files = sum(1 for p in c.external("big_linux_amd64").rglob("*") if p.is_file() or p.is_symlink())
-    # V-65: the rule's own work (decode + BUILD generation + moves) is the second fetch minus its `ocx vendor` run.
+    # The rule's own work (decode + BUILD generation + moves) is the second fetch minus its `ocx vendor` run.
     # What stays is Bazel's per-fetch cost for any set; the small set's own remainder is recorded as `floor_seconds`.
     _record("v65_big_set", {"files": files, "fetch_seconds": round(fetch.seconds, 1), "ocx_seconds": round(ocx_seconds, 1),
                             "rule_seconds": round(fetch.seconds - ocx_seconds, 1),

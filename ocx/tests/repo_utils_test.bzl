@@ -11,7 +11,6 @@ load(
     "OCX_ENV_CLASSES",
     "SYSEXIT_HINTS",
     "ambient_config_paths",
-    "decode_json",
     "is_absolute_path",
     "make_ocx_env",
     "run_ocx",
@@ -50,7 +49,6 @@ def _env_ctx(
         env = {},
         no_config = False,
         config = None,
-        patch_snapshot = None,
         allow_unverified = False,
         allow_yanked = False,
         sigstore_trusted_root = None):
@@ -67,7 +65,6 @@ def _env_ctx(
         env: the ambient environment ctx.getenv() reads.
         no_config: the `no_config` attr.
         config: the `config` attr (a path string stands in for the label).
-        patch_snapshot: the `patch_snapshot` attr.
         allow_unverified: the POLICY_ATTRS `allow_unverified` attr.
         allow_yanked: the POLICY_ATTRS `allow_yanked` attr.
         sigstore_trusted_root: the POLICY_ATTRS `sigstore_trusted_root` attr
@@ -107,7 +104,6 @@ def _env_ctx(
         attr = struct(
             no_config = no_config,
             config = config,
-            patch_snapshot = patch_snapshot,
             allow_unverified = allow_unverified,
             allow_yanked = allow_yanked,
             sigstore_trusted_root = sigstore_trusted_root,
@@ -120,8 +116,6 @@ def _env_ctx(
 _AMBIENT = {
     "OCX_HOME": "/home/u/.ocx",
     "OCX_CONFIG": "/site/config.toml",
-    "OCX_PATCHES": "{\"patches\":{\"ocx.sh/evil\":\"latest\"}}",
-    "OCX_PATCH_SNAPSHOT": "/site/patches.snapshot.json",
     "OCX_MIRRORS": "https://mirror.example",
     "OCX_SIGSTORE_TRUSTED_ROOT": "/site/trusted-root.json",
     # The two weakening knobs, exported three layers up in a CI image, and the
@@ -149,11 +143,6 @@ def _make_ocx_env_test_impl(ctx):
     asserts.equals(env, "0", ambient["OCX_QUIET"])
     asserts.equals(env, "1", ambient["OCX_NO_CONFIG_REFRESH"])
 
-    # 0.6.1+: no consent stamp for a checkout the user never allowed, and no
-    # exported toolchain root steering the render out of the repository.
-    asserts.equals(env, "1", ambient["OCX_NO_CONSENT"])
-    asserts.equals(env, "", ambient["OCX_TOOLCHAIN_DIR"])
-
     # OCX_NO_PROJECT is pinned on, closing the CWD walk the package tier would
     # otherwise run from the fetch directory. An ambient "0" reopens it.
     asserts.equals(env, "1", ambient["OCX_NO_PROJECT"])
@@ -173,14 +162,12 @@ def _make_ocx_env_test_impl(ctx):
     asserts.equals(env, "1", loose.get("OCX_NO_VERIFY", "<absent>"))
     asserts.equals(env, "1", loose.get("OCX_ALLOW_YANKED", "<absent>"))
 
-    # no_config: OCX_NO_CONFIG prunes only the *discovered* tiers. Without
-    # these three blanks an ambient OCX_PATCHES becomes the only patch source
-    # left in a build that asked for hermeticity.
+    # no_config: OCX_NO_CONFIG prunes only the *discovered* tiers, so an
+    # ambient OCX_CONFIG is blanked as well.
     hermetic = _env_ctx(env = _AMBIENT, no_config = True)
     blanked = make_ocx_env(hermetic, host).env
     asserts.equals(env, "1", blanked["OCX_NO_CONFIG"])
-    for key in ["OCX_CONFIG", "OCX_PATCHES", "OCX_PATCH_SNAPSHOT"]:
-        asserts.equals(env, "", blanked[key], key + " survived no_config")
+    asserts.equals(env, "", blanked["OCX_CONFIG"], "OCX_CONFIG survived no_config")
 
     # C-003: a trust root is not a config tier, so no_config leaves it alone —
     # with no_config plus a `config` label carrying [[trust.policy]], ocx still
@@ -194,22 +181,19 @@ def _make_ocx_env_test_impl(ctx):
     )
 
     # The attrs are what the caller did ask for, so they are reinstated over
-    # the blanks — but OCX_PATCHES has no attr and stays closed.
+    # the blanks.
     attrs = make_ocx_env(
         _env_ctx(
             env = _AMBIENT,
             no_config = True,
             config = "/w/cfg.toml",
-            patch_snapshot = "/w/snap.json",
         ),
         host,
     ).env
     asserts.equals(env, "/w/cfg.toml", attrs["OCX_CONFIG"])
-    asserts.equals(env, "/w/snap.json", attrs["OCX_PATCH_SNAPSHOT"])
-    asserts.equals(env, "", attrs["OCX_PATCHES"])
 
     # A translucent label attr replaces the ambient value and is watched —
-    # ctx.path() alone registers nothing since Bazel 7.1; the shadowed ambient
+    # ctx.path() alone registers nothing; the shadowed ambient
     # file is not, since nothing reads it any more.
     pinned = _env_ctx(env = _AMBIENT, sigstore_trusted_root = "/w/trusted-root.json")
     asserts.equals(
@@ -281,20 +265,18 @@ _PASSTHROUGH_ENV = [
     "OCX_INDEX",
     "OCX_DEFAULT_REGISTRY",
     "OCX_MANAGED_CONFIG",
-    "OCX_PATCHES",
     "OCX_EXTRA_CA_CERTS",
     "OCX_CONFIG",
-    "OCX_PATCH_SNAPSHOT",
     "OCX_SIGSTORE_TRUSTED_ROOT",
     "OCX_NO_CONFIG",
 ]
 
 def _passthrough_env_test_impl(ctx):
-    """W17/F5: all 15 forwarded env vars, and nothing else."""
+    """W17/F5: all 13 forwarded env vars, and nothing else."""
     env = unittest.begin(ctx)
     forwarded = [key for key, row in OCX_ENV_CLASSES.items() if row.cls in ["site", "translucent"]]
     asserts.equals(env, _PASSTHROUGH_ENV, forwarded)
-    asserts.equals(env, 15, len(forwarded))
+    asserts.equals(env, 13, len(forwarded))
 
     # The weakening pair is explicit-only: reading either with getenv() puts
     # an ambient value back in charge of what the build verifies and accepts,
@@ -305,7 +287,7 @@ def _passthrough_env_test_impl(ctx):
         asserts.false(env, key in forwarded, key + " must never be read from the environment")
 
     # Resolved or pinned, never forwarded verbatim.
-    for key in ["OCX_HOME", "OCX_NO_CONFIG_REFRESH", "OCX_PROJECT", "OCX_GLOBAL", "OCX_QUIET", "OCX_NO_PROJECT", "OCX_NO_CONSENT", "OCX_TOOLCHAIN_DIR"]:
+    for key in ["OCX_HOME", "OCX_NO_CONFIG_REFRESH", "OCX_PROJECT", "OCX_GLOBAL", "OCX_QUIET", "OCX_NO_PROJECT"]:
         asserts.false(env, key in forwarded, key + " is not a passthrough")
     return unittest.end(env)
 
@@ -313,11 +295,10 @@ def _run_ocx_retry_test_impl(ctx):
     """F2: only a transient sysexit buys another registry round-trip."""
     env = unittest.begin(ctx)
 
-    # 75 is ocx's own "transient, retry me" — retried even when the caller
-    # asked for no retries at all.
+    # 75 is ocx's own "transient, retry me": retried twice, with a backoff.
     calls = []
     sleeps = []
-    asserts.equals(env, "out0", _run_ocx(_replay_ctx([75, 75, 0], calls, sleeps), retries = 0))
+    asserts.equals(env, "out0", _run_ocx(_replay_ctx([75, 75, 0], calls, sleeps)))
     asserts.equals(env, 3, len(calls))
 
     # The backoff shells out to an absolute /bin/sh, but the bare `sleep` in
@@ -326,32 +307,15 @@ def _run_ocx_retry_test_impl(ctx):
     asserts.equals(env, 2, len(sleeps))
     asserts.equals(env, {"PATH": "/usr/bin:/bin"}, sleeps[0])
 
-    # 74 is the store-symlink TOCTOU two parallel fetches race on: retried up
-    # to the caller's budget.
-    calls = []
-    asserts.equals(env, "out0", _run_ocx(_replay_ctx([74, 0], calls), retries = 2))
-    asserts.equals(env, 2, len(calls))
-
-    # 69 is a registry that may simply come back.
-    calls = []
-    asserts.equals(env, "out0", _run_ocx(_replay_ctx([69, 0], calls), retries = 2))
-    asserts.equals(env, 2, len(calls))
-
     # A first-attempt success costs exactly one call.
     calls = []
-    asserts.equals(env, "out0", _run_ocx(_replay_ctx([0], calls), retries = 2))
+    asserts.equals(env, "out0", _run_ocx(_replay_ctx([0], calls)))
     asserts.equals(env, 1, len(calls))
     return unittest.end(env)
 
-def _run_ocx(fake, retries = 0, hints = {}):
+def _run_ocx(fake):
     """run_ocx() against a fake ctx, with the arguments a test does not vary."""
-    return run_ocx(fake, "/fake/ocx", ["vendor", "pkg"], {}, "vendoring pkg", False, hints = hints, retries = retries)
-
-# A Starlark failure carries the traceback, and the traceback echoes the
-# *source line* of every frame — so a fragment written literally into the call
-# below would match the echo whatever the code did. Held in a constant so the
-# call site cannot spell it.
-_CALLSITE_HINT = "the call-site hint, not the shared table"
+    return run_ocx(fake, "/fake/ocx", ["vendor", "pkg"], {}, "vendoring pkg", False)
 
 # Guards whose whole point is a fail(), which a unittest impl cannot catch:
 # {case: fragment the message must carry}. Every case is exercised through a
@@ -360,17 +324,12 @@ _CALLSITE_HINT = "the call-site hint, not the shared table"
 _GUARD_CASES = {
     # F2: a permanent sysexit must not buy a second registry round-trip. The
     # scripted 0 behind it succeeds if — and only if — the code was retried.
+    "retry_69": "exit 69",
+    "retry_74": "exit 74",
     "retry_79": "exit 79",
     "retry_80": "exit 80",
     "retry_81": "exit 81",
     "retry_65": "exit 65",
-    # F5: a call-site hint beats the shared sysexits table.
-    "hint_precedence": _CALLSITE_HINT,
-    # F5: decode_json's own guard — both branches. Malformed (rather than
-    # absent) output raises out of json.decode itself, which names neither the
-    # command nor rules_ocx — so the fragment is json.decode's own wording.
-    "decode_empty": "produced no output",
-    "decode_garbage": "unexpected character",
     # C-003: a relative ambient translucent `path` row is forwarded to ocx but
     # unwatchable, so it is refused rather than silently left unwatched. The
     # `file://` carve-out is scoped to the one row ocx parses as a file
@@ -382,11 +341,10 @@ _GUARD_CASES = {
     "file_url_wrong_row": "must be an absolute path",
     "file_url_relative": "must be an absolute path",
     "url_wrong_scheme": "must be an absolute path",
-    # C-008: the three sysexits 0.6.0's verifying fetch path made reachable.
-    # Each case scripts a trailing 0 that is reached only on a retry, so the
-    # same target proves the hint text *and* that _RETRYABLE did not grow —
-    # S-006 rules out auto-retrying 83, which would cost three round-trips on
-    # a settled transparency-log outage.
+    # The three sysexits the verifying fetch path raises. Each case scripts a
+    # trailing 0 that is reached only on a retry, so the same target proves the
+    # hint text *and* that _RETRYABLE did not grow: auto-retrying 83 would cost
+    # three round-trips on a settled transparency-log outage.
     "sysexit_83": "transparency log is unreachable",
     "sysexit_84": "does not support the OCI Referrers API",
     "sysexit_85": "signing key backend",
@@ -397,14 +355,7 @@ def _guard_impl(ctx):
     if case.startswith("retry_") or case.startswith("sysexit_"):
         # The trailing 0 is reached only when the leading code was retried.
         code = case.split("_")[1]
-        _run_ocx(_replay_ctx([int(code), 0], []), retries = 2)
-    elif case == "hint_precedence":
-        # 65 has a shared hint too, so only precedence decides which is shown.
-        _run_ocx(_replay_ctx([65], []), hints = {65: _CALLSITE_HINT})
-    elif case == "decode_empty":
-        decode_json("   \n", "ocx package env")
-    elif case == "decode_garbage":
-        decode_json("oops", "ocx package env")
+        _run_ocx(_replay_ctx([int(code), 0], []))
     elif case == "relative_translucent_path":
         make_ocx_env(
             _env_ctx(env = {"OCX_HOME": "/home/u/.ocx", "OCX_CONFIG": "./site.toml"}),
@@ -452,14 +403,11 @@ def _ambient_config_paths_test_impl(ctx):
     env = unittest.begin(ctx)
     posix_env = {"XDG_CONFIG_HOME": "/x/cfg", "HOME": "/home/u", "APPDATA": ""}
 
-    # Linux: /etc tier, XDG user config, then the three OCX_HOME-rooted tiers.
+    # Linux: /etc tier, then the XDG user config.
     asserts.equals(env, [
         "/etc/ocx/config.toml",
         "/x/cfg/ocx/config.toml",
-        "/home/u/.ocx/config.toml",
-        "/home/u/.ocx/state/managed-config/snapshot.json",
-        "/home/u/.ocx/state/managed-config/config.toml",
-    ], ambient_config_paths(False, False, posix_env, "/home/u/.ocx"))
+    ], ambient_config_paths(False, False, posix_env))
 
     # Unset XDG_CONFIG_HOME falls back to ~/.config; so does a relative one.
     for xdg in ["", "cfg"]:
@@ -467,7 +415,6 @@ def _ambient_config_paths_test_impl(ctx):
             False,
             False,
             {"XDG_CONFIG_HOME": xdg, "HOME": "/home/u"},
-            "",
         )
         asserts.equals(env, ["/etc/ocx/config.toml", "/home/u/.config/ocx/config.toml"], paths)
 
@@ -475,49 +422,34 @@ def _ambient_config_paths_test_impl(ctx):
     asserts.equals(env, [
         "/etc/ocx/config.toml",
         "/home/u/Library/Application Support/ocx/config.toml",
-    ], ambient_config_paths(False, True, posix_env, ""))
+    ], ambient_config_paths(False, True, posix_env))
 
     # Windows: APPDATA, backslashes, no /etc tier.
     asserts.equals(env, [
         "C:\\Users\\u\\AppData\\Roaming\\ocx\\config.toml",
-        "C:\\Users\\u\\.ocx\\config.toml",
-        "C:\\Users\\u\\.ocx\\state\\managed-config\\snapshot.json",
-        "C:\\Users\\u\\.ocx\\state\\managed-config\\config.toml",
     ], ambient_config_paths(
         True,
         False,
         {"APPDATA": "C:\\Users\\u\\AppData\\Roaming", "HOME": "", "XDG_CONFIG_HOME": ""},
-        "C:\\Users\\u\\.ocx",
     ))
 
-    # Windows without APPDATA: no /etc tier and no user tier — only OCX_HOME's.
-    asserts.equals(env, [
-        "C:\\Users\\u\\.ocx\\config.toml",
-        "C:\\Users\\u\\.ocx\\state\\managed-config\\snapshot.json",
-        "C:\\Users\\u\\.ocx\\state\\managed-config\\config.toml",
-    ], ambient_config_paths(
+    # Windows without APPDATA: no /etc tier and no user tier.
+    asserts.equals(env, [], ambient_config_paths(
         True,
         False,
         {"APPDATA": "", "HOME": "/home/u", "XDG_CONFIG_HOME": "/x/cfg"},
-        "C:\\Users\\u\\.ocx",
     ))
 
     # macOS without HOME: no Application Support tier to derive, and XDG stays
     # ignored even though it is the only thing set.
-    asserts.equals(env, [
-        "/etc/ocx/config.toml",
-        "/home/u/.ocx/config.toml",
-        "/home/u/.ocx/state/managed-config/snapshot.json",
-        "/home/u/.ocx/state/managed-config/config.toml",
-    ], ambient_config_paths(
+    asserts.equals(env, ["/etc/ocx/config.toml"], ambient_config_paths(
         False,
         True,
         {"HOME": "", "XDG_CONFIG_HOME": "/x/cfg", "APPDATA": "C:\\Users\\u\\AppData\\Roaming"},
-        "/home/u/.ocx",
     ))
 
-    # Nothing to discover: no home (the store is inside the fetched repo) and no env at all.
-    asserts.equals(env, ["/etc/ocx/config.toml"], ambient_config_paths(False, False, {}, ""))
+    # Nothing to discover: no env at all.
+    asserts.equals(env, ["/etc/ocx/config.toml"], ambient_config_paths(False, False, {}))
     return unittest.end(env)
 
 def _is_absolute_path_test_impl(ctx):
@@ -567,11 +499,10 @@ def _truthy_test_impl(ctx):
     return unittest.end(env)
 
 # W17: every sysexit AGENTS.md documents as reachable from a repository rule.
-# 83/84/85 joined in 0.6.0, when signature verification attached to the fetch
-# path (C-008).
+# 83/84/85 are what signature verification raises on the fetch path.
 _DOCUMENTED_SYSEXITS = [64, 65, 69, 74, 75, 77, 78, 79, 80, 81, 83, 84, 85]
 
-# (code, fragment): the cause each hint must name since ocx 0.6.1/0.6.2.
+# (code, fragment): the cause each hint must name.
 _HINT_CAUSES = [
     (65, "refused to extract"),
     (65, "OCX_EXTRA_CA_CERTS"),
@@ -596,7 +527,7 @@ def _sysexit_hints_test_impl(ctx):
     asserts.false(env, 82 in SYSEXIT_HINTS, "sysexit 82 is unreachable from a repository rule")
     asserts.false(env, 86 in SYSEXIT_HINTS, "sysexit 86 is unreachable from a repository rule")
 
-    # 0.6.1/0.6.2 moved causes onto 65, 69 and 78 (and a CA file onto 74);
+    # Causes land on 65, 69 and 78 (and a CA file on 74);
     # each hint must name what now lands there, or it misdirects the fix.
     for code, fragment in _HINT_CAUSES:
         asserts.true(env, fragment in SYSEXIT_HINTS[code], "sysexit {} hint omits '{}'".format(code, fragment))

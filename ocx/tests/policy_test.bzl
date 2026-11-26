@@ -21,12 +21,12 @@ load(
 # C-001: the four classes, and how many rows each carries. A count is what
 # catches a row that silently changed class — the per-row assertions below
 # only see the row they are on.
-_CLASS_SIZES = {"site": 11, "translucent": 4, "explicit": 2, "pinned": 7}
+_CLASS_SIZES = {"site": 10, "translucent": 3, "explicit": 2, "pinned": 5}
 
 # C-001: the rows `no_config` blanks. OCX_SIGSTORE_TRUSTED_ROOT is deliberately
 # absent — a trust root is not a config tier, and with `no_config` plus a
 # `config` label carrying [[trust.policy]] ocx still reads the env rung.
-_HERMETIC = ["OCX_PATCHES", "OCX_CONFIG", "OCX_PATCH_SNAPSHOT"]
+_HERMETIC = ["OCX_CONFIG"]
 
 def _env_classes_table_test_impl(ctx):
     """C-001/C-004: one table, four classes, every row well-formed."""

@@ -1,6 +1,6 @@
 # Copyright 2026 The OCX Authors
 # SPDX-License-Identifier: Apache-2.0
-"""Network blocked: V-04 (bazel vendor), V-05 (export directory as blob_dirs), V-32 (blob cache as blob_dirs).
+"""Network blocked: a build from `bazel vendor`, an exported directory as blob_dirs, a blob cache as blob_dirs.
 
 The offline leg runs Bazel in the compose `client` service (`network_mode: none`), with the run tree and the
 checkout mounted at their host paths and the host's uid, so the same paths and files serve both sides."""
@@ -52,13 +52,13 @@ def _out(proc: subprocess.CompletedProcess) -> str:
     return "\n".join((proc.stdout + proc.stderr).splitlines()[-40:])
 
 
-def test_v04_build_from_bazel_vendor_with_network_blocked(workspace: Workspace) -> None:
+def test_build_from_bazel_vendor_with_network_blocked(workspace: Workspace) -> None:
     host = workspace.client("host")
     vendor = workspace.path / "vendor"
     assert_ok(host.run("vendor", f"--vendor_dir={vendor}", "//:tool_run", lockfile="update"), "bazel vendor")
     control = offline(workspace.client("offline-control"), host, "//:tool_run")
     out = control.stdout + control.stderr
-    # Same signature as the V-05/V-32 control: the set fetch reached `ocx vendor` and the registry had no route.
+    # Same signature as the blob_dirs control: the set fetch reached `ocx vendor` and the registry had no route.
     # Any other failure (docker, Bazel, the module registry) is not a control.
     assert control.returncode != 0 and "bcr.bazel.build" not in out and re.search(r"\(exit (69|75|81)\)", out), (
         "control: the network-less client must fail at the set fetch: " + _out(control)
@@ -81,7 +81,7 @@ def _blob_cache_dir(ws: Workspace) -> str:
 
 
 @pytest.mark.parametrize("make", [_export_dir, _blob_cache_dir], ids=["v05-export", "v32-blob-cache"])
-def test_v05_v32_blob_dirs_with_network_blocked(workspace: Workspace, make) -> None:
+def test_blob_dirs_with_network_blocked(workspace: Workspace, make) -> None:
     name = make(workspace)
     (workspace.path / "BUILD.bazel").write_text((workspace.path / "BUILD.bazel").read_text() + f'\nexports_files(["{name}"])\n')
     module = workspace.path / "MODULE.bazel"

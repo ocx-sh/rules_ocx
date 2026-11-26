@@ -7,12 +7,12 @@ Bootstraps the pinned ocx CLI (`@ocx_tool`) and declares, per `project` or
 `package` tag, one hub repository and one set repository per platform.
 
 What the hub needs to know before any set repository is fetched (which tools,
-which platforms the lock serves) is recorded as a fact in `MODULE.bazel.lock`
-(design 4.4): on a hit the extension runs no `ocx` and makes no request; on a
+which platforms the lock serves) is recorded as a fact in `MODULE.bazel.lock`:
+on a hit the extension runs no `ocx` and makes no request; on a
 miss it runs `ocx vendor --manifest-only` once per listed platform. Besides
 that, the implementation reads `module_ctx.os`, the tag's `ocx.lock` (and its
-`ocx.toml`, on a miss only) and the `OCX_INSTALL_*` pair, and nothing else
-(C-RO-11): no other getenv, no watch of ambient config. The `ocx` runs get
+`ocx.toml`, on a miss only) and the `OCX_INSTALL_*` pair, and nothing else:
+no other getenv, no watch of ambient config. The `ocx` runs get
 their environment from `manifest_env()` plus whatever `module_ctx.execute`
 inherits from the process.
 """
@@ -38,8 +38,8 @@ _download = tag_class(
         ),
         "version": attr.string(
             doc = "Exact ocx version (default: the version pinned with this rules_ocx " +
-                  "release). Must be " + MIN_OCX_VERSION + " or newer — rules_ocx passes " +
-                  "`--pinned` to `ocx env`/`exec` and pins `OCX_NO_CONSENT`, and the floor is checked " +
+                  "release). Must be " + MIN_OCX_VERSION + " or newer, the first ocx release with " +
+                  "`ocx vendor` and manifest schema version 1. The floor is checked " +
                   "before any download.",
         ),
     },
@@ -69,7 +69,7 @@ _project = tag_class(
         ),
         "blob_dirs": attr.label_list(doc = _BLOB_DIRS_DOC),
         "config": attr.label(
-            doc = "An ocx site config.toml (mirrors, registries, [patches]) layered over the " +
+            doc = "An ocx site config.toml (mirrors, registries) layered over the " +
                   "host's discovered config — not the project ocx.toml; sets OCX_CONFIG for " +
                   "every invocation, overriding an ambient one, and is watched. Combine with " +
                   "no_config for a hermetic configuration.",
@@ -119,7 +119,7 @@ _package = tag_class(
         ),
         "blob_dirs": attr.label_list(doc = _BLOB_DIRS_DOC),
         "config": attr.label(
-            doc = "An ocx site config.toml (mirrors, registries, [patches]) layered over the " +
+            doc = "An ocx site config.toml (mirrors, registries) layered over the " +
                   "host's discovered config — not the project ocx.toml; sets OCX_CONFIG for " +
                   "every invocation, overriding an ambient one, and is watched. Combine with " +
                   "no_config for a hermetic configuration.",
@@ -164,7 +164,7 @@ def _manifest_facts(mctx, binary, host, policy, tier, tag, lock_text):
     """Runs `ocx vendor --manifest-only` once per platform and reads what the hub needs.
 
     Each run gets its own OCX_HOME and output directory inside the extension's
-    working directory (C-RO-16). module_ctx has no delete(); Bazel 9.2.0 clears
+    working directory. module_ctx has no delete(); Bazel 9.2.0 clears
     the working directory when the extension is next evaluated (checked on a
     scratch extension), and within one evaluation every (tag, platform) has a
     directory of its own.
@@ -198,7 +198,7 @@ def _manifest_facts(mctx, binary, host, policy, tier, tag, lock_text):
     tools = {}
 
     # The first run tells what the lock serves; a platform outside that fails
-    # naming it before ocx is asked for it (C-RO-08b). If the first run itself
+    # naming it before ocx is asked for it. If the first run itself
     # fails, run_ocx() reports ocx's message with the argv, which carries `-p <platform>`.
     for platform in tag.platforms:
         scratch = "{}/{}".format(work, slug(platform))

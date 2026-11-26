@@ -48,7 +48,7 @@ def _link_target_test_impl(ctx):
     asserts.true(env, parse_manifest(_with_target("/etc/passwd")).error != "", "absolute target")
     asserts.true(env, parse_manifest(_with_target("../../x")).error != "", "target escaping content_dir")
 
-    # V-69 control: the same shape inside content_dir is accepted.
+    # Control: the same shape inside content_dir is accepted.
     asserts.equals(env, "", parse_manifest(_with_target("../share/cmake")).error)
     return unittest.end(env)
 
@@ -179,8 +179,7 @@ def _conflicts_test_impl(ctx):
     asserts.true(env, check(dup_file) != "", "duplicate file")
 
     # A terminfo database holds `terminfo/E/Eterm` and `terminfo/e/eterm`; a
-    # case-sensitive package tree is legitimate content, not a conflict (C-RO-05
-    # likewise keeps `BUILD.bazel` beside `build`). The exact-duplicate check
+    # case-sensitive package tree is legitimate content, not a conflict. The exact-duplicate check
     # above is its control: it still fires.
     asserts.equals(env, "", check(dup_case), "paths differing only by case are distinct files")
     asserts.equals(env, "", check(case_file_and_link), "a link beside a file differing only by case")

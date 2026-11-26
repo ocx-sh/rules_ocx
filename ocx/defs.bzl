@@ -22,7 +22,6 @@ ocx_set_toolchain = _ocx_set_toolchain
 OcxSetInfo = _OcxSetInfo
 
 # A rule's `toolchains = ["//:toolchain_type"]` resolves against the repository
-# that defines the rule, so one `ocx_tool` in rules_ocx cannot serve many hubs
-# (design 5.3 listed `ocx_tool`; recorded divergence). Each hub's generated
-# `tool.bzl` calls this with its own `Label("//:toolchain_type")`.
+# that defines the rule, so one `ocx_tool` in rules_ocx cannot serve many hubs.
+# Each hub's generated `tool.bzl` calls this with its own `Label("//:toolchain_type")`.
 make_ocx_tool_rule = _make_ocx_tool_rule

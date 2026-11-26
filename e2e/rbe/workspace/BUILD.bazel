@@ -1,7 +1,7 @@
 # Targets of the rig tests (e2e/rbe/tests). Each writes what the test reads back.
 load("//tools:direct.bzl", "direct_run")
 
-# The tool of the default group through its launcher (V-01, V-02, V-06, V-13).
+# The tool of the default group through its launcher.
 genrule(
     name = "tool_run",
     outs = ["tool_run.txt"],
@@ -9,7 +9,15 @@ genrule(
     tools = ["@tools//:tool"],
 )
 
-# Control for V-06: an action that does take @ocx_tool as an input.
+# The executor has no network: the default route of the machine the action runs on. Run locally the same
+# action reports `yes`, run on an executor `none` (RIG_PROBE only changes the action key between the two runs).
+genrule(
+    name = "executor_net",
+    outs = ["executor_net.txt"],
+    cmd = "d=none; while read -r _ dest _; do [ \"$$dest\" = 00000000 ] && d=yes; done < /proc/net/route; echo default-route=$$d > $@",
+)
+
+# Control: an action that does take @ocx_tool as an input.
 genrule(
     name = "ocx_input_control",
     outs = ["ocx_input_control.txt"],
@@ -17,19 +25,19 @@ genrule(
     tools = ["@ocx_tool//:ocx"],
 )
 
-# No shell between Bazel and the launcher (V-07, V-28).
+# No shell between Bazel and the launcher.
 direct_run(
     name = "tool_direct",
     tool = "@tools//:tool",
 )
 
-# Control for V-07/V-28: a launcher that needs /bin/sh.
+# Control: a launcher that needs /bin/sh.
 direct_run(
     name = "sh_direct_control",
     tool = "//tools:sh_launcher.sh",
 )
 
-# A wasip1/wasm package as an action input: no launcher exists for it (V-08).
+# A wasip1/wasm package as an action input: no launcher exists for it.
 genrule(
     name = "wasm_read",
     srcs = ["@wasm_wasip1_wasm//:set"],
@@ -37,7 +45,7 @@ genrule(
     cmd = "for f in $(SRCS); do case $$f in *.wasm) od -An -tx1 -N4 $$f;; esac; done > $@",
 )
 
-# Every declared link of the links set, as the action sees it (V-12).
+# Every declared link of the links set, as the action sees it.
 genrule(
     name = "links_read",
     srcs = ["@links_linux_amd64//:set"],
@@ -45,7 +53,7 @@ genrule(
     cmd = "for f in $(SRCS); do if [ -L $$f ]; then echo \"$$f $$(readlink $$f)\"; fi; done > $@",
 )
 
-# Input list of an action over the tools set (V-34).
+# Input list of an action over the tools set.
 genrule(
     name = "set_inputs",
     srcs = ["@tools_linux_amd64_libc_glibc//:set"],
@@ -53,7 +61,7 @@ genrule(
     cmd = "echo $(SRCS) | wc -w > $@",
 )
 
-# An entry point that starts its package's binary by bare name (V-29, V-30).
+# An entry point that starts its package's binary by bare name.
 genrule(
     name = "entry_run",
     outs = ["entry_run.txt"],
@@ -61,7 +69,7 @@ genrule(
     tools = ["@entry//:entry-hello"],
 )
 
-# cmake's action finds ccache, which only the group declares (V-41); the control is cmake alone.
+# cmake's action finds ccache, which only the group declares; the control is cmake alone.
 [genrule(
     name = "cmake_finds_ccache" + suffix,
     outs = ["cmake_finds_ccache" + suffix + ".txt"],
@@ -72,7 +80,7 @@ genrule(
     ("_alone", "@cmake_alone//:cmake"),
 ]]
 
-# BUILD.bazel, its case variant and a nested BUILD stay at their places in the runfiles (V-47).
+# BUILD.bazel, its case variant and a nested BUILD stay at their places in the runfiles.
 genrule(
     name = "buildfiles_read",
     outs = ["buildfiles_read.txt"],
@@ -80,7 +88,7 @@ genrule(
     tools = ["@buildfiles//:tool"],
 )
 
-# The env-template package's tool (V-25).
+# The env-template package's tool.
 genrule(
     name = "envtpl_run",
     outs = ["envtpl_run.txt"],
@@ -88,7 +96,7 @@ genrule(
     tools = ["@envtpl"],
 )
 
-# A batch of actions over the big set and over the small tools set (V-31).
+# A batch of actions over the big set and over the small tools set.
 [genrule(
     name = "batch_{}_{}".format(kind, i),
     srcs = [setlabel],

@@ -1,5 +1,5 @@
-# Every tool of the lock is a runnable target in @tools. The PR #12 usage
-# pattern: shell tooling composed in a genrule report plus an sh_test.
+# Every tool of the lock is a runnable target in @tools: shell tooling
+# composed in a genrule report plus an sh_test.
 
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
 

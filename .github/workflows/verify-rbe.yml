@@ -32,10 +32,9 @@ jobs:
         with:
           groups: default,test,lint
       - uses: ./.github/actions/ocx-under-test
-      # The baseline runs before the tests: V-01 reads its numbers.
-      - name: Rig up, seed, baseline and test
+      - name: Rig up, seed and test
         run: |
-          ocx exec -g default,test,lint -- task rig:up rig:seed rig:baseline rig:test \
+          ocx exec -g default,test,lint -- task rig:up rig:seed rig:test \
             BAZEL=bazelisk RIG_BACKEND=buildbarn RIG_RUN_DIR="$RIG_RUN_DIR"
       - name: Upload rig logs
         if: always()
@@ -45,8 +44,6 @@ jobs:
           path: |
             ${{ env.RIG_RUN_DIR }}/logs/
             ${{ env.RIG_RUN_DIR }}/measures.json
-            ${{ env.RIG_RUN_DIR }}/baseline.json
-            ${{ env.RIG_RUN_DIR }}/baseline.md
           if-no-files-found: ignore
           retention-days: 14
           overwrite: true # a job rerun uploads the same name again; without it the step 409s and fails the job
@@ -67,9 +64,9 @@ jobs:
         with:
           groups: default,test,lint
       - uses: ./.github/actions/ocx-under-test
-      - name: Rig up, seed, baseline and test
+      - name: Rig up, seed and test
         run: |
-          ocx exec -g default,test,lint -- task rig:up rig:seed rig:baseline rig:test \
+          ocx exec -g default,test,lint -- task rig:up rig:seed rig:test \
             BAZEL=bazelisk RIG_BACKEND=nativelink RIG_RUN_DIR="$RIG_RUN_DIR"
       - name: Upload rig logs
         if: always()
@@ -79,8 +76,6 @@ jobs:
           path: |
             ${{ env.RIG_RUN_DIR }}/logs/
             ${{ env.RIG_RUN_DIR }}/measures.json
-            ${{ env.RIG_RUN_DIR }}/baseline.json
-            ${{ env.RIG_RUN_DIR }}/baseline.md
           if-no-files-found: ignore
           retention-days: 14
           overwrite: true # a job rerun uploads the same name again; without it the step 409s and fails the job

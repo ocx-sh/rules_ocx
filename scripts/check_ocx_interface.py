@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 The OCX Authors
-"""Guard: rules_ocx touches ocx only through its two vendor commands (C-RO-14).
+"""Guard: rules_ocx touches ocx only through its two vendor commands.
 
 Usage: check_ocx_interface.py [ROOT]   (default: the repository root)
 
@@ -45,7 +45,7 @@ Classes:
               `x.pop("env")`, `"env" in x`. Attribute reads on the manifest
               struct (`pkg.entrypoints`) and plain list literals pass. The
               one exempt file, by exact relative path, is
-              `ocx/private/vendor_manifest.bzl` (C-RO-03: the one place that
+              `ocx/private/vendor_manifest.bzl` (the one place that
               parses manifest.json and builds the struct); classes 1 and 2
               still apply there.
 
@@ -80,7 +80,7 @@ FORMAT_PAIR = re.compile(r"""["']--format["']\s*,\s*["']json["']""")
 APPEND = re.compile(r"""\.(?:append|extend)\(\s*\[?\s*["'](\w+)["']""")
 POP_GET = re.compile(r"\.(?:get|pop)\(\s*$")
 OPEN, CLOSE = "([{", ")]}"
-# The one parse surface (C-RO-03): it builds the manifest struct, so class 3 skips it.
+# The one parse surface: it builds the manifest struct, so class 3 skips it.
 METADATA_EXEMPT = "ocx/private/vendor_manifest.bzl"
 
 

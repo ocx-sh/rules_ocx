@@ -5,8 +5,8 @@
 
 visibility(["//ocx", "//ocx/tests"])
 
-# Diverges from design 5.3's FilesToRunProvider: C-RO-07 needs the sidecar File
-# to link `<name>.direct`.
+# A plain FilesToRunProvider would not do: the sidecar File is needed to link
+# `<name>.direct`.
 OcxSetInfo = provider(
     doc = "The files and tools of one platform's vendored set.",
     fields = {
@@ -87,7 +87,7 @@ def make_ocx_tool_rule(toolchain_type):
     `Label("//:toolchain_type")`.
 
     The rule is executable; attr `tool` (mandatory) names the tool. It outputs
-    symlinks `<name>` and `<name>.direct` (C-RO-07).
+    symlinks `<name>` and `<name>.direct`.
 
     Args:
         toolchain_type: a Label of the hub's `toolchain_type`, created in the
@@ -104,7 +104,7 @@ def make_ocx_tool_rule(toolchain_type):
             fail("{}: the selected set holds no tool '{}' (it has: {})".format(ctx.label, ctx.attr.tool, ", ".join(sorted(info.tools))))
 
         # Beside each other in this package: the launcher finds `<name>.direct`
-        # next to the path it was started by (C-RO-07). A Windows launcher keeps
+        # next to the path it was started by. A Windows launcher keeps
         # its `.exe`; its sidecar does not.
         suffix = ".exe" if tool.launcher.basename.endswith(".exe") else ""
         exe = ctx.actions.declare_file(ctx.attr.tool + suffix)

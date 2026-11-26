@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Linux only (sha256sum, stat -c).
-# V-51: a local ocx (OCX_INSTALL_BINARY + OCX_INSTALL_BINARY_SHA256) is hash-checked,
+# A local ocx (OCX_INSTALL_BINARY + OCX_INSTALL_BINARY_SHA256) is hash-checked,
 # copied, and immune to later edits of its source file.
 #
 # Env: OCX_E2E_OUTPUT_USER_ROOT (Bazel output_user_root; default: a temp dir),
-#      BAZEL (Bazel binary; default: bazel), HOME and OCX_HOME as the caller wants them.
+#      BAZEL (Bazel binary; default: bazel), HOME as the caller wants it.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

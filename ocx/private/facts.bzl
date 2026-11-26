@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 The OCX Authors
 
-"""Module-extension facts: what `ocx` reported at resolution, cached in the lockfile (design 4.4).
+"""Module-extension facts: what `ocx` reported at resolution, cached in the lockfile.
 
 One fact per tag. A fact is a hit only when every field that decided it still
 equals the tag's, byte for byte; the key's `hash()` only spreads keys and is
@@ -74,7 +74,7 @@ def fact_value(tag, available_platforms, tools):
     value = _inputs(tag)
     value.update({
         "available_platforms": list(available_platforms),
-        # The manifest's schema_version, apart from `v` (the fact's own), as in design 4.4.
+        # The manifest's schema_version, apart from `v` (the fact's own).
         "schema_version": 1,
         "tools": tools,
         "v": _VERSION,
@@ -116,7 +116,7 @@ def fact_hit(tag, stored):
     return all([decoded.value.get(k) == v for k, v in _inputs(tag).items()])
 
 def fact_decode(stored):
-    """Decodes a stored fact for the C-RO-12 handoff.
+    """Decodes a stored fact.
 
     Args:
         stored: the string from the lockfile.
@@ -138,7 +138,7 @@ def fact_decode(stored):
     )
 
 def manifest_env(home, config, no_config, allow_unverified, allow_yanked, trusted_root):
-    """The environment of one `ocx vendor --manifest-only` run (C-RO-11, C-RO-16).
+    """The environment of one `ocx vendor --manifest-only` run.
 
     Built from the arguments alone, with no getenv and no watch: the pinned
     rows of OCX_ENV_CLASSES, the explicit policy rows, the tag's `config` and
@@ -162,7 +162,7 @@ def manifest_env(home, config, no_config, allow_unverified, allow_yanked, truste
         if row.cls == "pinned":
             env[key] = row.value
     if no_config:
-        # OCX_NO_CONFIG alone does not prune an inherited OCX_CONFIG / OCX_PATCHES.
+        # OCX_NO_CONFIG alone does not prune an inherited OCX_CONFIG.
         for key, row in OCX_ENV_CLASSES.items():
             if row.hermetic:
                 env[key] = ""

@@ -6,6 +6,6 @@ package(default_visibility = ["//visibility:public"])
 exports_files([
     "capture.bin",
     "direct.bzl",
-    # A launcher that needs /bin/sh, as rules_ocx 0.5.1 wrote them: the control of the no-shell runner.
+    # A launcher that needs /bin/sh: the control of the no-shell runner, which must fail it where a native launcher runs.
     "sh_launcher.sh",
 ])

@@ -9,7 +9,7 @@ repository rules pass `repository_ctx.os.name` / `.arch` in.
 
 visibility(["//ocx", "//ocx/tests"])
 
-# C-RO-09: ocx os/arch -> constraint label.
+# ocx os/arch -> constraint label.
 _OS_C = {
     "darwin": "@platforms//os:macos",
     "linux": "@platforms//os:linux",
@@ -45,7 +45,7 @@ def os_arch(platform):
     return "/".join(platform.split("+")[0].split("/")[:2])
 
 def platform_constraints(platform):
-    """Bazel constraint labels of an ocx platform string (pure; C-RO-09).
+    """Bazel constraint labels of an ocx platform string.
 
     OS `linux`, `darwin`, `windows`, `wasip1` map to `@platforms//os:{linux,
     macos,windows,wasi}` and arch `amd64`, `arm64`, `wasm` to
@@ -88,7 +88,7 @@ def host_info(os_name, arch):
     Returns:
         struct with fields:
           triples: cargo-dist target triples of the ocx release artifact, most
-            preferred first (Windows: gnullvm, then msvc for older releases).
+            preferred first (Windows: gnullvm where a release ships one, then msvc).
           ocx_platform: ocx "os/arch" key for `-p` / ocx.lock.
           is_windows: bool.
           exe_ext: "" or ".exe".

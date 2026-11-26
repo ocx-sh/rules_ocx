@@ -3,7 +3,7 @@
 # Copyright 2026 The OCX Authors
 #
 # The remote-execution rig (e2e/rbe). Included from the root taskfile under the namespace `rig`
-# (rig:up, rig:seed, rig:test, rig:baseline, rig:down). Run state lives under RIG_RUN_DIR; every Bazel call
+# (rig:up, rig:seed, rig:test, rig:down). Run state lives under RIG_RUN_DIR; every Bazel call
 # drops all rc files and loads only e2e/rbe/rig.bazelrc, and every ocx call gets a scratch OCX_HOME.
 
 version: "3"
@@ -62,16 +62,6 @@ tasks:
       RIG_OCX: "{{.OCX}}"
       RIG_BAZEL: "{{.BAZEL}}"
       RIG_OUTPUT_ROOT: "{{.RIG_OUTPUT_ROOT}}"
-
-  baseline:
-    desc: Measure rules_ocx 0.5.1 on the rig and fold the numbers into e2e/rbe/RESULTS.md
-    dir: "{{.TASKFILE_DIR}}/.."
-    cmds:
-      - >-
-        python3 e2e/rbe/baseline/run_baseline.py --ocx "{{.OCX}}" --port "{{.RIG_PORT}}"
-        --port-nl "{{.RIG_PORT_NL}}" --run-dir "{{.RIG_RUN_DIR}}" --output-root "{{.RIG_OUTPUT_ROOT}}"
-        --results "{{.RIG_RUN_DIR}}/baseline.json" --bazel "{{.BAZEL}}" --backend buildbarn --backend nativelink
-      - python3 e2e/rbe/fold_baseline.py "{{.RIG_RUN_DIR}}/baseline.json" e2e/rbe/RESULTS.md
 
   down:
     desc: Stop the rig and delete its containers, networks and volumes

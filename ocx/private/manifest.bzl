@@ -17,7 +17,7 @@ def select_release(manifest, version, targets):
 
     Args:
         manifest: decoded dist.json object.
-        version: exact ocx version, e.g. "0.3.10".
+        version: exact ocx version, e.g. "0.7.1".
         targets: cargo-dist target triples in preference order, e.g.
             ["x86_64-pc-windows-gnullvm", "x86_64-pc-windows-msvc"]; the first
             with a row for `version` wins.
@@ -38,7 +38,7 @@ def select_release(manifest, version, targets):
 def archive_type(filename):
     """Maps a release filename to the explicit download_and_extract type.
 
-    ocx releases ship .zip (windows), .tar.gz (>= 0.4.3), and .tar.xz (older).
+    ocx releases ship .zip (windows) and .tar.gz; any other extension fails.
 
     Args:
         filename: release row filename, e.g. "ocx-x86_64-unknown-linux-musl.tar.gz".
@@ -50,7 +50,7 @@ def archive_type(filename):
         return "zip"
     if filename.endswith(".tar.gz"):
         return "tar.gz"
-    return "tar.xz"
+    fail("rules_ocx: unknown ocx archive format '{}' (known: .zip, .tar.gz)".format(filename))
 
 def is_sha256(value):
     """Tells whether a string is a 64-character lowercase-hex sha256 digest.

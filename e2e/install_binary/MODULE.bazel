@@ -1,4 +1,4 @@
-"""V-51 fixture: rules_ocx consumed with a local ocx binary (OCX_INSTALL_BINARY).
+"""Fixture: rules_ocx consumed with a local ocx binary (OCX_INSTALL_BINARY).
 
 Driven by run.sh, which supplies the binary, its sha256 and the Bazel roots.
 """

@@ -14,7 +14,7 @@ local_path_override(
 
 ocx = use_extension("@rules_ocx//ocx:extensions.bzl", "ocx")
 
-# Default group: one tool on a glibc and a musl leaf (V-02, V-13).
+# Default group: one tool on a glibc and a musl leaf.
 ocx.project(
     name = "tools",
     groups = ["default"],
@@ -26,7 +26,7 @@ ocx.project(
     ],
 )
 
-# cmake needs ccache, which only the group declares (V-41).
+# cmake needs ccache, which only the group declares.
 ocx.project(
     name = "build",
     groups = ["build"],
@@ -35,7 +35,7 @@ ocx.project(
     platforms = ["linux/amd64"],
 )
 
-# Relative links, one to a directory (V-12, V-34).
+# Relative links, one to a directory.
 ocx.project(
     name = "links",
     groups = ["links"],
@@ -44,7 +44,7 @@ ocx.project(
     platforms = ["linux/amd64"],
 )
 
-# An entry point (V-29, V-30).
+# An entry point.
 ocx.project(
     name = "entry",
     groups = ["entry"],
@@ -53,7 +53,7 @@ ocx.project(
     platforms = ["linux/amd64"],
 )
 
-# An author env template (V-25).
+# An author env template.
 ocx.project(
     name = "envtpl",
     groups = ["envtpl"],
@@ -62,7 +62,7 @@ ocx.project(
     platforms = ["linux/amd64"],
 )
 
-# BUILD.bazel and a case variant `build` inside the package (V-47).
+# BUILD.bazel and a case variant `build` inside the package.
 ocx.project(
     name = "buildfiles",
     groups = ["buildfiles"],
@@ -71,7 +71,7 @@ ocx.project(
     platforms = ["linux/amd64"],
 )
 
-# 100000 files (V-31, V-65).
+# 100000 files.
 ocx.project(
     name = "big",
     groups = ["big"],
@@ -80,7 +80,7 @@ ocx.project(
     platforms = ["linux/amd64"],
 )
 
-# A login-required package (V-10).
+# A login-required package.
 ocx.project(
     name = "private",
     groups = ["private"],
@@ -89,7 +89,7 @@ ocx.project(
     platforms = ["linux/amd64"],
 )
 
-# A set with no Linux leaf, declared from a Linux client (V-57).
+# A set with no Linux leaf, declared from a Linux client.
 ocx.project(
     name = "winonly",
     groups = ["winonly"],
@@ -98,21 +98,21 @@ ocx.project(
     platforms = ["windows/amd64"],
 )
 
-# A wasip1/wasm package: no ocx launcher exists for it (V-08).
+# A wasip1/wasm package: no ocx launcher exists for it.
 ocx.package(
     name = "wasm",
     package = "@PIN(rig/wasm,wasip1/wasm)@",
     platforms = ["wasip1/wasm"],
 )
 
-# cmake alone, without the group's ccache (V-41 control).
+# cmake alone, without the group's ccache.
 ocx.package(
     name = "cmake_alone",
     package = "@PIN(rig/cmake,linux/amd64)@",
     platforms = ["linux/amd64"],
 )
 
-# A digest-pinned package, reproducible (V-64).
+# A digest-pinned package, reproducible.
 ocx.package(
     name = "pinned",
     package = "@PIN(rig/tool,linux/amd64+libc.glibc)@",
@@ -134,7 +134,7 @@ use_repo(
     "envtpl_linux_amd64",
     "links",
     "links_linux_amd64",
-    "ocx_tool",  # only the V-06 control uses it as an input
+    "ocx_tool",  # only the ocx-input control uses it as an input
     "pinned",
     "pinned_linux_amd64_libc_glibc",
     "private",

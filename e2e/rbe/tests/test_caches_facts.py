@@ -1,6 +1,6 @@
 # Copyright 2026 The OCX Authors
 # SPDX-License-Identifier: Apache-2.0
-"""Caches and facts: V-03, V-09, V-16, V-33, V-55, V-56, V-64. Witnesses: nginx `/v2/` lines of one leg, the
+"""Caches and facts. Witnesses: nginx `/v2/` lines of one leg, the
 harness's ocx call log (the counting wrapper installed as @ocx_tool), execution-log input digests."""
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ def vendor_calls(ws: Workspace, since: int) -> list[str]:
     return [line for line in ws.ocx_calls()[since:] if line.startswith("start ") and " vendor" in line]
 
 
-def test_v03_fresh_client_takes_the_set_from_the_remote_repo_contents_cache(workspace: Workspace, log) -> None:
+def test_fresh_client_takes_the_set_from_the_remote_repo_contents_cache(workspace: Workspace, log) -> None:
     # Client a is the trusted writer: rig.bazelrc keeps local results (a repo contents entry is one) out of the cache.
     a = workspace.client("a")
     assert_ok(a.run("build", "//:tool_run", "--remote_upload_local_results", config=CONFIG, startup=REMOTE_REPO_CACHE,
@@ -46,7 +46,7 @@ def _set_digests(res) -> dict[str, str]:
             for i in spawn["inputs"] if marker in i["path"]}  # fmt: skip
 
 
-def test_v09_two_clients_give_identical_set_input_digests(workspace: Workspace) -> None:
+def test_two_clients_give_identical_set_input_digests(workspace: Workspace) -> None:
     other = render(RUN / "ws" / (workspace.test_id + "-moved"), workspace.test_id + "-moved")
     a = workspace.client("a", umask=0o022, tz="UTC")
     b = other.client("b", umask=0o077, tz="Pacific/Kiritimati")
@@ -66,7 +66,7 @@ def _hub_query(client, hub: str, lockfile: str):
     return client.run("query", f"@@rules_ocx++ocx+{hub}//:all", lockfile=lockfile)
 
 
-def test_v16_non_root_package_facts_need_no_registry(log) -> None:
+def test_non_root_package_facts_need_no_registry(log) -> None:
     """A non-root module declares a package by digest; the root has no ocx.lock."""
     from conftest import Workspace as W
     from conftest import _counting_wrapper
@@ -110,7 +110,7 @@ def test_v16_non_root_package_facts_need_no_registry(log) -> None:
             cl.shutdown()
 
 
-def test_v33_kept_lock_skips_ocx_and_registry_during_resolution(workspace: Workspace, log) -> None:
+def test_kept_lock_skips_ocx_and_registry_during_resolution(workspace: Workspace, log) -> None:
     assert_ok(_hub_query(workspace.client("a"), "tools", "update"), "client a")
     b = workspace.client("b")
     n = len(workspace.ocx_calls())
@@ -125,7 +125,7 @@ def test_v33_kept_lock_skips_ocx_and_registry_during_resolution(workspace: Works
     assert vendor_calls(workspace, n) and log.registry()
 
 
-def test_v55_lock_edit_with_the_same_tool_names_recomputes_the_fact(workspace: Workspace) -> None:
+def test_lock_edit_with_the_same_tool_names_recomputes_the_fact(workspace: Workspace) -> None:
     a = workspace.client("a")
     assert_ok(_hub_query(a, "tools", "update"), "first resolution")
     n = len(workspace.ocx_calls())
@@ -141,7 +141,7 @@ def test_v55_lock_edit_with_the_same_tool_names_recomputes_the_fact(workspace: W
     assert output(a, "tool_run.txt").strip() == "tool 1.0.1 platform=linux/amd64 libc=glibc"
 
 
-def test_v56_changed_platforms_recompute_the_fact_and_declare_the_set(workspace: Workspace) -> None:
+def test_changed_platforms_recompute_the_fact_and_declare_the_set(workspace: Workspace) -> None:
     a = workspace.client("a")
     assert_ok(_hub_query(a, "tools", "update"), "first resolution")
     n = len(workspace.ocx_calls())
@@ -171,7 +171,7 @@ def _contents_entries(client) -> int:
 
 
 @pytest.mark.parametrize("form", ["pinned", "tagged"])
-def test_v64_only_a_digest_pinned_package_is_reproducible(workspace: Workspace, form: str) -> None:
+def test_only_a_digest_pinned_package_is_reproducible(workspace: Workspace, form: str) -> None:
     index = _index(workspace)
     module = workspace.path / "MODULE.bazel"
     module.write_text(module.read_text() + (

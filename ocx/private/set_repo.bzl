@@ -4,7 +4,7 @@
 """Repository rule that vendors one platform's tool set with `ocx vendor`."""
 
 load(":manifest.bzl", "is_sha256")
-load(":repo_utils.bzl", "CONFIG_ATTRS", "POLICY_ATTRS", "SYSEXIT_HINTS", "make_isolated_ocx_env", "ocx_bin")
+load(":repo_utils.bzl", "CONFIG_ATTRS", "POLICY_ATTRS", "SYSEXIT_HINTS", "execute_ocx", "make_isolated_ocx_env", "ocx_bin")
 load(":vendor_manifest.bzl", "RESERVED_NAMES", "read_manifest")
 
 visibility(["//ocx", "//ocx/tests"])
@@ -15,7 +15,7 @@ _DEFS = str(Label("//ocx:defs.bzl"))
 
 _STASH = "_ocx_reserved"
 
-# The three top-level entries of an `ocx vendor` output directory (C-RO-02).
+# The three top-level entries of an `ocx vendor` output directory.
 _TOP_LEVEL = ["manifest.json", "packages", "selections"]
 
 def _is_reserved(path):
@@ -60,7 +60,7 @@ def _all_paths(manifest):
     return paths
 
 def build_file_content(manifest, moves):
-    """The generated BUILD.bazel text of a set repository (pure; C-RO-04, C-RO-05).
+    """The generated BUILD.bazel text of a set repository.
 
     One directory label per link-free directory that holds no moved file, a
     file label for every other regular file, the declared links, the moved
@@ -154,7 +154,7 @@ def reserved_moves(manifest):
     return struct(moves = moves, error = "")
 
 def cross_check(manifest, expected):
-    """Compares the manifest with the fact recorded at module resolution (pure; C-RO-12, V-48).
+    """Compares the manifest with the fact recorded at module resolution.
 
     Args:
         manifest: the parse_manifest() manifest.
@@ -212,7 +212,7 @@ def tool_conflict_error(manifest):
     return ""
 
 def windows_link_error(manifest):
-    """Refuses a windows platform whose manifest lists links (pure; C-RO-13, V-49).
+    """Refuses a windows platform whose manifest lists links.
 
     Args:
         manifest: the parse_manifest() manifest.
@@ -233,7 +233,7 @@ def windows_link_error(manifest):
     return ""
 
 def vendor_args(attr_values):
-    """The ocx argv after the binary for one vendor call (pure; C-RO-01, C-RO-02).
+    """The ocx argv after the binary for one vendor call.
 
     Project tier: `["--format", "json", "vendor", "-o", out, "-p", platform,
     "--omit-links", "-g", g ..., name ...]`. Package tier: `["--format",
@@ -271,7 +271,7 @@ def vendor_args(attr_values):
     return struct(args = [], error = "unknown tier '{}'".format(attr_values.tier))
 
 def package_pinned(package):
-    """Whether a package identifier ends in `@sha256:` plus a full digest (pure; C-RO-17).
+    """Whether a package identifier ends in `@sha256:` plus a full digest.
 
     Args:
         package: the identifier.
@@ -296,22 +296,6 @@ def vendor_failure(args, code, stderr):
         return ""
     hint = SYSEXIT_HINTS.get(code)
     return "ocx {} failed (exit {}): {}{}".format(" ".join(args), code, stderr.strip(), "\nhint: " + hint if hint else "")
-
-def _execute_vendor(rctx, binary, args, env, is_windows):
-    """Runs ocx, retrying only a sysexit 75 (transient registry) twice, as run_ocx does.
-
-    It returns the result instead of failing, so the caller can clean up first.
-    """
-    result = None
-    for attempt in range(3):
-        result = rctx.execute([str(binary)] + args, environment = env, timeout = 600)
-        if result.return_code != 75:
-            break
-
-        # Linear backoff; Batch has no `sleep`.
-        if not is_windows and attempt < 2:
-            rctx.execute(["/bin/sh", "-c", 'sleep "$0"', str(attempt + 1)], environment = {"PATH": "/usr/bin:/bin"})
-    return result
 
 def _path_flag(rctx, label):
     """Absolute path of a label attr, watched so an edit refetches."""
@@ -356,7 +340,7 @@ def _ocx_set_repo_impl(rctx):
         fail("rules_ocx: " + planned.error)
 
     ocx_env = make_isolated_ocx_env(rctx, str(scratch_home))
-    result = _execute_vendor(rctx, binary, planned.args, ocx_env.env, is_windows)
+    result = execute_ocx(rctx, binary, planned.args, ocx_env.env, is_windows)
 
     # Before any fail(): the scratch home and the output directory never outlive the call.
     rctx.delete(scratch_home)
@@ -397,9 +381,9 @@ def _ocx_set_repo_impl(rctx):
         rctx.rename(rctx.path(move.src), rctx.path(move.dst))
     rctx.file("BUILD.bazel", build_file_content(manifest, stashed.moves))
 
-    # C-RO-17: only a digest-pinned root is a function of the lockfile.
+    # Only a digest-pinned root is a function of the lockfile.
     pinned = attrs.tier == "project" or package_pinned(attrs.package)
-    if pinned and hasattr(rctx, "repo_metadata"):
+    if pinned:
         return rctx.repo_metadata(reproducible = True)
     return None
 

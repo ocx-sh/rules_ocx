@@ -1,7 +1,7 @@
 # Copyright 2026 The OCX Authors
 # SPDX-License-Identifier: Apache-2.0
 #
-# The remote-execution rig. Seeded from the S-B spike (images pinned by digest). Only nginx publishes ports;
+# The remote-execution rig. Images are pinned by digest. Only nginx publishes ports;
 # executors (`runner-*`, the NativeLink worker) have no route to the registry. Run state lives under RIG_RUN_DIR
 # (default ./.run, gitignored); `rig:up` creates that tree (prepare_run_dir.sh) before compose starts.
 name: ${RIG_PROJECT:-rules-ocx-rig}

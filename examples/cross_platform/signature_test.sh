@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# V-27c: the darwin/arm64 launcher reaches this workspace byte for byte, so it ships with a valid ad-hoc
+# The darwin/arm64 launcher reaches this workspace byte for byte, so it ships with a valid ad-hoc
 # signature. Positive: `codesign --verify` passes and the launcher runs to its own exit 78 (no sidecar beside
 # it). Control A: a copy with one byte changed fails `codesign --verify`. Control B: a copy after
 # `codesign --remove-signature` fails `codesign --verify`. Only `codesign` is asserted. The hosted macOS arm64

@@ -92,7 +92,7 @@ single `ocx_tool` in rules_ocx cannot serve many hubs (proved on Bazel
 `Label("//:toolchain_type")`.
 
 The rule is executable; attr `tool` (mandatory) names the tool. It outputs
-symlinks `<name>` and `<name>.direct` (C-RO-07).
+symlinks `<name>` and `<name>.direct`.
 
 
 **PARAMETERS**
@@ -132,17 +132,17 @@ is then enforced on the fetch. Any other manifest name is fetched
 unverified: the transport to the mirror is then all that stands behind the
 rows it serves, sha256 included.
 
-Local build under test: set `OCX_INSTALL_BINARY` (absolute path of an `ocx`
+Local build: set `OCX_INSTALL_BINARY` (absolute path of an `ocx`
 binary) and `OCX_INSTALL_BINARY_SHA256` (its digest, 64 lowercase hex) to use
 it instead of the release. Both are required together; the file is copied
 through the downloader, so a wrong digest fails the fetch and a later edit of
 the source file has no effect. `version` and the dist manifest are then
-ignored. Pass them with `--repo_env` and add `--lockfile_mode=off` (the pair
+ignored, and the binary's `ocx version` must still meet the floor below
+(a pre-release of the floor version passes). Pass them with `--repo_env` and add `--lockfile_mode=off` (the pair
 is not part of the lockfile).
 
-For the released path, `version` must be 0.6.1 or newer: rules_ocx passes `--pinned` to `ocx env`
-and `ocx exec` and pins `OCX_NO_CONSENT`, none of which exists on older
-releases.
+`version` must be 0.6.8 or newer: that is the first ocx release with `ocx vendor`
+and manifest schema version 1, the manifest this ruleset reads.
 
 **ATTRIBUTES**
 
@@ -152,7 +152,7 @@ releases.
 | <a id="ocx_download-name"></a>name |  A unique name for this repository.   | <a href="https://bazel.build/concepts/labels#target-names">Name</a> | required |  |
 | <a id="ocx_download-dist_manifest"></a>dist_manifest |  Release manifest snapshot (dist.json schema 1).   | <a href="https://bazel.build/concepts/labels">Label</a> | optional |  `"@rules_ocx//dist:dist.json"`  |
 | <a id="ocx_download-triple"></a>triple |  Escape hatch: exact release target triple, e.g. 'x86_64-unknown-linux-gnu' to prefer the glibc build. Defaults to host detection (Linux maps to musl).   | String | optional |  `""`  |
-| <a id="ocx_download-version"></a>version |  Exact ocx version to download, e.g. '0.6.2'. Must be 0.6.1 or newer.   | String | required |  |
+| <a id="ocx_download-version"></a>version |  Exact ocx version to download, e.g. '0.6.6'. Must be 0.6.8 or newer.   | String | required |  |
 
 
 <a id="ocx_hub_repo"></a>
@@ -190,7 +190,7 @@ load("@rules_ocx//ocx:defs.bzl", "ocx_set_repo")
 
 ocx_set_repo(<a href="#ocx_set_repo-name">name</a>, <a href="#ocx_set_repo-allow_unverified">allow_unverified</a>, <a href="#ocx_set_repo-allow_yanked">allow_yanked</a>, <a href="#ocx_set_repo-bindings">bindings</a>, <a href="#ocx_set_repo-blob_dirs">blob_dirs</a>, <a href="#ocx_set_repo-config">config</a>,
              <a href="#ocx_set_repo-expected_available_platforms">expected_available_platforms</a>, <a href="#ocx_set_repo-expected_tools">expected_tools</a>, <a href="#ocx_set_repo-groups">groups</a>, <a href="#ocx_set_repo-index">index</a>, <a href="#ocx_set_repo-no_config">no_config</a>, <a href="#ocx_set_repo-ocx">ocx</a>, <a href="#ocx_set_repo-ocx_lock">ocx_lock</a>,
-             <a href="#ocx_set_repo-ocx_toml">ocx_toml</a>, <a href="#ocx_set_repo-package">package</a>, <a href="#ocx_set_repo-patch_snapshot">patch_snapshot</a>, <a href="#ocx_set_repo-platform">platform</a>, <a href="#ocx_set_repo-sigstore_trusted_root">sigstore_trusted_root</a>, <a href="#ocx_set_repo-tier">tier</a>)
+             <a href="#ocx_set_repo-ocx_toml">ocx_toml</a>, <a href="#ocx_set_repo-package">package</a>, <a href="#ocx_set_repo-platform">platform</a>, <a href="#ocx_set_repo-sigstore_trusted_root">sigstore_trusted_root</a>, <a href="#ocx_set_repo-tier">tier</a>)
 </pre>
 
 One platform's vendored tool set, produced by `ocx vendor`.
@@ -208,17 +208,16 @@ The repository holds the vendored tree, the generated `BUILD.bazel` and the
 | <a id="ocx_set_repo-allow_yanked"></a>allow_yanked |  Whether resolution may fall back to a yanked release — sets OCX_ALLOW_YANKED for every invocation.   | Boolean | optional |  `False`  |
 | <a id="ocx_set_repo-bindings"></a>bindings |  Tool names to bind (project tier).   | List of strings | optional |  `[]`  |
 | <a id="ocx_set_repo-blob_dirs"></a>blob_dirs |  Directories passed as `--blob-dir`.   | <a href="https://bazel.build/concepts/labels">List of labels</a> | optional |  `[]`  |
-| <a id="ocx_set_repo-config"></a>config |  An ocx site config.toml (mirrors, registries, [patches]) layered over the host's discovered config — not the project ocx.toml. Sets OCX_CONFIG for every invocation, overriding an ambient one, and the file is watched. Combine with no_config for a hermetic configuration.   | <a href="https://bazel.build/concepts/labels">Label</a> | optional |  `None`  |
+| <a id="ocx_set_repo-config"></a>config |  An ocx site config.toml (mirrors, registries) layered over the host's discovered config — not the project ocx.toml. Sets OCX_CONFIG for every invocation, overriding an ambient one, and the file is watched. Combine with no_config for a hermetic configuration.   | <a href="https://bazel.build/concepts/labels">Label</a> | optional |  `None`  |
 | <a id="ocx_set_repo-expected_available_platforms"></a>expected_available_platforms |  available_platforms recorded in the fact; cross-checked against the manifest.   | List of strings | optional |  `[]`  |
 | <a id="ocx_set_repo-expected_tools"></a>expected_tools |  `name:kind` rows recorded in the fact for this platform; cross-checked against the manifest.   | List of strings | optional |  `[]`  |
 | <a id="ocx_set_repo-groups"></a>groups |  ocx.toml groups to vendor (project tier).   | List of strings | optional |  `[]`  |
 | <a id="ocx_set_repo-index"></a>index |  Optional index passed as `--index`.   | <a href="https://bazel.build/concepts/labels">Label</a> | optional |  `None`  |
-| <a id="ocx_set_repo-no_config"></a>no_config |  Ignore the host's discovered config tiers (/etc, the user config, $OCX_HOME/config.toml) and the managed-config snapshot — sets OCX_NO_CONFIG=1, and blanks an ambient OCX_CONFIG, OCX_PATCHES and OCX_PATCH_SNAPSHOT, which OCX_NO_CONFIG alone does not prune. The `config` and `patch_snapshot` attrs still apply. Use this when a corporate managed config must not reach the build; it also opts out of the exit-78 gate a required-but-unsynced managed config raises.   | Boolean | optional |  `False`  |
+| <a id="ocx_set_repo-no_config"></a>no_config |  Ignore the host's discovered config tiers (/etc, the user config, $OCX_HOME/config.toml) and the managed-config snapshot — sets OCX_NO_CONFIG=1, and blanks an ambient OCX_CONFIG, which OCX_NO_CONFIG alone does not prune. The `config` attr still applies. Use this when a corporate managed config must not reach the build; it also opts out of the exit-78 gate a required-but-unsynced managed config raises.   | Boolean | optional |  `False`  |
 | <a id="ocx_set_repo-ocx"></a>ocx |  The pinned ocx CLI binary.   | <a href="https://bazel.build/concepts/labels">Label</a> | optional |  `"@ocx_tool//:ocx"`  |
 | <a id="ocx_set_repo-ocx_lock"></a>ocx_lock |  The ocx.lock next to ocx_toml (project tier).   | <a href="https://bazel.build/concepts/labels">Label</a> | optional |  `None`  |
 | <a id="ocx_set_repo-ocx_toml"></a>ocx_toml |  The project ocx.toml (project tier).   | <a href="https://bazel.build/concepts/labels">Label</a> | optional |  `None`  |
 | <a id="ocx_set_repo-package"></a>package |  Package identifier (package tier).   | String | optional |  `""`  |
-| <a id="ocx_set_repo-patch_snapshot"></a>patch_snapshot |  A committed patches.snapshot.json (written by `ocx patch freeze` next to ocx.lock) freezing the digests of the patch companions composed onto this environment. Sets OCX_PATCH_SNAPSHOT. `ocx lock --check` does not cover companions — without a frozen snapshot they resolve at fetch time.   | <a href="https://bazel.build/concepts/labels">Label</a> | optional |  `None`  |
 | <a id="ocx_set_repo-platform"></a>platform |  ocx platform key to vendor for.   | String | required |  |
 | <a id="ocx_set_repo-sigstore_trusted_root"></a>sigstore_trusted_root |  A sigstore trusted-root.json pinned in-tree. Sets OCX_SIGSTORE_TRUSTED_ROOT for every invocation, overriding the ambient `<OCX_HOME>/sigstore/trusted-root.json` rung, and the file is watched.   | <a href="https://bazel.build/concepts/labels">Label</a> | optional |  `None`  |
 | <a id="ocx_set_repo-tier"></a>tier |  Which `ocx vendor` form to call.   | String | required |  |

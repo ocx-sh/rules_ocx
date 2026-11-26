@@ -135,7 +135,7 @@ class Seeder:
         path_env = {"key": "PATH", "type": "path", "value": "${installPath}/bin", "visibility": "public"}
         linux = "linux/amd64"
 
-        # Multi-platform tool: the leaf's binary reports its own libc and platform (V-13).
+        # Multi-platform tool: the leaf's binary reports its own libc and platform.
         for plat in TOOL_LEAVES:
             libc = plat.partition("+libc.")[2] or "none"
 
@@ -153,12 +153,12 @@ class Seeder:
 
             self.publish("rig/tool", "1.0.0", plat, tool, {"env": [path_env]})
 
-        # Same tool names, other bytes: a lock edit that keeps every tool name (V-55).
+        # Same tool names, other bytes: a lock edit that keeps every tool name.
         for plat in TOOL_LEAVES[:2]:
             report = f"tool 1.0.1 platform={plat.partition('+')[0]} libc={plat.partition('+libc.')[2]}"
             self.publish("rig/tool", "1.0.1", plat, lambda p, r=report: self.exe(p / "bin" / "tool", r), {"env": [path_env]})
 
-        # cmake and ccache are unrelated packages: only the workspace's group puts them together (V-41).
+        # cmake and ccache are unrelated packages: only the workspace's group puts them together.
         self.publish("rig/ccache", "1.0.0", linux, lambda p: self.exe(p / "bin" / "ccache", "ccache"), {"env": [path_env]})
         self.publish("rig/cmake", "1.0.0", linux, lambda p: self.exe(p / "bin" / "cmake", "cmake"), {"env": [path_env]})
 
@@ -214,12 +214,6 @@ class Seeder:
 
         self.publish("rig/buildfiles", "1.0.0", linux, buildfiles, {"env": [path_env]})
 
-        def emptydir(pkg: Path) -> None:
-            self.exe(pkg / "bin" / "tool", "emptydir")
-            (pkg / "empty").mkdir()
-
-        self.publish("rig/emptydir", "1.0.0", linux, emptydir, {"env": [path_env]})
-
         def wasm(pkg: Path) -> None:
             (pkg / "module.wasm").write_bytes(b"\x00asm\x01\x00\x00\x00")
 
@@ -234,17 +228,6 @@ class Seeder:
             (pkg / "bin" / "winonly.cmd").write_text("@echo winonly\r\n", encoding="utf-8")
 
         self.publish("rig/winonly", "1.0.0", "windows/amd64", winonly, {"env": [path_env]})
-
-        # Neither `binaries` nor `entrypoints`: env-only package, no scan.
-        def bare(pkg: Path) -> None:
-            (pkg / "data").mkdir()
-            (pkg / "data" / "x.txt").write_text("x\n", encoding="utf-8")
-
-        self.publish(
-            "rig/bare", "1.0.0", linux, bare,
-            {"env": [{"key": "BARE_DATA", "type": "constant", "value": "${installPath}/data", "visibility": "public"}]},
-            no_bin_scan=True,
-        )  # fmt: skip
 
         def big(pkg: Path) -> None:
             self.exe(pkg / "bin" / "tool", "big")

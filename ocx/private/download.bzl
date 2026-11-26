@@ -10,7 +10,7 @@ setup.ocx.sh installer. Binary-only placement — never runs `ocx self setup`.
 
 load(":manifest.bzl", "archive_type", "artifact_url", "is_sha256", "manifest_sha256", "select_release")
 load(":platforms.bzl", "host_info")
-load(":versions.bzl", "MIN_OCX_VERSION", "min_version_error")
+load(":versions.bzl", "DEFAULT_OCX_VERSION", "MIN_OCX_VERSION", "local_binary_version_error", "min_version_error")
 
 visibility(["//ocx", "//ocx/tests"])
 
@@ -71,8 +71,8 @@ def fetch_ocx_binary(ctx, version, triple = "", dist_manifest = None):
 
     With OCX_INSTALL_BINARY and OCX_INSTALL_BINARY_SHA256 set, that file is
     copied through `ctx.download` (a wrong hash fails the fetch; a later edit of
-    the source file changes nothing) and no version is checked. Otherwise the
-    release `version` is taken from the dist manifest.
+    the source file changes nothing) and its `ocx version` is checked against
+    the floor. Otherwise the release `version` is taken from the dist manifest.
 
     Args:
         ctx: repository_ctx or module_ctx.
@@ -92,6 +92,10 @@ def fetch_ocx_binary(ctx, version, triple = "", dist_manifest = None):
     if request.url:
         local = "local/" + bin_name
         ctx.download(request.url, local, sha256 = request.sha256, executable = True)
+        reported = ctx.execute([ctx.path(local), "version"], timeout = 30)
+        err = local_binary_version_error(reported.return_code, reported.stdout)
+        if err:
+            fail(err)
         return ctx.path(local)
 
     err = min_version_error(version)
@@ -146,17 +150,17 @@ is then enforced on the fetch. Any other manifest name is fetched
 unverified: the transport to the mirror is then all that stands behind the
 rows it serves, sha256 included.
 
-Local build under test: set `OCX_INSTALL_BINARY` (absolute path of an `ocx`
+Local build: set `OCX_INSTALL_BINARY` (absolute path of an `ocx`
 binary) and `OCX_INSTALL_BINARY_SHA256` (its digest, 64 lowercase hex) to use
 it instead of the release. Both are required together; the file is copied
 through the downloader, so a wrong digest fails the fetch and a later edit of
 the source file has no effect. `version` and the dist manifest are then
-ignored. Pass them with `--repo_env` and add `--lockfile_mode=off` (the pair
+ignored, and the binary's `ocx version` must still meet the floor below
+(a pre-release of the floor version passes). Pass them with `--repo_env` and add `--lockfile_mode=off` (the pair
 is not part of the lockfile).
 
-For the released path, `version` must be {} or newer: rules_ocx passes `--pinned` to `ocx env`
-and `ocx exec` and pins `OCX_NO_CONSENT`, none of which exists on older
-releases.""".format(MIN_OCX_VERSION),
+`version` must be {} or newer: that is the first ocx release with `ocx vendor`
+and manifest schema version 1, the manifest this ruleset reads.""".format(MIN_OCX_VERSION),
     attrs = {
         "dist_manifest": attr.label(
             default = "//dist:dist.json",
@@ -170,8 +174,10 @@ releases.""".format(MIN_OCX_VERSION),
         ),
         "version": attr.string(
             mandatory = True,
-            doc = "Exact ocx version to download, e.g. '0.6.2'. Must be " +
-                  "{} or newer.".format(MIN_OCX_VERSION),
+            doc = "Exact ocx version to download, e.g. '{}'. Must be {} or newer.".format(
+                DEFAULT_OCX_VERSION,
+                MIN_OCX_VERSION,
+            ),
         ),
     },
 )

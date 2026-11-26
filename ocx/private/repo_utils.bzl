@@ -8,6 +8,8 @@ policy reducer, config-path derivation) is one, so tests/ can cover it without
 a repository_ctx.
 """
 
+load(":versions.bzl", "MIN_OCX_VERSION")
+
 visibility(["//ocx", "//ocx/tests"])
 
 def _env(cls, attr = "", path = False, value = "", hermetic = False, file_url = False):
@@ -54,8 +56,7 @@ OCX_ENV_CLASSES = {
     "OCX_INDEX": _env("site"),
     "OCX_DEFAULT_REGISTRY": _env("site"),
     "OCX_MANAGED_CONFIG": _env("site"),
-    "OCX_PATCHES": _env("site", hermetic = True),
-    # 0.6.2: extra TLS roots (a PEM path, or the PEM text) for every registry,
+    # Extra TLS roots (a PEM path, or the PEM text) for every registry,
     # index, Sigstore and TUF client — a corporate proxy CA. Outranks every
     # config.toml tier. Opaque rather than a watched `path` row: a root decides
     # whether a fetch connects, never which bytes it gets (digests do), so an
@@ -64,7 +65,6 @@ OCX_ENV_CLASSES = {
     # translucent: ambient value forwarded, but a rule attr overrides it and
     # no_config blanks the hermetic ones.
     "OCX_CONFIG": _env("translucent", attr = "config", path = True, hermetic = True),
-    "OCX_PATCH_SNAPSHOT": _env("translucent", attr = "patch_snapshot", path = True, hermetic = True),
     "OCX_SIGSTORE_TRUSTED_ROOT": _env("translucent", attr = "sigstore_trusted_root", path = True, file_url = True),
     "OCX_NO_CONFIG": _env("translucent", attr = "no_config"),
     # explicit: the build's weakening posture — never read from the ambient
@@ -83,16 +83,6 @@ OCX_ENV_CLASSES = {
     "OCX_QUIET": _env("pinned", value = "0"),
     "OCX_NO_PROJECT": _env("pinned", value = "1"),
     "OCX_NO_CONFIG_REFRESH": _env("pinned", value = "1"),
-    # `ocx pull` and `ocx exec` otherwise stamp shell-activation consent for
-    # the `--project` directory, which the prompt hook then honours on every
-    # `cd` (ocx-sh/ocx#400). The flags outrank it; no call here passes one.
-    "OCX_NO_CONSENT": _env("pinned", value = "1"),
-    # Empty is ocx's "absent": the render `ocx pull` does stays at
-    # `<project>/.ocx/toolchain` instead of following an exported root into the user's home. Not a
-    # repository path: ocx refuses a root outside $HOME/$OCX_HOME with exit 78
-    # on *every* command, and Bazel's output base is outside $HOME on macOS.
-    # A config.toml `toolchain_dir` still outranks this (env is its weakest tier).
-    "OCX_TOOLCHAIN_DIR": _env("pinned", value = ""),
 }
 
 def _rows(cls):
@@ -112,39 +102,32 @@ def _rows(cls):
 # tails keep those overrides honest; the default hints below spell the same
 # causes inline.
 #
-# 0.6.2: an extra CA *file* holding no certificate is 65 (unreadable: 74);
-# inline PEM text that is not one is 78.
+# An extra CA *file* holding no certificate is 65 (unreadable: 74); inline PEM
+# text that is not one is 78.
 CA_FILE_TAIL = ("; if the error above names a CA file instead, it holds no valid " +
                 "certificate — fix OCX_EXTRA_CA_CERTS or extra_ca_certs")
 
 # A registry host resolving to a private/loopback/metadata address is refused
-# with 78 (the fix is a trusted_hosts entry); 0.6.1 made the ocx.toml
-# `activate` key and 0.6.2's config.toml `toolchain_dir` refusable too.
+# with 78 (the fix is a trusted_hosts entry); a refused ocx.toml or config.toml
+# value is 78 too.
 CONFIG_TAIL = ("; if the error above names a setting instead, ocx refused it — a registry " +
                "host resolving to a private address (allow it in " +
                "[registries.\"<ns>\"].trusted_hosts), or a config.toml / ocx.toml value")
 
 SYSEXIT_HINTS = {
-    64: ("usage error — the pinned ocx CLI and rules_ocx disagree on the command surface; " +
-         "pin an ocx release this rules_ocx supports with ocx.download(version = '…') in " +
-         "MODULE.bazel, or upgrade rules_ocx"),
+    64: ("usage error — rules_ocx needs an ocx that has `ocx vendor` (" + MIN_OCX_VERSION +
+         " or newer); pin one with ocx.download(version = '…') in MODULE.bazel, or upgrade rules_ocx"),
     # Tier-neutral: the package tier has no lockfile, so a malformed reference
     # or digest is named first and 'ocx lock' offered as the project-tier case.
-    # The patch_snapshot clause is not hypothetical: ocx 0.5.6 bumped the
-    # snapshot to V2 (companions keyed by tag) and dropped V1 entirely, so a
-    # file frozen by an older ocx and committed lands here — a shape this
-    # rules_ocx's own pin bump is what starts refusing.
-    #
-    # 0.6.1+: a package layer refused at extraction (a path escaping its root,
-    # a symlink ladder, a hard link out) is 65, not 1 — the artifact is hostile
-    # or corrupt, so it never clears on retry.
+    # A package layer refused at extraction (a path escaping its root, a
+    # symlink ladder, a hard link out) is 65: the artifact is hostile or
+    # corrupt, so it never clears on retry.
     65: ("data error — a malformed reference or digest; a package layer ocx refused to " +
          "extract (it escapes its root — a hostile or corrupt artifact, report it to the " +
          "publisher); in a project, a lockfile out of date with ocx.toml ('ocx lock', then " +
-         "commit); a patch_snapshot written by an older ocx ('ocx patch freeze' again, then " +
          "commit)" + CA_FILE_TAIL),
-    # 0.6.1+: a guarded registry or Sigstore host that does not resolve is 69
-    # (was 78/64); 0.6.2: so is a TLS certificate refusal, never a retried 75.
+    # A guarded registry or Sigstore host that does not resolve is 69, and so is
+    # a TLS certificate refusal, never a retried 75.
     69: ("a required service or registry is unavailable — its host did not resolve, or its " +
          "TLS certificate was refused (behind an intercepting proxy, export " +
          "OCX_EXTRA_CA_CERTS or set extra_ca_certs in config.toml); check network, " +
@@ -157,38 +140,28 @@ SYSEXIT_HINTS = {
     77: ("permission denied — the registry rejected the request for this repository (403), or " +
          "OCX_HOME is not writable by the current user; check registry access and OCX_HOME's " +
          "permissions"),
-    # Both project-tier 78s (missing/unsupported ocx.lock) are overridden at
-    # their call sites, so this shared text only ever reaches the package tier,
-    # which has no lockfile — leaving the managed config and CONFIG_TAIL.
+    # The package tier has no lockfile, so the 78 text names the managed config
+    # and CONFIG_TAIL.
     78: ("configuration error — a required managed config has never been synced; run " +
          "'ocx config update' (no_config = True / OCX_NO_CONFIG=1 opts out of the tier)" +
          CONFIG_TAIL),
-    79: ("not found — the reference, or a required patch companion composed onto it, does not " +
-         "exist in the registry; check the name, or refresh the companions with 'ocx patch sync'"),
+    79: "not found — the reference does not exist in the registry; check the name",
     80: "authentication required — the registry needs credentials for this reference; run 'ocx login <registry>'",
     81: ("blocked by policy — offline or frozen mode, a frozen index snapshot, or an ocx.toml " +
          "policy refused the resolution"),
     # 82 (dirty rc) has no entry: it is raised only by `ocx config setup` and
     # `ocx self setup` refusing to overwrite a hand-edited managed shell block,
     # and no repository rule ever runs either command — a hint here would be
-    # dead code. 86 (0.6.1, a forge lacking a capability a write transport
+    # dead code. 86 (a forge lacking a capability a write transport
     # needs) likewise: only announce/claim/cascade raise it, all publishing.
     #
-    # 83/85 (0.6.0): raised only inside `maybe_auto_verify`, the gate an
-    # operator [[trust.policy]] attaches to a materializing fetch. Its one
-    # production caller is `setup_impl` (ocx pull.rs), so of the eight commands
-    # these rules run it is reachable from the project tier's `pull` and `env`
-    # and from `package install` and `package env` — never from `lock --check`,
-    # `package which` or either `inspect --closure`, none of which materializes.
-    #
-    # 84 is mapped for the contract, not because 0.6.0 can raise it here: the
-    # verify path folds ClientError::ReferrersUnsupported into
-    # NoSignaturesFound (79) and ocx's own comment calls 84 "write-path only",
-    # which no repo rule reaches. Kept so a future ocx that classifies it on a
-    # read fails with a route rather than a bare exit code.
+    # 83/85: raised when the operator's [[trust.policy]] gates a materializing fetch.
+    # 84 is mapped for the contract: the verify path folds a registry without the
+    # Referrers API into 79 on a read, so 84 is not expected here; kept so an ocx
+    # that classifies it on a read fails with a route rather than a bare exit code.
     #
     # None of the three is retried — a transparency log that is down stays down
-    # for longer than three registry round-trips (S-006), and 85 is
+    # for longer than three registry round-trips, and 85 is
     # deterministic; revisit after the first flaky-CI report.
     83: ("the transparency log is unreachable — a signature could not be verified against " +
          "Rekor; retry once it is back, check network access to the log, or accept " +
@@ -207,13 +180,12 @@ SYSEXIT_HINTS = {
 # Extra attempts granted to a sysexit 75 even when the caller asked for none.
 _TRANSIENT_RETRIES = 2
 
-# The only sysexits another attempt can change: 69 a registry that may come
-# back, 74 the store-symlink TOCTOU two parallel fetches race on, 75 ocx's own
-# "transient, retry me". Everything else is settled on the first answer — a
-# typo'd reference (79), expired credentials (80) or a policy block (81) would
-# otherwise burn three registry round-trips and the backoff between them,
-# multiplied by the platform count on a hub.
-_RETRYABLE = [69, 74, 75]
+# The one sysexit another attempt can change: 75, ocx's own "transient, retry
+# me". Everything else is settled on the first answer — a typo'd reference (79),
+# expired credentials (80) or a policy block (81) would otherwise burn three
+# registry round-trips and the backoff between them, multiplied by the platform
+# count on a hub.
+_RETRYABLE = [75]
 
 # Env vars consulted to locate the platform user-config directory.
 _CONFIG_HOME_ENV = ["XDG_CONFIG_HOME", "HOME", "APPDATA"]
@@ -275,7 +247,7 @@ def is_absolute_path(path, is_windows):
     return (len(path) > 2 and path[1] == ":" and path[2] in "/\\" and
             path[0].lower() in _DRIVE_LETTERS)
 
-def ambient_config_paths(is_windows, is_macos, env, home):
+def ambient_config_paths(is_windows, is_macos, env):
     """The host config files ocx would load, in ocx precedence order.
 
     Bazel cannot invalidate on a file it never reads, so the repository rules
@@ -287,9 +259,6 @@ def ambient_config_paths(is_windows, is_macos, env, home):
         is_windows: host flag.
         is_macos: host flag (different user-config directory).
         env: {var: value} for XDG_CONFIG_HOME, HOME and APPDATA; "" when unset.
-        home: the resolved OCX_HOME, or "" to drop the OCX_HOME-rooted tiers
-            (the store lives inside the repo being fetched, which cannot
-            be watched).
 
     Returns:
         list of absolute path strings, lowest precedence first.
@@ -322,10 +291,6 @@ def ambient_config_paths(is_windows, is_macos, env, home):
     if config_home:
         paths.append(sep.join([config_home, "ocx", "config.toml"]))
 
-    if home:
-        paths.append(sep.join([home, "config.toml"]))
-        paths.append(sep.join([home, "state", "managed-config", "snapshot.json"]))
-        paths.append(sep.join([home, "state", "managed-config", "config.toml"]))
     return paths
 
 # The attr schema make_ocx_env() reads off ctx.attr.
@@ -335,7 +300,7 @@ def ambient_config_paths(is_windows, is_macos, env, home):
 CONFIG_ATTRS = {
     "config": attr.label(
         allow_single_file = True,
-        doc = "An ocx site config.toml (mirrors, registries, [patches]) layered over the " +
+        doc = "An ocx site config.toml (mirrors, registries) layered over the " +
               "host's discovered config — not the project ocx.toml. Sets OCX_CONFIG for " +
               "every invocation, overriding an ambient one, and the file is watched. " +
               "Combine with no_config for a hermetic configuration.",
@@ -344,18 +309,10 @@ CONFIG_ATTRS = {
         default = False,
         doc = "Ignore the host's discovered config tiers (/etc, the user config, " +
               "$OCX_HOME/config.toml) and the managed-config snapshot — sets OCX_NO_CONFIG=1, " +
-              "and blanks an ambient OCX_CONFIG, OCX_PATCHES and OCX_PATCH_SNAPSHOT, which " +
-              "OCX_NO_CONFIG alone does not prune. The `config` and `patch_snapshot` attrs " +
-              "still apply. Use this when a corporate managed config must not reach the " +
+              "and blanks an ambient OCX_CONFIG, which OCX_NO_CONFIG alone does not " +
+              "prune. The `config` attr still applies. Use this when a corporate managed config must not reach the " +
               "build; it also opts out of the exit-78 gate a required-but-unsynced managed " +
               "config raises.",
-    ),
-    "patch_snapshot": attr.label(
-        allow_single_file = True,
-        doc = "A committed patches.snapshot.json (written by `ocx patch freeze` next to " +
-              "ocx.lock) freezing the digests of the patch companions composed onto this " +
-              "environment. Sets OCX_PATCH_SNAPSHOT. `ocx lock --check` does not cover " +
-              "companions — without a frozen snapshot they resolve at fetch time.",
     ),
 }
 
@@ -529,11 +486,8 @@ def make_ocx_env(ctx, host):
             env[key] = value
 
     # OCX_NO_CONFIG only prunes the *discovered* tiers: ocx loads an explicit
-    # OCX_CONFIG regardless, and with the config tier gone an ambient
-    # OCX_PATCHES becomes the *only* patch source — attacker-chosen companions
-    # composed into a build that asked for hermeticity. Empty is ocx's
-    # documented "treat as unset" for all three; the attrs below then reinstate
-    # whatever the caller did ask for. A trusted root is not a config tier, so
+    # OCX_CONFIG regardless. Empty is ocx's documented "treat as unset"; the
+    # attrs below then reinstate whatever the caller did ask for. A trusted root is not a config tier, so
     # it carries no `hermetic` flag and survives.
     if ctx.attr.no_config:
         for key, row in OCX_ENV_CLASSES.items():
@@ -543,14 +497,12 @@ def make_ocx_env(ctx, host):
     # Attrs beat the ambient environment: a bool row is only ever turned on
     # (its "off" is the ambient answer), a path row becomes the resolved file,
     # and ctx.watch() is what registers that file with Bazel — ctx.path()
-    # alone watches nothing since Bazel 7.1. A surviving
+    # alone watches nothing. A surviving
     # ambient path row is watched instead — it names a file ocx reads that
     # Bazel would otherwise never see, so editing an ambient site config would
     # not refetch, and a relative one that cannot be watched is refused rather
     # than forwarded unwatched. A row the block above blanked is "" and is
     # skipped by the emptiness test, which is the whole of the no_config case.
-    # OCX_PATCHES is deliberately not a path row: it carries a JSON
-    # `[patches]` envelope, not a filename.
     for key in _rows("translucent"):
         row = OCX_ENV_CLASSES[key]
         override = getattr(ctx.attr, row.attr)
@@ -590,7 +542,6 @@ def make_ocx_env(ctx, host):
             host.is_windows,
             host.ocx_platform.startswith("darwin"),
             {key: ctx.getenv(key) or "" for key in _CONFIG_HOME_ENV},
-            "",
         ):
             # ambient_config_paths() derives its user tier from HOME/APPDATA,
             # neither of which it tests for absoluteness — a relative one would
@@ -619,38 +570,29 @@ def ocx_bin(ctx):
     exe = stable.dirname.get_child(stable.basename + ".exe")
     return exe if exe.exists else stable
 
-def run_ocx(ctx, binary, args, env, what, is_windows, hints = {}, retries = 0):
-    """Runs the ocx CLI, mapping failures to actionable messages.
+def execute_ocx(ctx, binary, args, env, is_windows):
+    """Runs the ocx CLI once, retrying only a transient failure.
+
+    A sysexit 75 is ocx's own "transient, retry me", raised when the registry
+    times out or reports capacity exceeded; it is retried twice with a linear
+    backoff. Any other result is settled on the first answer.
 
     Args:
-        ctx: repository_ctx.
+        ctx: repository_ctx or module_ctx.
         binary: path of the ocx executable.
         args: argv after the binary.
         env: environment dict (from make_ocx_env().env).
-        what: short human description used in error messages.
         is_windows: host flag (from host_info()); Windows has no `sleep`.
-        hints: {exit_code: extra hint} overriding the sysexits defaults.
-        retries: extra attempts after a *transient* failure (_RETRYABLE — any
-            other sysexit is settled on the first answer and fails at once).
-            Repo rules fetch in parallel, and concurrent `ocx package install`
-            calls of the same package can race on store symlink creation (ocx
-            TOCTOU); the store is idempotent, so a retry converges. A sysexit
-            75 is retried regardless — it is ocx's own "transient, retry me",
-            raised when the registry times out or reports capacity exceeded.
-            Attempts are spaced by a linear backoff.
 
     Returns:
-        stdout string.
+        The execution result, successful or not, so a caller can clean up
+        before it fails.
     """
     result = None
-    attempts = max(retries, _TRANSIENT_RETRIES) + 1
+    attempts = _TRANSIENT_RETRIES + 1
     for attempt in range(attempts):
         result = ctx.execute([str(binary)] + args, environment = env, timeout = 600)
-        if result.return_code == 0:
-            return result.stdout
         if result.return_code not in _RETRYABLE:
-            break
-        if attempt >= retries and result.return_code != 75:
             break
 
         # ponytail: linear 1s, 2s, … — back-to-back execs span microseconds
@@ -665,7 +607,26 @@ def run_ocx(ctx, binary, args, env, what, is_windows, hints = {}, retries = 0):
                 ["/bin/sh", "-c", 'sleep "$0"', str(attempt + 1)],
                 environment = {"PATH": "/usr/bin:/bin"},
             )
-    hint = hints.get(result.return_code) or SYSEXIT_HINTS.get(result.return_code, "")
+    return result
+
+def run_ocx(ctx, binary, args, env, what, is_windows):
+    """Runs the ocx CLI, mapping a failure to an actionable message.
+
+    Args:
+        ctx: repository_ctx or module_ctx.
+        binary: path of the ocx executable.
+        args: argv after the binary.
+        env: environment dict (from make_ocx_env().env).
+        what: short human description used in error messages.
+        is_windows: host flag (from host_info()); Windows has no `sleep`.
+
+    Returns:
+        stdout string.
+    """
+    result = execute_ocx(ctx, binary, args, env, is_windows)
+    if result.return_code == 0:
+        return result.stdout
+    hint = SYSEXIT_HINTS.get(result.return_code, "")
     fail("rules_ocx: {} failed (exit {}): ocx {}\n{}{}".format(
         what,
         result.return_code,
@@ -674,14 +635,8 @@ def run_ocx(ctx, binary, args, env, what, is_windows, hints = {}, retries = 0):
         "\nhint: " + hint if hint else "",
     ))
 
-def decode_json(stdout, what):
-    """json.decode with an error message naming the failing command."""
-    if not stdout.strip():
-        fail("rules_ocx: {} produced no output — expected JSON".format(what))
-    return json.decode(stdout)
-
 def make_isolated_ocx_env(rctx, home):
-    """Environment for one ocx call run against a throwaway OCX_HOME (C-RO-16).
+    """Environment for one ocx call run against a throwaway OCX_HOME.
 
     `home` is a fresh directory inside the working directory that the caller
     deletes before returning. HOME and the process environment are inherited;

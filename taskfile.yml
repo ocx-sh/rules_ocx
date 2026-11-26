@@ -144,9 +144,9 @@ tasks:
       - arch -x86_64 "${RUNNER_TEMP:-/tmp}/bazelisk-x64" build //...
 
   # Offline failure mode; a network-backed cache would mask it. Linux only (one runner is enough). A set
-  # repository vendors into a scratch OCX_HOME of its own (C-RO-16), so there is no warm store an offline refetch
+  # repository vendors into a scratch OCX_HOME of its own, so there is no warm store an offline refetch
   # could reuse: it must fail naming ocx, never hang. That an offline build *succeeds* from `bazel vendor` or
-  # blob_dirs is proven with the network cut, in the rig (verify-rbe: V-04, V-05, V-32).
+  # blob_dirs is proven with the network cut, in the rig (verify-rbe: test_offline.py).
   deep:offline:
     internal: true
     cmds:
@@ -228,8 +228,8 @@ tasks:
       - bash scripts/ocx_under_test.sh --guard
       - bash scripts/ocx_under_test_test.sh
 
-  # make-location (buildifier >= 9) flags every `$(location)` in the examples and tests; the old
-  # buildifier_prebuilt 8.2 gate did not, so it stays off until those call sites are migrated on purpose.
+  # make-location (buildifier >= 9) flags every `$(location)` in the examples and tests, so it stays off
+  # until those call sites are migrated on purpose.
   buildifier:check:
     desc: buildifier format + lint check over every tracked Bazel file
     cmds:
@@ -252,7 +252,7 @@ tasks:
       - "{{.BAZEL}} test //..."
 
   test:install-binary:
-    desc: Local-ocx install path (V-51) — hash check, copy, immunity to later edits (Linux only)
+    desc: Local-ocx install path — hash check, copy, immunity to later edits (Linux only)
     cmds:
       - BAZEL=bazelisk ocx exec -g test -- bash e2e/install_binary/run.sh
 

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 The OCX Authors
 #
-# The ocx-interface guard (C-RO-14). Included from the root taskfile under the namespace `guard` (guard:check, guard:test) by its owner.
+# The ocx-interface guard. Included from the root taskfile under the namespace `guard` (guard:check, guard:test) by its owner.
 
 version: "3"
 

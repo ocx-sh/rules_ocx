@@ -427,8 +427,8 @@ def test_f1_url_guard_allowlists_the_asset_shape_instead_of_blocking_separators(
 
 
 def test_f1_validate_refuses_a_filename_it_cannot_type():
-    """F1(b): archive_type() falls back to tar.xz, so an unmapped extension
-    fails at extraction rather than at download — and a row with no filename
+    """F1(b): an extension archive_type() does not map is refused here, before
+    it can reach a fetch — and a row with no filename
     at all has to die() with a message, not KeyError out of the guard."""
     for bad in ("ocx.tar.bz2", "ocx", None, 7, ["ocx.tar.gz"]):
         m = manifest("0.5.2")
