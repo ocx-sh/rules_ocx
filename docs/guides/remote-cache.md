@@ -24,11 +24,7 @@ Buildbarn and NativeLink both ran the rig suite green on 2026-11-26.
 - On Windows, `--enable_runfiles`. The launcher looks in the runfiles tree, and without it the launcher exits 78.
 - `platforms` on every tag, naming each platform an executor may have.
 
-Put the Windows flag in the `.bazelrc` of the workspace.
-
-```text
-common:windows --enable_runfiles
-```
+Put the line `common:windows --enable_runfiles` in the `.bazelrc` of the workspace.
 
 ## Keep action keys stable
 

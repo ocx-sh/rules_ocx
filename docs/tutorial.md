@@ -44,35 +44,21 @@ ocx.project(
     name = "tools",
     ocx_toml = "//:ocx.toml",
     ocx_lock = "//:ocx.lock",
-    platforms = [
-        "darwin/amd64",
-        "darwin/arm64",
-        "linux/amd64",
-        "linux/arm64",
-        "windows/amd64",
-    ],
+    platforms = ["linux/amd64", "darwin/arm64"],
 )
 use_repo(ocx, "tools")
 
 register_toolchains("@tools//:all")
 ```
 
-Pin Bazel 9 in `.bazelversion`.
+Pin Bazel 9 by writing `9.2.0` into `.bazelversion`.
 
-```console
-$ echo 9.2.0 > .bazelversion
-```
-
-On Windows, add a `.bazelrc` so that tests get a runfiles tree.
-The tools look for their files in it, and without it they exit 78.
-
-```text
-common:windows --enable_runfiles
-```
+On Windows, put `common:windows --enable_runfiles` in a `.bazelrc`.
+The tools look for their files in the runfiles tree, and without it they exit 78.
 
 ## Write the test
 
-Create `lint_test.sh` and make it executable.
+Create `lint_test.sh` and run `chmod +x lint_test.sh`.
 
 ```bash
 #!/usr/bin/env bash
@@ -80,10 +66,6 @@ set -euo pipefail
 
 grep -q "version:" <<<"$("$SHELLCHECK_BIN" --version)"
 echo "shellcheck OK"
-```
-
-```console
-$ chmod +x lint_test.sh
 ```
 
 Create `BUILD.bazel`.
