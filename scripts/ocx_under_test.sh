@@ -7,7 +7,7 @@
 # No pin file: no effect, the released ocx pin stays in force. Run by the `ci:*` and `deep:*` tasks and by the
 # `ocx-under-test` composite action, so the logic exists once.
 #
-# Effects: a marked block in .bazelrc.user (the workspace rc imports it): `--lockfile_mode=off` and the pair
+# Effects: a marked block in .bazelrc.user of the root and of every examples/* and e2e/* module (each workspace rc imports it): `--lockfile_mode=off` and the pair
 # `--repo_env=OCX_INSTALL_BINARY[_SHA256]=...`, because the pair is not in the lockfile. Under GitHub Actions the
 # pair is also appended to $GITHUB_ENV for later steps (the rig tasks read OCX_INSTALL_BINARY).
 # The pin file is refused on the lane that writes the shared Bazel cache (a push to main), so a dev ocx never
@@ -74,18 +74,35 @@ else
   [[ -z "${GITHUB_ACTIONS:-}" ]] || echo "::add-mask::$anon"
   export OCX_AUTH_ghcr_io_TYPE=bearer OCX_AUTH_ghcr_io_TOKEN="$anon"
 fi
-# A policy-covered pull verifies the signature before it downloads and fails closed.
-status=0
-report="$("${OCX:-ocx}" --config "$config" --format json package pull "$identifier")" || status=$?
 # The report maps the identifier to the package root: flat in ocx 0.6.5, under `paths` from 0.6.6. A failed pull
 # prints an error document instead, so read the key by identifier, never the first entry.
-pulled="$(printf '%s' "$report" | jq -r --arg id "$identifier" '(.paths // .)[$id] // empty' 2> /dev/null || true)"
-if [[ "$status" -ne 0 || -z "$pulled" ]]; then
-  detail="$(printf '%s' "$report" | jq -r '.error.message // empty' 2> /dev/null || true)"
-  echo "::error::ocx package pull of $identifier (exit $status) gave no package root; expected a JSON report mapping the identifier to a directory${detail:+: $detail}" >&2
-  exit 1
+#
+# The deep tier runs this script once per task. ocx 0.6.5 fails a second pull of a package whose manifest it
+# already holds locally (ghcr.io's referrers endpoint answers "Not authorized"), so the first run records the
+# binary it verified and later runs reuse it; the SHA-256 below is always recomputed from the file.
+memo="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/ocx-under-test.memo"
+binary=""
+if [[ -f "$memo" ]]; then
+  IFS=$'\t' read -r memo_id memo_binary < "$memo" || true
+  if [[ "${memo_id:-}" == "$identifier" && -f "${memo_binary:-}" ]]; then
+    binary="$memo_binary"
+  fi
 fi
-binary="$(find "$pulled/content" -type f \( -name ocx -o -name ocx.exe \) -print -quit)"
+if [[ -z "$binary" ]]; then
+  # A policy-covered pull verifies the signature before it downloads and fails closed.
+  status=0
+  report="$("${OCX:-ocx}" --config "$config" --format json package pull "$identifier")" || status=$?
+  pulled="$(printf '%s' "$report" | jq -r --arg id "$identifier" '(.paths // .)[$id] // empty' 2> /dev/null || true)"
+  if [[ "$status" -ne 0 || -z "$pulled" ]]; then
+    detail="$(printf '%s' "$report" | jq -r '.error.message // empty' 2> /dev/null || true)"
+    echo "::error::ocx package pull of $identifier (exit $status) gave no package root; expected a JSON report mapping the identifier to a directory${detail:+: $detail}" >&2
+    exit 1
+  fi
+  binary="$(find "$pulled/content" -type f \( -name ocx -o -name ocx.exe \) -print -quit)"
+  if [[ -n "$binary" ]]; then
+    printf '%s\t%s\n' "$identifier" "$binary" > "$memo"
+  fi
+fi
 if [[ -z "$binary" ]]; then
   echo "::error::no ocx binary in the pulled package" >&2
   exit 1
@@ -99,23 +116,31 @@ if command -v cygpath > /dev/null 2>&1; then
   binary="$(cygpath -m "$binary")"
 fi
 
-rc="$root/.bazelrc.user"
 begin="# ocx-under-test begin"
 end="# ocx-under-test end"
 kept="$scratch/rc.kept"
-if [[ -f "$rc" ]]; then
-  awk -v b="$begin" -v e="$end" '$0 == b {skip = 1} !skip {print} $0 == e {skip = 0}' "$rc" > "$kept"
-else
-  : > "$kept"
-fi
-{
-  cat "$kept"
-  echo "$begin"
-  echo "common --lockfile_mode=off"
-  echo "common --repo_env=OCX_INSTALL_BINARY=$binary"
-  echo "common --repo_env=OCX_INSTALL_BINARY_SHA256=$sha"
-  echo "$end"
-} > "$rc"
+# Every Bazel workspace the tasks build from: the root and each example module or e2e module with its own
+# MODULE.bazel (each imports its own .bazelrc.user).
+workspaces=("$root")
+for module in "$root"/examples/*/MODULE.bazel "$root"/e2e/*/MODULE.bazel; do
+  [[ -f "$module" ]] && workspaces+=("$(dirname "$module")")
+done
+for workspace in "${workspaces[@]}"; do
+  rc="$workspace/.bazelrc.user"
+  if [[ -f "$rc" ]]; then
+    awk -v b="$begin" -v e="$end" '$0 == b {skip = 1} !skip {print} $0 == e {skip = 0}' "$rc" > "$kept"
+  else
+    : > "$kept"
+  fi
+  {
+    cat "$kept"
+    echo "$begin"
+    echo "common --lockfile_mode=off"
+    echo "common --repo_env=OCX_INSTALL_BINARY=$binary"
+    echo "common --repo_env=OCX_INSTALL_BINARY_SHA256=$sha"
+    echo "$end"
+  } > "$rc"
+done
 if [[ -n "${GITHUB_ENV:-}" ]]; then
   {
     echo "OCX_INSTALL_BINARY=$binary"
