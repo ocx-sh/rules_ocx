@@ -62,12 +62,18 @@ in-tree draft ocx-sh/ocx#12.
 
 1. **Never re-implement OCX internals in Starlark**: no OCI protocol, no
    registry auth, no index/object-store layout knowledge, no lockfile
-   parsing. The `ocx` CLI is the only interface; its `--format json` shapes
-   (env entries, which paths, install report, closure surface) are the parse
-   surface.
+   parsing. The `ocx` CLI is the only interface. The `manifest.json` that
+   `ocx vendor` writes is the one ocx document rules_ocx parses
+   (`ocx/private/vendor_manifest.bzl`); no other ocx report is read. The text
+   of `ocx.lock` is hashed into a fact and never parsed.
 2. The ocx CLI is version-unstable: `DEFAULT_OCX_VERSION`
    (`ocx/private/versions.bzl`) and `dist/dist.json` bump **together**.
-3. Extension impls: no `module_ctx.os`, no getenv — repository rules only.
+3. Extension impls may read `module_ctx.os`, read the tag's `ocx.lock` with
+   `module_ctx.read` (its `ocx.toml` only on a miss), read the `OCX_INSTALL_*`
+   variables, download ocx and run `ocx vendor --manifest-only`, and only to
+   compute facts that miss. Nothing else: no other getenv, no watch of ambient
+   config, never a credential or secret variable. Everything else that touches
+   the host stays in repository rules.
 4. Every sysexit **reachable from a repository rule** (table in the CLI
    contract section) maps to a fail() naming the user-fixable action, or the
    condition to check, and the exact command where one exists; 75 is retried

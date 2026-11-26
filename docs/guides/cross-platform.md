@@ -1,13 +1,16 @@
 <!-- doc_type: how-to -->
 <!-- doc_tier: everyday -->
-# Use per-platform tools with transitions
+# Use tools for several platforms
 
-This guide builds a tool for a platform other than your host, for example Linux arm64 binaries on a macOS machine.
+This guide vendors one package for several platforms and runs the right one on each machine.
+It also shows how to inspect the files of a platform you do not run.
 It assumes you know how to declare an [`ocx.package`](ci-reproducible.md).
 
 ## Declare the platforms
 
-List the platforms on the package. rules_ocx creates one repository per platform and a hub that selects by target platform.
+List the platforms on the package.
+rules_ocx creates one set repository per platform.
+It also creates a hub that selects a toolchain by the platform an action executes on.
 
 ```starlark
 ocx.package(
@@ -15,68 +18,71 @@ ocx.package(
     index = "//:index",
     package = "ocx.sh/jqlang/jq:latest",
     platforms = [
+        "darwin/amd64",
+        "darwin/arm64",
         "linux/amd64",
         "linux/arm64",
         "windows/amd64",
     ],
 )
 use_repo(ocx, "jq")
+
+register_toolchains("@jq//:all")
 ```
 
-The hub `@jq` aliases only `//:content`.
-The launchers live in the per-platform repositories.
+A build fetches the set of the platform it executes on and no other.
+A platform that the package does not serve fails the build and names the platform.
 
-## Transition to the target platform
+`@jq//:jq` is the tool.
+When a Linux machine and a macOS machine build the same target, each runs its own launcher.
 
-A small rule changes `--platforms` for its `srcs`, so one build fetches `jq` for foreign platforms.
+## Name a platform with libc
+
+A platform key can carry features, such as `linux/amd64+libc.musl`.
+The hub lists the musl toolchain before the glibc one, so a musl executor gets the musl set.
+A platform key with no libc feature, or with `libc.glibc`, adds no constraint.
+
+## Read the files of a platform you do not run
+
+A set repository is named `<tag>_<platform>`, with every character that is not a lowercase letter or digit turned into `_`.
+Its `:set` target holds every file of the set.
+Add the repository to `use_repo` and depend on `:set` to fetch it without running anything from it.
 
 ```starlark
-def _transition_impl(_settings, attr):
-    return {"//command_line_option:platforms": str(attr.target_platform)}
-
-_platform_transition = transition(
-    implementation = _transition_impl,
-    inputs = [],
-    outputs = ["//command_line_option:platforms"],
-)
+use_repo(ocx, "jq", "jq_linux_arm64", "jq_windows_amd64")
 ```
 
-The complete rule, `platform_filegroup`, is in [`examples/cross_platform/transition.bzl`](https://github.com/ocx-sh/rules_ocx/blob/main/examples/cross_platform/transition.bzl).
-Use it with a `platform` target.
-
 ```starlark
-platform(
-    name = "linux_arm64",
-    constraint_values = [
-        "@platforms//cpu:aarch64",
-        "@platforms//os:linux",
+sh_test(
+    name = "abi_test",
+    srcs = ["abi_test.sh"],
+    data = [
+        "@jq_linux_arm64//:set",
+        "@jq_windows_amd64//:set",
     ],
-)
-
-platform_filegroup(
-    name = "jq_linux_arm64",
-    srcs = ["@jq//:content"],
-    target_platform = ":linux_arm64",
+    env = {
+        "JQ_LINUX_ARM64": "$(locations @jq_linux_arm64//:set)",
+        "JQ_WINDOWS_AMD64": "$(locations @jq_windows_amd64//:set)",
+    },
 )
 ```
 
-## Compose a foreign environment from the project lock
+The test reads the first bytes of each binary and expects an ELF aarch64 file and a PE32+ file.
+Run it with `bazel test //:abi_test` in `examples/cross_platform`.
 
-For an `ocx.project`, set `platform` to compose another platform's environment from the same `ocx.lock`.
+## Run a tool in a repository rule
 
-```starlark
-ocx.project(
-    name = "tools_arm64",
-    ocx_lock = "//:ocx.lock",
-    ocx_toml = "//:ocx.toml",
-    platform = "linux/arm64",
-)
-```
-
-Its `env.bzl` holds the store paths of the arm64 binaries.
-The repository has no runnable launchers, because those binaries do not run on the host.
+A repository rule cannot select a toolchain.
+It can read a file of one set repository.
+Build the label from a string, so that the sets of other platforms stay unfetched.
+`examples/project/host_tool_version.bzl` runs `shellcheck --version` this way while Bazel fetches.
 
 ## Check the result
 
-The example test inspects the fetched binaries with `file -bL` and expects an ELF aarch64 file and a PE32+ file.
-Run the same check on a Linux machine with `bazel test //:abi_test` in `examples/cross_platform`.
+Run `bazel build @jq//:jq` on a Linux machine and on a macOS machine.
+Each one fetches only its own set repository.
+
+## Know the limits
+
+- A Windows set cannot carry symlinks, because Bazel declares none there. A Windows set whose package lists a link fails and names the package.
+- On Windows, build with `--enable_runfiles`. The launcher looks for its files in the runfiles tree and exits 78 without it.

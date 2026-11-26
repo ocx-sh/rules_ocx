@@ -6,8 +6,8 @@ In this tutorial you add rules_ocx to a Bazel workspace and run `shellcheck` in 
 You never install `shellcheck` on your machine.
 It takes about ten minutes.
 
-You need Bazel 8 or later.
-You also need the `ocx` CLI to write the lock file ([install it](https://ocx.sh/install/)).
+You need Bazel 9.
+You also need an `ocx` CLI with the `vendor` command to write the lock file ([install it](https://ocx.sh/install/)).
 rules_ocx wraps `ocx`. It downloads a pinned `ocx` build itself and runs it for every fetch.
 
 ## Pin the tool
@@ -30,6 +30,8 @@ Commit both files later. The lock file is what makes every build use the same by
 ## Declare the module
 
 Create `MODULE.bazel`.
+`platforms` names every platform a build may run the tool on, spelled as the lock keys them.
+Each one must be a platform the lock serves.
 
 ```starlark
 module(name = "tutorial")
@@ -42,8 +44,30 @@ ocx.project(
     name = "tools",
     ocx_toml = "//:ocx.toml",
     ocx_lock = "//:ocx.lock",
+    platforms = [
+        "darwin/amd64",
+        "darwin/arm64",
+        "linux/amd64",
+        "linux/arm64",
+        "windows/amd64",
+    ],
 )
 use_repo(ocx, "tools")
+
+register_toolchains("@tools//:all")
+```
+
+Pin Bazel 9 in `.bazelversion`.
+
+```console
+$ echo 9.2.0 > .bazelversion
+```
+
+On Windows, add a `.bazelrc` so that tests get a runfiles tree.
+The tools look for their files in it, and without it they exit 78.
+
+```text
+common:windows --enable_runfiles
 ```
 
 ## Write the test
@@ -82,7 +106,8 @@ sh_test(
 $ bazel test //:lint
 ```
 
-The first run fetches `ocx` and `shellcheck`, then reports `//:lint` as `PASSED`.
+The first run fetches `ocx` and the `shellcheck` set for your platform, then reports `//:lint` as `PASSED`.
+The sets of the other platforms stay unfetched.
 
 ## Check what you got
 
@@ -92,8 +117,8 @@ List the targets that rules_ocx created.
 $ bazel query @tools//...
 ```
 
-The list contains `@tools//:shellcheck`.
-A tool that is declared but missing from this list raises no error, so run this query whenever a target you expect is absent.
+The list contains `@tools//:shellcheck` and one toolchain per platform.
+A platform the lock does not serve fails the build and names the platform, so the list never drops one silently.
 
 ## Next steps
 

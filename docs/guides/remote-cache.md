@@ -1,58 +1,80 @@
 <!-- doc_type: how-to -->
 <!-- doc_tier: integration -->
-# Keep tool bytes out of remote-cached actions
+# Build with remote execution and a remote cache
 
-This guide makes a fully remote-cached build download no tool content, even on a machine that has never seen the tools.
-It assumes you provision tools with `ocx.project` or `ocx.package`.
+This guide makes actions that use a vendored tool run on remote executors that have no network and no `ocx`, and keeps those actions cacheable.
+It assumes you provision tools with [`ocx.project` or `ocx.package`](pin-toolchain.md).
 
-## Switch to lazy provisioning
+## Know what the executor receives
 
-Add `bins` to the tag, listing the executables you use.
+A set is a tree of files in a repository.
+Bazel uploads it as the inputs of every action that uses one of its tools.
+The launcher in it is a native program.
+It needs no shell, no `ocx` and no network on the executor.
+It looks for its files beside itself or in the runfiles tree of the action.
+
+Remote execution is supported.
+
+<!-- R9-MARK for the meta-orchestrator: add one sentence naming the executors the rig proved (Buildbarn, NativeLink) once R8 is green, with the date. -->
+
+## Require what the build needs
+
+- Bazel 9. The module declares `bazel_compatibility = [">=9.0.0"]` and refuses Bazel 8 and earlier.
+- An `ocx` with the `vendor` command, because the extension and every set repository run it.
+- On Windows, `--enable_runfiles`. The launcher looks in the runfiles tree, and without it the launcher exits 78.
+- `platforms` on every tag, naming each platform an executor may have.
+
+Put the Windows flag in the `.bazelrc` of the workspace.
+
+```text
+common:windows --enable_runfiles
+```
+
+## Keep action keys stable
+
+Every action that uses a tool of a set keys on the whole set.
+A change to any package in the set re-runs all of those actions.
+Declare one `ocx.project` tag per group a target needs, so that a change to an unrelated group leaves the key alone.
 
 ```starlark
 ocx.project(
-    name = "tools_lazy",
-    bins = [
-        "shellcheck",
-        "shfmt",
-    ],
-    ocx_lock = "//:ocx.lock",
+    name = "lint_tools",
+    groups = ["lint"],
     ocx_toml = "//:ocx.toml",
+    ocx_lock = "//:ocx.lock",
+    platforms = ["linux/amd64", "darwin/arm64"],
+)
+ocx.project(
+    name = "build_tools",
+    groups = ["build"],
+    ocx_toml = "//:ocx.toml",
+    ocx_lock = "//:ocx.lock",
+    platforms = ["linux/amd64", "darwin/arm64"],
 )
 ```
 
-Nothing is pulled at fetch time.
-Each name becomes a launcher that re-enters `ocx exec` and materializes the content on its first execution.
+Pin the packages.
+A project tag is pinned by its lock.
+An `ocx.package` is pinned by a digest in its identifier, and a floating tag makes the extension not reproducible.
 
-## Pin the package for the package tier
+## Share the repository contents cache with trusted lanes only
 
-An `ocx.package` with `bins` needs `pins` or an `@sha256:` reference, so the action key is stable.
+Bazel can share fetched repositories between clients through a remote repository contents cache (`--experimental_remote_repo_contents_cache`).
+A fresh client then skips the set repository rule and makes no registry request.
 
-```starlark
-ocx.package(
-    name = "jq_lazy",
-    bins = ["jq"],
-    package = "ocx.sh/jqlang/jq:latest",
-    pins = {
-        "linux/amd64": "sha256:913ff41f5e643a73c17a2e560e349d8eea255f50b293156e58da15b957baacae",
-        "darwin/arm64": "sha256:c5cf10597aacad9b7925f937c966ec72145ea6a40f7f7ef4cac11f90c43130b1",
-    },
-)
-```
+Only trusted CI lanes write that cache.
+A client that writes it decides what every other client receives, so an untrusted client must read it and never write it.
+Each set repository is fetched into a scratch `OCX_HOME` from digest-verified blobs, and the home of the machine is never read.
+A tampered home on one machine cannot reach the cache.
 
-Tool content never becomes an action input.
-Actions key on the lock file (project) or the digest-pinned reference (package).
-The POSIX launchers resolve everything through runfiles, so the keys match across machines.
+## Know the limits
 
-## Know the trade-offs
-
-- `bins` names are not validated at fetch time.
-- `//:content` and `//:env.bzl` are unavailable, because they need materialized bytes.
-- `isolated_home = True` cannot be combined with `bins`.
-- The first executions on a cold machine race on the store ([ocx-sh/ocx#179](https://github.com/ocx-sh/ocx/issues/179)).
+- Empty directories of a package are not visible to actions on a remote executor.
+- A Windows set cannot carry symlinks.
+- A set repository keeps no layer cache between fetches. Give the tag `blob_dirs` when a fetch must not reach the registry.
+- A tool finds the packages of its own set and nothing from another tag.
 
 ## Check the result
 
-Run a build whose actions all hit the remote cache on a pristine machine.
-The shared `OCX_HOME` store stays empty of tool content.
-The first cache-miss action on that machine pays the pull once.
+Run the same build on a second machine with an empty output base, the same remote cache and the repository contents cache on.
+The registry sees no request for the set, and the actions are cache hits.

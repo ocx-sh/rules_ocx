@@ -35,6 +35,28 @@ $ bazel fetch //...
 - `OCX_EXTRA_CA_CERTS` adds TLS roots, for example a corporate proxy CA.
 - `OCX_AUTH_<REGISTRY>_{TYPE,USER,TOKEN}` sets registry credentials. Bazel cannot enumerate these, so run `bazel fetch --force` after changing auth.
 
+## Fetch without a network
+
+Give a tag `blob_dirs`, a list of directories of pre-fetched blobs.
+Each one is passed to `ocx` as `--blob-dir`, so the vendor runs offline.
+
+```starlark
+ocx.project(
+    name = "tools",
+    blob_dirs = ["//third_party:ocx_blobs"],
+    ocx_lock = "//:ocx.lock",
+    ocx_toml = "//:ocx.toml",
+    platforms = ["linux/amd64"],
+)
+```
+
+## Use a local ocx binary
+
+To run an `ocx` that is not a release, set `OCX_INSTALL_BINARY` to its absolute path and `OCX_INSTALL_BINARY_SHA256` to its digest.
+Both are required together.
+Bazel copies the file through its downloader, so a wrong digest fails the fetch and a later edit of the file changes nothing.
+Pass both with `--repo_env`, and add `--lockfile_mode=off`, because the pair is not part of the lock file.
+
 ## Keep the mirror readable without credentials
 
 The mirror for the `ocx` binary and the manifest must allow anonymous read.

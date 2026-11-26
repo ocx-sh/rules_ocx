@@ -1,50 +1,72 @@
-# The @jq hub select()s the per-platform package repo matching the target
-# platform; platform_filegroup transitions it, so one build fetches jq for
-# foreign platforms — the PR #12 ABI-assertion pattern.
+# One package, vendored for five platforms behind the @jq hub.
+#   abi_test          a foreign platform's files are fetched without running them
+#   host_test         the hub tool of the platform the test runs on runs
+#   runfiles_test     an action finds its launcher's files in the runfiles tree
+#   no_runfiles_test  Windows only: without a runfiles tree the launcher exits 78
+#   signature_test    macOS only: a launcher with one changed byte is killed
 
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
-load(":transition.bzl", "platform_filegroup")
-
-platform(
-    name = "linux_arm64",
-    constraint_values = [
-        "@platforms//cpu:aarch64",
-        "@platforms//os:linux",
-    ],
-)
-
-platform(
-    name = "windows_amd64",
-    constraint_values = [
-        "@platforms//cpu:x86_64",
-        "@platforms//os:windows",
-    ],
-)
-
-platform_filegroup(
-    name = "jq_linux_arm64",
-    srcs = ["@jq//:content"],
-    target_platform = ":linux_arm64",
-)
-
-platform_filegroup(
-    name = "jq_windows_amd64",
-    srcs = ["@jq//:content"],
-    target_platform = ":windows_amd64",
-)
+load(":launcher_status.bzl", "launcher_status")
 
 sh_test(
     name = "abi_test",
     size = "small",
     srcs = ["abi_test.sh"],
     data = [
-        ":jq_linux_arm64",
-        ":jq_windows_amd64",
+        "@jq_linux_arm64//:set",
+        "@jq_windows_amd64//:set",
     ],
     env = {
-        "JQ_LINUX_ARM64": "$(locations :jq_linux_arm64)",
-        "JQ_WINDOWS_AMD64": "$(locations :jq_windows_amd64)",
+        "JQ_LINUX_ARM64": "$(locations @jq_linux_arm64//:set)",
+        "JQ_WINDOWS_AMD64": "$(locations @jq_windows_amd64//:set)",
     },
-    # `file -b` assertions need a Linux runner.
-    target_compatible_with = ["@platforms//os:linux"],
+)
+
+sh_test(
+    name = "host_test",
+    size = "small",
+    srcs = ["host_test.sh"],
+    data = ["@jq"],
+    env = {"JQ_BIN": "$(rootpath @jq//:jq)"},
+)
+
+launcher_status(
+    name = "with_runfiles",
+    runfiles = True,
+    tool = "@jq",
+)
+
+launcher_status(
+    name = "without_runfiles",
+    runfiles = False,
+    target_compatible_with = ["@platforms//os:windows"],
+    tool = "@jq",
+)
+
+sh_test(
+    name = "runfiles_test",
+    size = "small",
+    srcs = ["runfiles_test.sh"],
+    data = [":with_runfiles"],
+    env = {"WITH_RUNFILES": "$(rootpath :with_runfiles)"},
+)
+
+# Windows only: elsewhere the launcher follows the symlink Bazel makes to the
+# vendored files, so a configuration without runfiles still finds its root.
+sh_test(
+    name = "no_runfiles_test",
+    size = "small",
+    srcs = ["no_runfiles_test.sh"],
+    data = [":without_runfiles"],
+    env = {"WITHOUT_RUNFILES": "$(rootpath :without_runfiles)"},
+    target_compatible_with = ["@platforms//os:windows"],
+)
+
+sh_test(
+    name = "signature_test",
+    size = "small",
+    srcs = ["signature_test.sh"],
+    data = ["@jq"],
+    env = {"JQ_BIN": "$(rootpath @jq//:jq)"},
+    target_compatible_with = ["@platforms//os:macos"],
 )

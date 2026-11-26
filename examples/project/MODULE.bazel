@@ -12,32 +12,49 @@ local_path_override(
 )
 
 ocx = use_extension("@rules_ocx//ocx:extensions.bzl", "ocx")
+
+# One tag per group a target needs; this lock has the default group only.
+# `platforms` lists every platform a build may run a tool on, spelled as the
+# lock keys it. A build fetches only the set of the platform it executes on.
 ocx.project(
     name = "tools",
     ocx_lock = "//:ocx.lock",
     ocx_toml = "//:ocx.toml",
-)
-
-# Lazy variant: nothing is pulled at fetch time — each bin is a launcher
-# re-entering `ocx exec`, materializing the toolchain on first execution.
-# Fully remote-cached builds download no tool content at all.
-ocx.project(
-    name = "tools_lazy",
-    bins = [
-        "shellcheck",
-        "shfmt",
+    platforms = [
+        "darwin/amd64",
+        "darwin/arm64",
+        "linux/amd64",
+        "linux/arm64",
+        "windows/amd64",
     ],
-    ocx_lock = "//:ocx.lock",
-    ocx_toml = "//:ocx.toml",
 )
 
-# Cross-platform variant: composes the linux/arm64 environment from the same
-# ocx.lock — env.bzl holds the absolute store paths of the arm64 leaves. No
-# runnable launchers (the binaries do not run on this host).
-ocx.project(
-    name = "tools_arm64",
-    ocx_lock = "//:ocx.lock",
-    ocx_toml = "//:ocx.toml",
-    platform = "linux/arm64",
+# The hub declares one toolchain per platform; its tools resolve by the
+# platform an action executes on.
+register_toolchains("@tools//:all")
+
+# `@tools` holds the tool targets; the set repositories are named so a
+# repository rule can read a file of one (host_tool_version.bzl).
+use_repo(
+    ocx,
+    "tools",
+    "tools_darwin_amd64",
+    "tools_darwin_arm64",
+    "tools_linux_amd64",
+    "tools_linux_arm64",
+    "tools_windows_amd64",
 )
-use_repo(ocx, "tools", "tools_arm64", "tools_lazy")
+
+host_tool_version = use_repo_rule("//:host_tool_version.bzl", "host_tool_version")
+
+# Runs a tool of a set repository while Bazel fetches this repository.
+host_tool_version(
+    name = "shellcheck_version",
+    tools = {
+        "darwin/amd64": "@tools_darwin_amd64//:selections/default/shells/default/bin/shellcheck",
+        "darwin/arm64": "@tools_darwin_arm64//:selections/default/shells/default/bin/shellcheck",
+        "linux/amd64": "@tools_linux_amd64//:selections/default/shells/default/bin/shellcheck",
+        "linux/arm64": "@tools_linux_arm64//:selections/default/shells/default/bin/shellcheck",
+        "windows/amd64": "@tools_windows_amd64//:selections/default/shells/default/bin/shellcheck.exe",
+    },
+)

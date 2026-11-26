@@ -3,6 +3,15 @@
 
 The environment variables that reach the rules_ocx repository rules, and the ones that do not.
 
+## Local ocx binary
+
+| Variable | Effect |
+| --- | --- |
+| `OCX_INSTALL_BINARY` | Absolute path of an `ocx` binary to use instead of the release. Needs `OCX_INSTALL_BINARY_SHA256`. |
+| `OCX_INSTALL_BINARY_SHA256` | Digest of that file, 64 lowercase hex characters. A wrong digest fails the fetch, and a later edit of the file changes nothing. |
+
+Pass both with `--repo_env` and add `--lockfile_mode=off`, because the pair is not part of the lock file.
+
 ## Mirror and transport
 
 | Variable | Effect |
@@ -23,7 +32,7 @@ Together with the mirror and transport variables above, this is the whole forwar
 A relative value is refused, because a repository rule runs from Bazel's own working directory and cannot watch it.
 `file://` is accepted only on `OCX_SIGSTORE_TRUSTED_ROOT`, and the path behind the prefix must be absolute.
 
-`OCX_HOME` is resolved rather than forwarded: it selects the store the rules point `ocx` at.
+`OCX_HOME` is never forwarded. Every `ocx` run gets a fresh scratch `OCX_HOME` inside its own directory, deleted before the run returns.
 
 ## Never read from the environment
 
@@ -35,4 +44,4 @@ A relative value is refused, because a repository rule runs from Bazel's own wor
 | `OCX_NO_PROJECT` | Fixed, so a fetch cannot walk directories from Bazel's working directory. |
 | `OCX_NO_CONFIG_REFRESH` | Fixed on, because the managed-config refresh needs a TTY. |
 | `OCX_NO_CONSENT` | Fixed on, so no shell-activation consent stamp is written. |
-| `OCX_TOOLCHAIN_DIR` | Fixed empty, so the `ocx pull` render stays in the fetched repository. |
+| `OCX_TOOLCHAIN_DIR` | Fixed empty, which is ocx's "absent", so an exported toolchain root cannot move anything. |

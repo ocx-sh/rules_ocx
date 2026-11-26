@@ -3,25 +3,96 @@
 Public API of rules_ocx.
 
 Most consumers only need the `ocx` module extension
-(`@rules_ocx//ocx:extensions.bzl`). The repository rules are re-exported
-here for power users composing their own extensions on top of the same
-CLI-backed provisioning.
+(`@rules_ocx//ocx:extensions.bzl`). The repository and build rules are
+re-exported here for power users composing their own extensions on top of the
+same vendored provisioning, and for the `tool.bzl` each hub generates.
 
-<a id="ocx_platform_constraints"></a>
+<a id="ocx_set"></a>
 
-## ocx_platform_constraints
+## ocx_set
 
 <pre>
-load("@rules_ocx//ocx:defs.bzl", "ocx_platform_constraints")
+load("@rules_ocx//ocx:defs.bzl", "ocx_set")
 
-ocx_platform_constraints(<a href="#ocx_platform_constraints-platform">platform</a>)
+ocx_set(<a href="#ocx_set-name">name</a>, <a href="#ocx_set-srcs">srcs</a>, <a href="#ocx_set-links">links</a>, <a href="#ocx_set-reserved">reserved</a>, <a href="#ocx_set-tools">tools</a>)
 </pre>
 
-Bazel constraint labels for the os/arch prefix of an ocx platform key.
+Every file of one vendored set, with its declared links and restored reserved files as runfiles.
 
-'linux/arm64+libc.musl' -> ['@platforms//os:linux', '@platforms//cpu:aarch64'].
-For toolchain authors composing exec_compatible_with; also the hub's source
-of config_setting constraint_values. Fails on an unmappable os/arch.
+**ATTRIBUTES**
+
+
+| Name  | Description | Type | Mandatory | Default |
+| :------------- | :------------- | :------------- | :------------- | :------------- |
+| <a id="ocx_set-name"></a>name |  A unique name for this target.   | <a href="https://bazel.build/concepts/labels#target-names">Name</a> | required |  |
+| <a id="ocx_set-srcs"></a>srcs |  File and directory labels of the vendored tree.   | <a href="https://bazel.build/concepts/labels">List of labels</a> | optional |  `[]`  |
+| <a id="ocx_set-links"></a>links |  Declared link path -> target.   | <a href="https://bazel.build/rules/lib/dict">Dictionary: String -> String</a> | optional |  `{}`  |
+| <a id="ocx_set-reserved"></a>reserved |  Stash path `_ocx_reserved/<n>` -> original path.   | <a href="https://bazel.build/rules/lib/dict">Dictionary: String -> String</a> | optional |  `{}`  |
+| <a id="ocx_set-tools"></a>tools |  Tool name -> [launcher path, sidecar path].   | <a href="https://bazel.build/rules/lib/dict">Dictionary: String -> List of strings</a> | optional |  `{}`  |
+
+
+<a id="ocx_set_toolchain"></a>
+
+## ocx_set_toolchain
+
+<pre>
+load("@rules_ocx//ocx:defs.bzl", "ocx_set_toolchain")
+
+ocx_set_toolchain(<a href="#ocx_set_toolchain-name">name</a>, <a href="#ocx_set_toolchain-set">set</a>)
+</pre>
+
+Exposes an `ocx_set` as a toolchain of the hub's `toolchain_type`.
+
+**ATTRIBUTES**
+
+
+| Name  | Description | Type | Mandatory | Default |
+| :------------- | :------------- | :------------- | :------------- | :------------- |
+| <a id="ocx_set_toolchain-name"></a>name |  A unique name for this target.   | <a href="https://bazel.build/concepts/labels#target-names">Name</a> | required |  |
+| <a id="ocx_set_toolchain-set"></a>set |  The `ocx_set` of this platform.   | <a href="https://bazel.build/concepts/labels">Label</a> | optional |  `None`  |
+
+
+<a id="OcxSetInfo"></a>
+
+## OcxSetInfo
+
+<pre>
+load("@rules_ocx//ocx:defs.bzl", "OcxSetInfo")
+
+OcxSetInfo(<a href="#OcxSetInfo-files">files</a>, <a href="#OcxSetInfo-runfiles">runfiles</a>, <a href="#OcxSetInfo-tools">tools</a>)
+</pre>
+
+The files and tools of one platform's vendored set.
+
+**FIELDS**
+
+| Name  | Description |
+| :------------- | :------------- |
+| <a id="OcxSetInfo-files"></a>files |  depset of every file of the set    |
+| <a id="OcxSetInfo-runfiles"></a>runfiles |  runfiles of the whole set    |
+| <a id="OcxSetInfo-tools"></a>tools |  dict: tool name -> struct(launcher = File, sidecar = File)    |
+
+
+<a id="make_ocx_tool_rule"></a>
+
+## make_ocx_tool_rule
+
+<pre>
+load("@rules_ocx//ocx:defs.bzl", "make_ocx_tool_rule")
+
+make_ocx_tool_rule(<a href="#make_ocx_tool_rule-toolchain_type">toolchain_type</a>)
+</pre>
+
+Creates the `ocx_tool` rule bound to one hub's toolchain type.
+
+A rule's `toolchains = ["//:toolchain_type"]` is resolved against the
+repository that defines the rule, not the one that instantiates it, so a
+single `ocx_tool` in rules_ocx cannot serve many hubs (proved on Bazel
+9.2.0). Each hub's generated `.bzl` calls this with its own
+`Label("//:toolchain_type")`.
+
+The rule is executable; attr `tool` (mandatory) names the tool. It outputs
+symlinks `<name>` and `<name>.direct` (C-RO-07).
 
 
 **PARAMETERS**
@@ -29,11 +100,11 @@ of config_setting constraint_values. Fails on an unmappable os/arch.
 
 | Name  | Description | Default Value |
 | :------------- | :------------- | :------------- |
-| <a id="ocx_platform_constraints-platform"></a>platform |  an ocx platform key ('os/arch[/variant][+feature,...]').   |  none |
+| <a id="make_ocx_tool_rule-toolchain_type"></a>toolchain_type |  a Label of the hub's `toolchain_type`, created in the hub's own `.bzl` so that it resolves in the hub.   |  none |
 
 **RETURNS**
 
-[os_constraint_label, cpu_constraint_label].
+the rule.
 
 
 <a id="ocx_download"></a>
@@ -61,7 +132,15 @@ is then enforced on the fetch. Any other manifest name is fetched
 unverified: the transport to the mirror is then all that stands behind the
 rows it serves, sha256 included.
 
-`version` must be 0.6.1 or newer: rules_ocx passes `--pinned` to `ocx env`
+Local build under test: set `OCX_INSTALL_BINARY` (absolute path of an `ocx`
+binary) and `OCX_INSTALL_BINARY_SHA256` (its digest, 64 lowercase hex) to use
+it instead of the release. Both are required together; the file is copied
+through the downloader, so a wrong digest fails the fetch and a later edit of
+the source file has no effect. `version` and the dist manifest are then
+ignored. Pass them with `--repo_env` and add `--lockfile_mode=off` (the pair
+is not part of the lockfile).
+
+For the released path, `version` must be 0.6.1 or newer: rules_ocx passes `--pinned` to `ocx env`
 and `ocx exec` and pins `OCX_NO_CONSENT`, none of which exists on older
 releases.
 
@@ -76,141 +155,72 @@ releases.
 | <a id="ocx_download-version"></a>version |  Exact ocx version to download, e.g. '0.6.2'. Must be 0.6.1 or newer.   | String | required |  |
 
 
-<a id="ocx_package_hub"></a>
+<a id="ocx_hub_repo"></a>
 
-## ocx_package_hub
+## ocx_hub_repo
 
 <pre>
-load("@rules_ocx//ocx:defs.bzl", "ocx_package_hub")
+load("@rules_ocx//ocx:defs.bzl", "ocx_hub_repo")
 
-ocx_package_hub(<a href="#ocx_package_hub-name">name</a>, <a href="#ocx_package_hub-bins">bins</a>, <a href="#ocx_package_hub-platform_reals">platform_reals</a>, <a href="#ocx_package_hub-platform_repos">platform_repos</a>)
+ocx_hub_repo(<a href="#ocx_hub_repo-name">name</a>, <a href="#ocx_hub_repo-sets">sets</a>, <a href="#ocx_hub_repo-tools">tools</a>)
 </pre>
 
-Multi-platform hub for an ocx.package() with `platforms`.
+The hub of a vendored tool collection.
 
-`//:content` (or, with `bins`, each named launcher) select()s the
-per-platform package repo matching the target platform — combine with a
-platform transition to fetch foreign-platform tools (e.g. for container
-images).
+Holds one toolchain per platform (each naming that platform's set repository
+only inside `toolchain()`), and one `ocx_tool` per tool name. Register it with
+`register_toolchains("@<hub>//:all")`.
 
 **ATTRIBUTES**
 
 
 | Name  | Description | Type | Mandatory | Default |
 | :------------- | :------------- | :------------- | :------------- | :------------- |
-| <a id="ocx_package_hub-name"></a>name |  A unique name for this repository.   | <a href="https://bazel.build/concepts/labels#target-names">Name</a> | required |  |
-| <a id="ocx_package_hub-bins"></a>bins |  Lazy mode: launcher names to alias instead of //:content.   | List of strings | optional |  `[]`  |
-| <a id="ocx_package_hub-platform_reals"></a>platform_reals |  repo slug -> real ocx platform, the source of each config_setting's Bazel constraint_values.   | <a href="https://bazel.build/rules/lib/dict">Dictionary: String -> String</a> | required |  |
-| <a id="ocx_package_hub-platform_repos"></a>platform_repos |  repo slug -> apparent name of the per-platform package repo.   | <a href="https://bazel.build/rules/lib/dict">Dictionary: String -> String</a> | required |  |
+| <a id="ocx_hub_repo-name"></a>name |  A unique name for this repository.   | <a href="https://bazel.build/concepts/labels#target-names">Name</a> | required |  |
+| <a id="ocx_hub_repo-sets"></a>sets |  platform -> label of that platform's `ocx_set_toolchain`.   | <a href="https://bazel.build/rules/lib/dict">Dictionary: String -> String</a> | optional |  `{}`  |
+| <a id="ocx_hub_repo-tools"></a>tools |  Tool names.   | List of strings | optional |  `[]`  |
 
 
-<a id="ocx_package_repo"></a>
+<a id="ocx_set_repo"></a>
 
-## ocx_package_repo
+## ocx_set_repo
 
 <pre>
-load("@rules_ocx//ocx:defs.bzl", "ocx_package_repo")
+load("@rules_ocx//ocx:defs.bzl", "ocx_set_repo")
 
-ocx_package_repo(<a href="#ocx_package_repo-name">name</a>, <a href="#ocx_package_repo-allow_unverified">allow_unverified</a>, <a href="#ocx_package_repo-allow_yanked">allow_yanked</a>, <a href="#ocx_package_repo-bins">bins</a>, <a href="#ocx_package_repo-config">config</a>, <a href="#ocx_package_repo-index">index</a>, <a href="#ocx_package_repo-isolated_home">isolated_home</a>,
-                 <a href="#ocx_package_repo-no_config">no_config</a>, <a href="#ocx_package_repo-ocx">ocx</a>, <a href="#ocx_package_repo-package">package</a>, <a href="#ocx_package_repo-patch_snapshot">patch_snapshot</a>, <a href="#ocx_package_repo-pins">pins</a>, <a href="#ocx_package_repo-platform">platform</a>, <a href="#ocx_package_repo-resolved_platform">resolved_platform</a>,
-                 <a href="#ocx_package_repo-sigstore_trusted_root">sigstore_trusted_root</a>)
+ocx_set_repo(<a href="#ocx_set_repo-name">name</a>, <a href="#ocx_set_repo-allow_unverified">allow_unverified</a>, <a href="#ocx_set_repo-allow_yanked">allow_yanked</a>, <a href="#ocx_set_repo-bindings">bindings</a>, <a href="#ocx_set_repo-blob_dirs">blob_dirs</a>, <a href="#ocx_set_repo-config">config</a>,
+             <a href="#ocx_set_repo-expected_available_platforms">expected_available_platforms</a>, <a href="#ocx_set_repo-expected_tools">expected_tools</a>, <a href="#ocx_set_repo-groups">groups</a>, <a href="#ocx_set_repo-index">index</a>, <a href="#ocx_set_repo-no_config">no_config</a>, <a href="#ocx_set_repo-ocx">ocx</a>, <a href="#ocx_set_repo-ocx_lock">ocx_lock</a>,
+             <a href="#ocx_set_repo-ocx_toml">ocx_toml</a>, <a href="#ocx_set_repo-package">package</a>, <a href="#ocx_set_repo-patch_snapshot">patch_snapshot</a>, <a href="#ocx_set_repo-platform">platform</a>, <a href="#ocx_set_repo-sigstore_trusted_root">sigstore_trusted_root</a>, <a href="#ocx_set_repo-tier">tier</a>)
 </pre>
 
-Provisions a single OCX package from an OCI registry.
+One platform's vendored tool set, produced by `ocx vendor`.
 
-`//:content` is the package tree; every executable the package declares as
-its public surface (`ocx package inspect --closure`) becomes a runnable
-target `//:<name>` (host-platform repos only). A package shipping no
-complete `binaries` metadata falls back to scanning the composed PATH, which
-also exposes its private executables — `//:env.bzl`'s `OCX_SCANNED_PACKAGES`
-names the packages that forced it. For reproducibility, commit an index
-snapshot and reference it
-via `index` (tags then resolve frozen from the snapshot), or pin
-per-platform manifest digests via `pins` — plain floating tags resolve at
-fetch time and log the resolved digest.
-
-With `bins`, provisioning is lazy: nothing is installed at fetch time, and
-each named executable becomes a launcher re-entering `ocx package exec` —
-content materializes on first execution and never becomes a Bazel action
-input (`//:content` is not available in lazy mode).
+The repository holds the vendored tree, the generated `BUILD.bazel` and the
+`ocx_set` / `ocx_set_toolchain` targets over it.
 
 **ATTRIBUTES**
 
 
 | Name  | Description | Type | Mandatory | Default |
 | :------------- | :------------- | :------------- | :------------- | :------------- |
-| <a id="ocx_package_repo-name"></a>name |  A unique name for this repository.   | <a href="https://bazel.build/concepts/labels#target-names">Name</a> | required |  |
-| <a id="ocx_package_repo-allow_unverified"></a>allow_unverified |  When true, sets OCX_NO_VERIFY=1 for every invocation — ocx's own documented equivalent of `--no-verify`, so no verify flag is ever put on an argv. When false, OCX_NO_VERIFY=0 is written anyway, so an ambient value cannot switch verification off. It cannot switch verification *on*: ocx attaches that only under an operator-configured `[[trust.policy]]`, so this attr can only decline to disable it — and `no_config = True` prunes the discovered tiers that policy lives in, so there is then nothing to decline and verification is off either way.   | Boolean | optional |  `False`  |
-| <a id="ocx_package_repo-allow_yanked"></a>allow_yanked |  Whether resolution may fall back to a yanked release — sets OCX_ALLOW_YANKED for every invocation.   | Boolean | optional |  `False`  |
-| <a id="ocx_package_repo-bins"></a>bins |  Lazy provisioning: names of the executables to expose (not validated at fetch time). When set, nothing is installed during the fetch — each name becomes a launcher re-entering `ocx package exec`, keyed on the digest-pinned reference. Requires a digest-pinned identity (`pins` or '@sha256:'); incompatible with isolated_home and index.   | List of strings | optional |  `[]`  |
-| <a id="ocx_package_repo-config"></a>config |  An ocx site config.toml (mirrors, registries, [patches]) layered over the host's discovered config — not the project ocx.toml. Sets OCX_CONFIG for every invocation, overriding an ambient one, and the file is watched. Combine with no_config for a hermetic configuration. With `bins` it is copied into the repository and uploaded as an input with every action — keep credentials out of it.   | <a href="https://bazel.build/concepts/labels">Label</a> | optional |  `None`  |
-| <a id="ocx_package_repo-index"></a>index |  Committed ocx index snapshot directory (created with `ocx --index <dir> index update <package>`). When set, tag resolution is frozen to the snapshot (`--index --frozen`): floating tags become reproducible until the snapshot is refreshed.   | <a href="https://bazel.build/concepts/labels">Label</a> | optional |  `None`  |
-| <a id="ocx_package_repo-isolated_home"></a>isolated_home |  Keep the ocx store inside this repository instead of the shared user OCX_HOME. It also relocates OCX_HOME, so ocx's `~/.ocx/sigstore/trusted-root.json` rung is not found there — with a trust policy configured, trusted-root resolution falls through to the Rekor trust-root cache and then a live TUF fetch; offline it stops at the cache and fails outright, as ocx ships no embedded root.   | Boolean | optional |  `False`  |
-| <a id="ocx_package_repo-no_config"></a>no_config |  Ignore the host's discovered config tiers (/etc, the user config, $OCX_HOME/config.toml) and the managed-config snapshot — sets OCX_NO_CONFIG=1, and blanks an ambient OCX_CONFIG, OCX_PATCHES and OCX_PATCH_SNAPSHOT, which OCX_NO_CONFIG alone does not prune. The `config` and `patch_snapshot` attrs still apply. Use this when a corporate managed config must not reach the build; it also opts out of the exit-78 gate a required-but-unsynced managed config raises.   | Boolean | optional |  `False`  |
-| <a id="ocx_package_repo-ocx"></a>ocx |  The pinned ocx CLI binary.   | <a href="https://bazel.build/concepts/labels">Label</a> | optional |  `"@ocx_tool//:ocx"`  |
-| <a id="ocx_package_repo-package"></a>package |  Fully-qualified identifier: 'registry/repo[:tag][@sha256:…]'.   | String | required |  |
-| <a id="ocx_package_repo-patch_snapshot"></a>patch_snapshot |  A committed patches.snapshot.json (written by `ocx patch freeze` next to ocx.lock) freezing the digests of the patch companions composed onto this environment. Sets OCX_PATCH_SNAPSHOT. `ocx lock --check` does not cover companions — without a frozen snapshot they resolve at fetch time. With `bins` it is copied into the repository and uploaded as an input with every action — keep credentials out of it.   | <a href="https://bazel.build/concepts/labels">Label</a> | optional |  `None`  |
-| <a id="ocx_package_repo-pins"></a>pins |  ocx platform key -> 'sha256:…' manifest digest overriding the digest of `package` for that platform.   | <a href="https://bazel.build/rules/lib/dict">Dictionary: String -> String</a> | optional |  `{}`  |
-| <a id="ocx_package_repo-platform"></a>platform |  ocx platform key ('linux/amd64', …) to provision for; empty = host.   | String | optional |  `""`  |
-| <a id="ocx_package_repo-resolved_platform"></a>resolved_platform |  Real ocx platform sent to `-p` — lets a declared `platform` be aliased to a different real one (variant/feature build). Empty = derive from `platform`. Runnable-target gating compares its os/arch prefix to the host; `pins` still key on `platform`.   | String | optional |  `""`  |
-| <a id="ocx_package_repo-sigstore_trusted_root"></a>sigstore_trusted_root |  A sigstore trusted-root.json pinned in-tree. Sets OCX_SIGSTORE_TRUSTED_ROOT for every invocation, overriding the ambient `<OCX_HOME>/sigstore/trusted-root.json` rung, and the file is watched. Under lazy provisioning (`bins` on `ocx.project`/`ocx.package`) it is copied into the repository and uploaded as an input with every action.   | <a href="https://bazel.build/concepts/labels">Label</a> | optional |  `None`  |
-
-
-<a id="ocx_project_repo"></a>
-
-## ocx_project_repo
-
-<pre>
-load("@rules_ocx//ocx:defs.bzl", "ocx_project_repo")
-
-ocx_project_repo(<a href="#ocx_project_repo-name">name</a>, <a href="#ocx_project_repo-allow_unverified">allow_unverified</a>, <a href="#ocx_project_repo-allow_yanked">allow_yanked</a>, <a href="#ocx_project_repo-bins">bins</a>, <a href="#ocx_project_repo-config">config</a>, <a href="#ocx_project_repo-groups">groups</a>, <a href="#ocx_project_repo-isolated_home">isolated_home</a>,
-                 <a href="#ocx_project_repo-no_config">no_config</a>, <a href="#ocx_project_repo-ocx">ocx</a>, <a href="#ocx_project_repo-ocx_lock">ocx_lock</a>, <a href="#ocx_project_repo-ocx_toml">ocx_toml</a>, <a href="#ocx_project_repo-patch_snapshot">patch_snapshot</a>, <a href="#ocx_project_repo-platform">platform</a>, <a href="#ocx_project_repo-sigstore_trusted_root">sigstore_trusted_root</a>)
-</pre>
-
-Provisions the toolchain declared in a workspace ocx.toml/ocx.lock.
-
-Fails when the lockfile is stale or missing (fix with `ocx lock`). Every
-executable the toolchain's packages declare as their public surface
-(`ocx inspect --closure`) becomes a runnable target `//:<name>`; a package
-shipping no complete `binaries` metadata falls back to scanning the composed
-PATH, which also exposes its private executables — `//:env.bzl`'s
-`OCX_SCANNED_PACKAGES` names the packages that forced it. The raw
-environment is loadable from the same file (`OCX_ENV`, `OCX_HOME`).
-
-With `bins`, provisioning is lazy: nothing is pulled at fetch time, and each
-named executable becomes a launcher that re-enters `ocx exec` — content
-materializes on first execution and never becomes a Bazel action input, so
-fully remote-cached builds download no tool content at all.
-
-`groups` scopes both the pull and the composed environment. Omitted, ocx's
-defaults apply: every group is pulled, but only the default `[tools]` table
-is composed into launchers — name groups explicitly (or use the reserved
-`all`) to expose their executables.
-
-`platform` composes a foreign platform's environment from the same
-ocx.lock: that platform's leaves are pulled into the store and `env.bzl`
-holds their absolute store paths (sysroots, target libraries, container
-image content). Foreign repos expose no runnable launchers — the binaries
-do not run on this host.
-
-**ATTRIBUTES**
-
-
-| Name  | Description | Type | Mandatory | Default |
-| :------------- | :------------- | :------------- | :------------- | :------------- |
-| <a id="ocx_project_repo-name"></a>name |  A unique name for this repository.   | <a href="https://bazel.build/concepts/labels#target-names">Name</a> | required |  |
-| <a id="ocx_project_repo-allow_unverified"></a>allow_unverified |  When true, sets OCX_NO_VERIFY=1 for every invocation — ocx's own documented equivalent of `--no-verify`, so no verify flag is ever put on an argv. When false, OCX_NO_VERIFY=0 is written anyway, so an ambient value cannot switch verification off. It cannot switch verification *on*: ocx attaches that only under an operator-configured `[[trust.policy]]`, so this attr can only decline to disable it — and `no_config = True` prunes the discovered tiers that policy lives in, so there is then nothing to decline and verification is off either way.   | Boolean | optional |  `False`  |
-| <a id="ocx_project_repo-allow_yanked"></a>allow_yanked |  Whether resolution may fall back to a yanked release — sets OCX_ALLOW_YANKED for every invocation.   | Boolean | optional |  `False`  |
-| <a id="ocx_project_repo-bins"></a>bins |  Lazy provisioning: names of the executables to expose (not validated at fetch time). When set, nothing is pulled during the fetch — each name becomes a launcher re-entering `ocx exec`, and actions key on the lockfile (a runfile) instead of tool content. Incompatible with isolated_home.   | List of strings | optional |  `[]`  |
-| <a id="ocx_project_repo-config"></a>config |  An ocx site config.toml (mirrors, registries, [patches]) layered over the host's discovered config — not the project ocx.toml. Sets OCX_CONFIG for every invocation, overriding an ambient one, and the file is watched. Combine with no_config for a hermetic configuration. With `bins` it is copied into the repository and uploaded as an input with every action — keep credentials out of it.   | <a href="https://bazel.build/concepts/labels">Label</a> | optional |  `None`  |
-| <a id="ocx_project_repo-groups"></a>groups |  ocx.toml groups to provision (comma-joined into `-g` for `ocx pull`, `ocx env`, and lazy `ocx exec`). Reserved names: 'default' = the top-level [tools] table, 'all' = default + every declared group.   | List of strings | optional |  `[]`  |
-| <a id="ocx_project_repo-isolated_home"></a>isolated_home |  Keep the ocx store inside this repository instead of the shared user OCX_HOME. It also relocates OCX_HOME, so ocx's `~/.ocx/sigstore/trusted-root.json` rung is not found there — with a trust policy configured, trusted-root resolution falls through to the Rekor trust-root cache and then a live TUF fetch; offline it stops at the cache and fails outright, as ocx ships no embedded root.   | Boolean | optional |  `False`  |
-| <a id="ocx_project_repo-no_config"></a>no_config |  Ignore the host's discovered config tiers (/etc, the user config, $OCX_HOME/config.toml) and the managed-config snapshot — sets OCX_NO_CONFIG=1, and blanks an ambient OCX_CONFIG, OCX_PATCHES and OCX_PATCH_SNAPSHOT, which OCX_NO_CONFIG alone does not prune. The `config` and `patch_snapshot` attrs still apply. Use this when a corporate managed config must not reach the build; it also opts out of the exit-78 gate a required-but-unsynced managed config raises.   | Boolean | optional |  `False`  |
-| <a id="ocx_project_repo-ocx"></a>ocx |  The pinned ocx CLI binary.   | <a href="https://bazel.build/concepts/labels">Label</a> | optional |  `"@ocx_tool//:ocx"`  |
-| <a id="ocx_project_repo-ocx_lock"></a>ocx_lock |  The ocx.lock next to ocx_toml; watched so lock changes refetch.   | <a href="https://bazel.build/concepts/labels">Label</a> | required |  |
-| <a id="ocx_project_repo-ocx_toml"></a>ocx_toml |  The project ocx.toml declaring the toolchain.   | <a href="https://bazel.build/concepts/labels">Label</a> | required |  |
-| <a id="ocx_project_repo-patch_snapshot"></a>patch_snapshot |  A committed patches.snapshot.json (written by `ocx patch freeze` next to ocx.lock) freezing the digests of the patch companions composed onto this environment. Sets OCX_PATCH_SNAPSHOT. `ocx lock --check` does not cover companions — without a frozen snapshot they resolve at fetch time. With `bins` it is copied into the repository and uploaded as an input with every action — keep credentials out of it.   | <a href="https://bazel.build/concepts/labels">Label</a> | optional |  `None`  |
-| <a id="ocx_project_repo-platform"></a>platform |  ocx platform key ('linux/arm64', …) to compose for; empty = host. A foreign platform pulls that platform's leaves from the same ocx.lock and exposes env.bzl only (no runnable launchers). Incompatible with bins — lazy launchers already resolve the executing host at run time.   | String | optional |  `""`  |
-| <a id="ocx_project_repo-sigstore_trusted_root"></a>sigstore_trusted_root |  A sigstore trusted-root.json pinned in-tree. Sets OCX_SIGSTORE_TRUSTED_ROOT for every invocation, overriding the ambient `<OCX_HOME>/sigstore/trusted-root.json` rung, and the file is watched. Under lazy provisioning (`bins` on `ocx.project`/`ocx.package`) it is copied into the repository and uploaded as an input with every action.   | <a href="https://bazel.build/concepts/labels">Label</a> | optional |  `None`  |
+| <a id="ocx_set_repo-name"></a>name |  A unique name for this repository.   | <a href="https://bazel.build/concepts/labels#target-names">Name</a> | required |  |
+| <a id="ocx_set_repo-allow_unverified"></a>allow_unverified |  When true, sets OCX_NO_VERIFY=1 for every invocation — ocx's own documented equivalent of `--no-verify`, so no verify flag is ever put on an argv. When false, OCX_NO_VERIFY=0 is written anyway, so an ambient value cannot switch verification off. It cannot switch verification *on*: ocx attaches that only under an operator-configured `[[trust.policy]]`, so this attr can only decline to disable it — and `no_config = True` prunes the discovered tiers that policy lives in, so there is then nothing to decline and verification is off either way.   | Boolean | optional |  `False`  |
+| <a id="ocx_set_repo-allow_yanked"></a>allow_yanked |  Whether resolution may fall back to a yanked release — sets OCX_ALLOW_YANKED for every invocation.   | Boolean | optional |  `False`  |
+| <a id="ocx_set_repo-bindings"></a>bindings |  Tool names to bind (project tier).   | List of strings | optional |  `[]`  |
+| <a id="ocx_set_repo-blob_dirs"></a>blob_dirs |  Directories passed as `--blob-dir`.   | <a href="https://bazel.build/concepts/labels">List of labels</a> | optional |  `[]`  |
+| <a id="ocx_set_repo-config"></a>config |  An ocx site config.toml (mirrors, registries, [patches]) layered over the host's discovered config — not the project ocx.toml. Sets OCX_CONFIG for every invocation, overriding an ambient one, and the file is watched. Combine with no_config for a hermetic configuration.   | <a href="https://bazel.build/concepts/labels">Label</a> | optional |  `None`  |
+| <a id="ocx_set_repo-expected_available_platforms"></a>expected_available_platforms |  available_platforms recorded in the fact; cross-checked against the manifest.   | List of strings | optional |  `[]`  |
+| <a id="ocx_set_repo-expected_tools"></a>expected_tools |  `name:kind` rows recorded in the fact for this platform; cross-checked against the manifest.   | List of strings | optional |  `[]`  |
+| <a id="ocx_set_repo-groups"></a>groups |  ocx.toml groups to vendor (project tier).   | List of strings | optional |  `[]`  |
+| <a id="ocx_set_repo-index"></a>index |  Optional index passed as `--index`.   | <a href="https://bazel.build/concepts/labels">Label</a> | optional |  `None`  |
+| <a id="ocx_set_repo-no_config"></a>no_config |  Ignore the host's discovered config tiers (/etc, the user config, $OCX_HOME/config.toml) and the managed-config snapshot — sets OCX_NO_CONFIG=1, and blanks an ambient OCX_CONFIG, OCX_PATCHES and OCX_PATCH_SNAPSHOT, which OCX_NO_CONFIG alone does not prune. The `config` and `patch_snapshot` attrs still apply. Use this when a corporate managed config must not reach the build; it also opts out of the exit-78 gate a required-but-unsynced managed config raises.   | Boolean | optional |  `False`  |
+| <a id="ocx_set_repo-ocx"></a>ocx |  The pinned ocx CLI binary.   | <a href="https://bazel.build/concepts/labels">Label</a> | optional |  `"@ocx_tool//:ocx"`  |
+| <a id="ocx_set_repo-ocx_lock"></a>ocx_lock |  The ocx.lock next to ocx_toml (project tier).   | <a href="https://bazel.build/concepts/labels">Label</a> | optional |  `None`  |
+| <a id="ocx_set_repo-ocx_toml"></a>ocx_toml |  The project ocx.toml (project tier).   | <a href="https://bazel.build/concepts/labels">Label</a> | optional |  `None`  |
+| <a id="ocx_set_repo-package"></a>package |  Package identifier (package tier).   | String | optional |  `""`  |
+| <a id="ocx_set_repo-patch_snapshot"></a>patch_snapshot |  A committed patches.snapshot.json (written by `ocx patch freeze` next to ocx.lock) freezing the digests of the patch companions composed onto this environment. Sets OCX_PATCH_SNAPSHOT. `ocx lock --check` does not cover companions — without a frozen snapshot they resolve at fetch time.   | <a href="https://bazel.build/concepts/labels">Label</a> | optional |  `None`  |
+| <a id="ocx_set_repo-platform"></a>platform |  ocx platform key to vendor for.   | String | required |  |
+| <a id="ocx_set_repo-sigstore_trusted_root"></a>sigstore_trusted_root |  A sigstore trusted-root.json pinned in-tree. Sets OCX_SIGSTORE_TRUSTED_ROOT for every invocation, overriding the ambient `<OCX_HOME>/sigstore/trusted-root.json` rung, and the file is watched.   | <a href="https://bazel.build/concepts/labels">Label</a> | optional |  `None`  |
+| <a id="ocx_set_repo-tier"></a>tier |  Which `ocx vendor` form to call.   | String | required |  |
 
 

@@ -16,48 +16,57 @@ ocx = use_extension("@rules_ocx//ocx:extensions.bzl", "ocx")
 # tag class end to end. Root module only; at most one.
 ocx.policy()
 
-# Floating tag: resolves at fetch time; the fetch log prints the digest to pin.
+# `platforms` is required: it names every platform a build may run the tool on.
+# A build fetches only the set of the platform it executes on.
+
+# Floating tag: resolves each time the extension runs, so it records no fact
+# and the extension is not reproducible. Use it to try a package out.
 ocx.package(
     name = "jq",
     package = "ocx.sh/jqlang/jq:latest",
+    platforms = [
+        "darwin/amd64",
+        "darwin/arm64",
+        "linux/amd64",
+        "linux/arm64",
+        "windows/amd64",
+    ],
 )
 
 # Frozen index: ':latest' resolves from the committed snapshot in index/
-# (created with `ocx --index index index update ocx.sh/jqlang/jq`) — OCX's native
-# tag locking. Deterministic until the snapshot is refreshed and committed.
+# (created with `ocx --index index index update ocx.sh/jqlang/jq`) — OCX's
+# native tag locking. Deterministic until the snapshot is refreshed and committed.
 ocx.package(
     name = "jq_frozen",
     index = "//:index",
     package = "ocx.sh/jqlang/jq:latest",
+    platforms = [
+        "darwin/amd64",
+        "darwin/arm64",
+        "linux/amd64",
+        "linux/arm64",
+        "windows/amd64",
+    ],
 )
 
-# Digest-pinned: fully reproducible. OCX pins *per-platform* manifest
-# digests (indices move when a platform is added and may be GC'd);
-# `ocx package install -p <platform> ocx.sh/jqlang/jq:latest` reports each digest.
-# Platforms without a pin fall back to `package`.
+# Digest-pinned: fully reproducible. The extension records what the package
+# provides in MODULE.bazel.lock and runs no ocx on the next resolution.
 ocx.package(
     name = "jq_pinned",
-    package = "ocx.sh/jqlang/jq:latest",
-    pins = {
-        "darwin/amd64": "sha256:f750c91d28769d12298ba9a4c10340152fcbdd48c48102bf275c21d736cc72a2",
-        "darwin/arm64": "sha256:c5cf10597aacad9b7925f937c966ec72145ea6a40f7f7ef4cac11f90c43130b1",
-        "linux/amd64": "sha256:913ff41f5e643a73c17a2e560e349d8eea255f50b293156e58da15b957baacae",
-        "windows/amd64": "sha256:bab93861d95a25d33163cc9499cb17bb109028d6537ca55b8427af21c1fdc989",
-    },
+    package = "ocx.sh/jqlang/jq:latest@sha256:c295300441831e002c0ba54df8e6126cdd4064c63be2464bdc6b68d0012beec6",
+    platforms = [
+        "darwin/amd64",
+        "darwin/arm64",
+        "linux/amd64",
+        "linux/arm64",
+        "windows/amd64",
+    ],
 )
 
-# Lazy: nothing is installed at fetch time — the launcher re-enters
-# `ocx package exec`, materializing the digest-pinned package on first
-# execution. Fully remote-cached builds download no tool content at all.
-ocx.package(
-    name = "jq_lazy",
-    bins = ["jq"],
-    package = "ocx.sh/jqlang/jq:latest",
-    pins = {
-        "darwin/amd64": "sha256:f750c91d28769d12298ba9a4c10340152fcbdd48c48102bf275c21d736cc72a2",
-        "darwin/arm64": "sha256:c5cf10597aacad9b7925f937c966ec72145ea6a40f7f7ef4cac11f90c43130b1",
-        "linux/amd64": "sha256:913ff41f5e643a73c17a2e560e349d8eea255f50b293156e58da15b957baacae",
-        "windows/amd64": "sha256:bab93861d95a25d33163cc9499cb17bb109028d6537ca55b8427af21c1fdc989",
-    },
+register_toolchains(
+    "@jq//:all",
+    "@jq_frozen//:all",
+    "@jq_pinned//:all",
 )
-use_repo(ocx, "jq", "jq_frozen", "jq_lazy", "jq_pinned")
+
+use_repo(ocx, "jq", "jq_frozen", "jq_pinned")
