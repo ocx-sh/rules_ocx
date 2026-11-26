@@ -56,8 +56,12 @@ def test_v04_build_from_bazel_vendor_with_network_blocked(workspace: Workspace) 
     vendor = workspace.path / "vendor"
     assert_ok(host.run("vendor", f"--vendor_dir={vendor}", "//:tool_run", lockfile="update"), "bazel vendor")
     control = offline(workspace.client("offline-control"), host, "//:tool_run")
-    assert control.returncode != 0, "control: the network-less client built without the vendor directory"
-    assert "bcr.bazel.build" not in control.stdout + control.stderr, "control failed before the set fetch: " + _out(control)
+    out = control.stdout + control.stderr
+    # Same signature as the V-05/V-32 control: the set fetch reached `ocx vendor` and the registry had no route.
+    # Any other failure (docker, Bazel, the module registry) is not a control.
+    assert control.returncode != 0 and "bcr.bazel.build" not in out and re.search(r"\(exit (69|75|81)\)", out), (
+        "control: the network-less client must fail at the set fetch: " + _out(control)
+    )
     res = offline(workspace.client("offline"), host, f"--vendor_dir={vendor}", "//:tool_run")
     assert res.returncode == 0, _out(res)
 
