@@ -1,0 +1,7 @@
+# Runs the fetched ocx; the output is what run.sh compares across edits of the source file.
+genrule(
+    name = "version",
+    outs = ["version.txt"],
+    cmd = "$(execpath @ocx_tool//:ocx) version > $@",
+    tools = ["@ocx_tool//:ocx"],
+)

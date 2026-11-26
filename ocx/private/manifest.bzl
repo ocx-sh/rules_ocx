@@ -52,6 +52,22 @@ def archive_type(filename):
         return "tar.gz"
     return "tar.xz"
 
+def is_sha256(value):
+    """Tells whether a string is a 64-character lowercase-hex sha256 digest.
+
+    Args:
+        value: candidate digest.
+
+    Returns:
+        True when `value` is exactly 64 lowercase hex characters.
+    """
+    if len(value) != 64:
+        return False
+    for char in value.elems():
+        if char not in _HEX_DIGITS:
+            return False
+    return True
+
 def manifest_sha256(url):
     """Extracts a self-verifying sha256 from a dist.json manifest URL.
 
@@ -75,10 +91,7 @@ def manifest_sha256(url):
     if len(segment) != 69 or not segment.endswith(".json"):
         return ""
     digest = segment[:64]
-    for char in digest.elems():
-        if char not in _HEX_DIGITS:
-            return ""
-    return digest
+    return digest if is_sha256(digest) else ""
 
 def artifact_url(row, mirror_url):
     """Resolves the download URL for a release row, honoring a mirror.
