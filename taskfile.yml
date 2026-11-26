@@ -143,7 +143,10 @@ tasks:
       - chmod +x "${RUNNER_TEMP:-/tmp}/bazelisk-x64"
       - arch -x86_64 "${RUNNER_TEMP:-/tmp}/bazelisk-x64" build //...
 
-  # Hermetic offline behaviour; a network-backed cache would mask it. Linux only (one runner is enough).
+  # Offline failure mode; a network-backed cache would mask it. Linux only (one runner is enough). A set
+  # repository vendors into a scratch OCX_HOME of its own (C-RO-16), so there is no warm store an offline refetch
+  # could reuse: it must fail naming ocx, never hang. That an offline build *succeeds* from `bazel vendor` or
+  # blob_dirs is proven with the network cut, in the rig (verify-rbe: V-04, V-05, V-32).
   deep:offline:
     internal: true
     cmds:
@@ -152,17 +155,17 @@ tasks:
         vars: { BAZEL_VERSION: "{{.ITEM}}" }
         if: '{{eq OS "linux"}}'
 
+  # One target, not `@dev_tools//...`: a tool the lock serves on another platform only (uvw is Windows-only)
+  # has no toolchain on this one, and `//...` would analyse it.
   deep:offline-version:
     internal: true
     env:
       USE_BAZEL_VERSION: "{{.BAZEL_VERSION}}"
     cmds:
-      - "{{.BAZEL}} fetch @dev_tools//..."
-      - cmd: OCX_OFFLINE=1 {{.BAZEL}} fetch --force @dev_tools//...
+      - "{{.BAZEL}} fetch @dev_tools//:actionlint"
       - cmd: |
-          empty=$(mktemp -d)/empty-ocx-home
-          if OCX_HOME="$empty" OCX_OFFLINE=1 {{.BAZEL}} fetch --force @dev_tools//...; then
-            echo "expected the offline fetch against an empty store to fail" >&2
+          if OCX_OFFLINE=1 {{.BAZEL}} fetch --force @dev_tools//:actionlint; then
+            echo "expected the offline refetch without a store to fail" >&2
             exit 1
           fi
           echo "offline failure mode OK"
