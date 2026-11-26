@@ -129,7 +129,7 @@ def _min_version_error_test_impl(ctx):
 
     # Malformed versions get their own message, since the floor would
     # misdiagnose a spelling problem as an out-of-date pin.
-    for bad in ["v1.2.3", "", " 1.2.3", "1.2.", "-rc1", "x.y.z"]:
+    for bad in ["v1.2.3", "", " 1.2.3", "1.2.", "-rc1", "x.y.z", "1", "2026-11-26"]:
         got = min_version_error(bad, floor)
         asserts.true(env, _MALFORMED_FRAGMENT in got, "%r must be refused as malformed, got: %r" % (bad, got))
 
@@ -154,6 +154,11 @@ def _local_binary_version_test_impl(ctx):
         got = local_binary_version_error(code, out)
         asserts.true(env, "OCX_INSTALL_BINARY did not report a version" in got, got)
     asserts.true(env, "exited 2" in local_binary_version_error(2, ""))
+
+    # A lone integer or a date is not a version.
+    for out in ["ocx built 2026-11-26 0.5.0\n", "ocx 1\n", "2026-11-26\n"]:
+        got = local_binary_version_error(0, out)
+        asserts.true(env, "did not report a version" in got or "OCX_INSTALL_BINARY is ocx" in got, got)
     asserts.false(env, _MALFORMED_FRAGMENT in below)
     return unittest.end(env)
 

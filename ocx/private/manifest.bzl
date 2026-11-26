@@ -32,8 +32,8 @@ def select_release(manifest, version, targets):
             if row["version"] == version and row["target"] == target:
                 return row
     fail(("rules_ocx: ocx {} for {} not found in the dist manifest — " +
-          "run 'task dist:update' or point OCX_INSTALL_DIST_URL at a manifest " +
-          "that contains it").format(version, " or ".join(targets)))
+          "point OCX_INSTALL_DIST_URL at a manifest that lists it, " +
+          "or set OCX_INSTALL_BINARY to a local build").format(version, " or ".join(targets)))
 
 def archive_type(filename):
     """Maps a release filename to the explicit download_and_extract type.

@@ -14,7 +14,10 @@ genrule(
 genrule(
     name = "executor_net",
     outs = ["executor_net.txt"],
-    cmd = "d=none; while read -r _ dest _; do [ \"$$dest\" = 00000000 ] && d=yes; done < /proc/net/route; echo default-route=$$d > $@",
+    cmd = "d=none; while read -r _ dest _; do [ \"$$dest\" = 00000000 ] && d=yes; done < /proc/net/route; " +
+          "if [ -r /proc/net/ipv6_route ]; then while read -r dest plen _ _ _ _ _ _ _ iface; do " +
+          "[ \"$$dest\" = 00000000000000000000000000000000 ] && [ \"$$plen\" = 00 ] && [ \"$$iface\" != lo ] && d=yes; " +
+          "done < /proc/net/ipv6_route; fi; echo default-route=$$d > $@",
 )
 
 # Control: an action that does take @ocx_tool as an input.

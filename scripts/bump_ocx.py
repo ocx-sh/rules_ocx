@@ -552,7 +552,7 @@ def main():
             if indexed:
                 die(
                     f"{DIST} lists releases at or above MIN_OCX_VERSION but DEFAULT_OCX_VERSION is {pin}, "
-                    f"below it. Run `task dist:update` to move the pin."
+                    f"below it. Run `python3 scripts/bump_ocx.py` to move the pin."
                 )
             print(f"OK: no release at or above MIN_OCX_VERSION is listed yet; DEFAULT_OCX_VERSION {pin} is below it")
             return

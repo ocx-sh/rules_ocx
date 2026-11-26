@@ -38,7 +38,8 @@ _download = tag_class(
         ),
         "version": attr.string(
             doc = "Exact ocx version (default: the version pinned with this rules_ocx " +
-                  "release). Must be " + MIN_OCX_VERSION + " or newer, the first ocx release with " +
+                  "release; until a release with `ocx vendor` is listed, the default is below " +
+                  "the floor and the download fails with a message saying so). Must be " + MIN_OCX_VERSION + " or newer, the first ocx release with " +
                   "`ocx vendor` and manifest schema version 1. The floor is checked " +
                   "before any download.",
         ),

@@ -8,6 +8,7 @@ Downloads the release archive listed in the vendored dist.json snapshot
 setup.ocx.sh installer. Binary-only placement — never runs `ocx self setup`.
 """
 
+load(":facts.bzl", "manifest_env")
 load(":manifest.bzl", "archive_type", "artifact_url", "is_sha256", "manifest_sha256", "select_release")
 load(":platforms.bzl", "host_info")
 load(":versions.bzl", "DEFAULT_OCX_VERSION", "MIN_OCX_VERSION", "NO_SUPPORTED_RELEASE_NOTE", "local_binary_version_error", "min_version_error")
@@ -92,7 +93,9 @@ def fetch_ocx_binary(ctx, version, triple = "", dist_manifest = None):
     if request.url:
         local = "local/" + bin_name
         ctx.download(request.url, local, sha256 = request.sha256, executable = True)
-        reported = ctx.execute([ctx.path(local), "version"], timeout = 30)
+        # The same scratch environment as every other ocx run: no ambient OCX_* and a fresh OCX_HOME.
+        env = manifest_env(str(ctx.path("local_version_home")), "", True, False, False, "")
+        reported = ctx.execute([ctx.path(local), "version"], environment = env, timeout = 30)
         err = local_binary_version_error(reported.return_code, reported.stdout)
         if err:
             fail(err)
@@ -113,6 +116,8 @@ def fetch_ocx_binary(ctx, version, triple = "", dist_manifest = None):
     else:
         manifest = json.decode(ctx.read(dist_manifest or Label("//dist:dist.json")))
 
+    if not manifest.get("releases"):
+        fail("rules_ocx: ocx {} is not available.".format(version) + NO_SUPPORTED_RELEASE_NOTE)
     row = select_release(manifest, version, triples)
     url = artifact_url(row, ctx.getenv("OCX_INSTALL_MIRROR_URL"))
     ctx.download_and_extract(url, output = "extracted", sha256 = row["sha256"], type = archive_type(row["filename"]))
@@ -176,10 +181,7 @@ and manifest schema version 1, the manifest this ruleset reads.""".format(MIN_OC
         ),
         "version": attr.string(
             mandatory = True,
-            doc = "Exact ocx version to download, e.g. '{}'. Must be {} or newer.".format(
-                DEFAULT_OCX_VERSION,
-                MIN_OCX_VERSION,
-            ),
+            doc = "Exact ocx version to download, e.g. '{0}'. Must be {0} or newer.".format(MIN_OCX_VERSION),
         ),
     },
 )

@@ -56,9 +56,12 @@ MALFORMED_OCX_VERSION_MSG = (
 )
 
 def _core(version):
-    """The numeric core of a version: `0.6.8` of `0.6.8-pr784+2026`, "" when malformed."""
+    """The numeric core of a version: `0.6.8` of `0.6.8-pr784+2026`, "" when it is not dotted.
+
+    A single integer or a date (`2026-11-26` has the core `2026`) is not a version.
+    """
     core = version.split("+")[0].split("-")[0]
-    if not core or not all([part.isdigit() for part in core.split(".")]):
+    if "." not in core or not all([part.isdigit() for part in core.split(".")]):
         return ""
     return core
 
