@@ -10,7 +10,7 @@ setup.ocx.sh installer. Binary-only placement — never runs `ocx self setup`.
 
 load(":manifest.bzl", "archive_type", "artifact_url", "is_sha256", "manifest_sha256", "select_release")
 load(":platforms.bzl", "host_info")
-load(":versions.bzl", "DEFAULT_OCX_VERSION", "MIN_OCX_VERSION", "local_binary_version_error", "min_version_error")
+load(":versions.bzl", "DEFAULT_OCX_VERSION", "MIN_OCX_VERSION", "NO_SUPPORTED_RELEASE_NOTE", "local_binary_version_error", "min_version_error")
 
 visibility(["//ocx", "//ocx/tests"])
 
@@ -100,6 +100,8 @@ def fetch_ocx_binary(ctx, version, triple = "", dist_manifest = None):
 
     err = min_version_error(version)
     if err:
+        if version == DEFAULT_OCX_VERSION:
+            err += NO_SUPPORTED_RELEASE_NOTE
         fail(err)
 
     triples = [triple] if triple else host.triples

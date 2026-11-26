@@ -6,7 +6,7 @@
 load("@bazel_skylib//lib:partial.bzl", "partial")
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
 load("//ocx/private:manifest.bzl", "archive_type", "artifact_url", "manifest_sha256", "select_release")
-load("//ocx/private:versions.bzl", "DEFAULT_OCX_VERSION", "MIN_OCX_VERSION", "local_binary_version_error", "min_version_error")
+load("//ocx/private:versions.bzl", "DEFAULT_OCX_VERSION", "MIN_OCX_VERSION", "NO_SUPPORTED_RELEASE_NOTE", "local_binary_version_error", "min_version_error")
 
 _MANIFEST = {
     "schema": 1,
@@ -136,6 +136,7 @@ def _min_version_error_test_impl(ctx):
     # Both messages name the floor they were given.
     asserts.true(env, "1.2.3" in min_version_error("0.1.0", floor))
     asserts.true(env, MIN_OCX_VERSION in min_version_error("0.0.1"))
+    asserts.true(env, "OCX_INSTALL_BINARY" in NO_SUPPORTED_RELEASE_NOTE)
     return unittest.end(env)
 
 # A locally supplied binary is checked on what `ocx version` printed.
@@ -143,9 +144,17 @@ def _local_binary_version_test_impl(ctx):
     env = unittest.begin(ctx)
     asserts.equals(env, "", local_binary_version_error(0, MIN_OCX_VERSION + "-pr784+20261126073008\n"))
     asserts.equals(env, "", local_binary_version_error(0, MIN_OCX_VERSION + "\n"))
-    asserts.true(env, MIN_OCX_VERSION in local_binary_version_error(0, "0.0.1\n"))
+    asserts.equals(env, "", local_binary_version_error(0, "ocx 9.9.9-fake-one\n"))
+    asserts.equals(env, "", local_binary_version_error(0, "ocx " + MIN_OCX_VERSION + "\n"))
+
+    # Below the floor and unreadable are different messages, both naming the variable.
+    below = local_binary_version_error(0, "0.0.1\n")
+    asserts.true(env, "OCX_INSTALL_BINARY is ocx 0.0.1" in below, below)
+    for code, out in [(2, ""), (0, ""), (0, "ocx\n"), (0, "v0.7.0\n"), (0, "garbage text")]:
+        got = local_binary_version_error(code, out)
+        asserts.true(env, "OCX_INSTALL_BINARY did not report a version" in got, got)
     asserts.true(env, "exited 2" in local_binary_version_error(2, ""))
-    asserts.true(env, _MALFORMED_FRAGMENT in local_binary_version_error(0, "ocx 0.7.0"))
+    asserts.false(env, _MALFORMED_FRAGMENT in below)
     return unittest.end(env)
 
 # The shipped default satisfies the floor, except in the one known state: the

@@ -15,6 +15,12 @@ and a bump must not drop any target the outgoing pin already covers.
 --check (= `task dist:check`) runs that offline over the committed
 file; a refresh additionally requires that the incoming manifest only *adds*
 rows to the committed one.
+
+The file lists only releases at or above MIN_OCX_VERSION (versions.bzl): the
+floor refuses any lower version before a download, so such a row is dead data.
+A refresh drops them. While no release at or above the floor exists, the table
+is empty and DEFAULT_OCX_VERSION is below the floor: --check accepts exactly
+that pair and nothing in between. The first release with `ocx vendor` ends it.
 """
 
 import argparse
@@ -53,6 +59,7 @@ VERSIONS = REPO / "ocx" / "private" / "versions.bzl"
 WORKFLOWS = REPO / ".github" / "workflows"
 
 PIN_RE = re.compile(r'(DEFAULT_OCX_VERSION = ")([^"]+)(")')
+MIN_RE = re.compile(r'MIN_OCX_VERSION = "([^"]+)"')
 
 
 def die(msg):
@@ -141,6 +148,54 @@ def current_pin():
     if not m:
         die(f"DEFAULT_OCX_VERSION not found in {VERSIONS}")
     return m.group(2)
+
+
+def floor():
+    """MIN_OCX_VERSION as a version tuple; (0,) when versions.bzl declares none."""
+    m = MIN_RE.search(VERSIONS.read_text())
+    return version_key(m.group(1)) if m else (0,)
+
+
+def supported(manifest):
+    """The manifest without releases below the floor (the same object when none go).
+
+    `latest` is cleared when it names a version below the floor.
+    """
+    fl = floor()
+    rows = manifest.get("releases")
+    if not isinstance(rows, list):
+        return manifest
+    kept = [r for r in rows if not isinstance(r, dict) or version_key(r.get("version")) >= fl]
+    if len(kept) == len(rows):
+        return manifest
+    out = dict(manifest, releases=kept)
+    latest = manifest.get("latest")
+    if isinstance(latest, dict) and version_key(latest.get("version")) < fl:
+        out["latest"] = None
+    return out
+
+
+def render(manifest):
+    """Serialises a manifest in the layout of the upstream file: one row per line."""
+
+    def compact(v):
+        return json.dumps(v, separators=(",", ":"))
+
+    lines = [
+        "{",
+        f'  "schema": {compact(manifest.get("schema"))},',
+        f'  "latest": {compact(manifest.get("latest"))},',
+        f'  "latest_next": {compact(manifest.get("latest_next"))},',
+    ]
+    rows = manifest["releases"]
+    if not rows:
+        lines.append('  "releases": []')
+    else:
+        lines.append('  "releases": [')
+        lines.extend(f"    {compact(r)}{',' if i < len(rows) - 1 else ''}" for i, r in enumerate(rows))
+        lines.append("  ]")
+    lines.append("}")
+    return "\n".join(lines) + "\n"
 
 
 def fetch_snapshot():
@@ -482,8 +537,25 @@ def main():
         # is still a url+sha256 pair ocx.download(version = ...) can select, and
         # dist/dist.json is linguist-generated, so no reviewer sees the diff.
         indexed = index_rows(manifest, DIST)
+        fl = floor()
+        below = sorted(f"{v} {t}" for v, t in indexed if version_key(v) < fl)
+        if below:
+            die(
+                f"{DIST} lists rows below MIN_OCX_VERSION ({', '.join(below[:3])}"
+                f"{', ...' if len(below) > 3 else ''}): the floor refuses those versions before any "
+                f"download, so the rows are dead data. Run `task dist:update`."
+            )
         for (version, target), r in sorted(indexed.items()):
             check_row(r, f"{version} {target}")
+        if version_key(pin) < fl:
+            # The one known state before the first release with `ocx vendor`.
+            if indexed:
+                die(
+                    f"{DIST} lists releases at or above MIN_OCX_VERSION but DEFAULT_OCX_VERSION is {pin}, "
+                    f"below it. Run `task dist:update` to move the pin."
+                )
+            print(f"OK: no release at or above MIN_OCX_VERSION is listed yet; DEFAULT_OCX_VERSION {pin} is below it")
+            return
         rows = validate(manifest, pin)
         exts = sorted({ext_of(r["filename"]) for r in rows})
         print(f"OK: {pin} x {len(rows)} targets, archives {exts}; {len(indexed)} rows checked")
@@ -493,28 +565,39 @@ def main():
     committed = load_snapshot()
     body, manifest = fetch_snapshot()
 
-    # Guards first: nothing is written until every one of them passes.
-    assert_additions_only(committed, manifest)
+    # Guards first: nothing is written until every one of them passes. Rows
+    # below the floor are dropped from both sides, so dropping them is no loss.
+    fl = floor()
+    incoming = supported(manifest)
+    assert_additions_only(supported(committed), incoming)
+    nothing_listed = not incoming["releases"]
+    if args.version and version_key(args.version) < fl:
+        die(f"--version {args.version} is below MIN_OCX_VERSION: the floor refuses it, so no row for it is kept")
     if args.snapshot_only:
         version = before  # a refresh, not a bump — the pin stays put
     elif args.version:
         version = args.version
+    elif nothing_listed:
+        version = before  # no release at or above the floor yet: the pin stays put
     else:
         assert_latest_stable(manifest)
-        version = newest_stable(manifest)
+        version = newest_stable(incoming)
         if version != before:
             assert_forward(before, version)
-    # Every target the committed pin covers has to survive the move; `before`
-    # is read from the committed snapshot, so upstream cannot shrink the set
-    # it is measured against.
-    rows = validate(manifest, version, {r["target"] for r in rows_for(committed, before)})
+    if nothing_listed and version_key(before) < fl and not args.version:
+        rows = []  # the known pre-vendor state: an empty table and a pin below the floor
+    else:
+        # Every target the committed pin covers has to survive the move; `before`
+        # is read from the committed snapshot, so upstream cannot shrink the set
+        # it is measured against.
+        rows = validate(incoming, version, {r["target"] for r in rows_for(committed, before)})
 
-    old_exts = sorted({ext_of(r["filename"]) for r in rows_for(manifest, before)}) if before != version else []
+    old_exts = sorted({ext_of(r["filename"]) for r in rows_for(incoming, before)}) if before != version else []
     new_exts = sorted({ext_of(r["filename"]) for r in rows})
 
-    # Raw bytes, never json.dumps: reformatting a 184-row security-boundary
-    # file would make every future diff unreadable.
-    DIST.write_bytes(body)
+    # Upstream's own bytes when nothing was dropped, never a reformat: that
+    # keeps every future diff readable. Dropped rows go through render().
+    DIST.write_bytes(body if incoming is manifest else render(incoming).encode())
     pin_changed = not args.snapshot_only and write_pin(version)
     ci = [] if args.snapshot_only else write_ci_pins(version)
 

@@ -315,7 +315,7 @@ tasks:
       - task: dist:check
 
   dist:check:
-    desc: Snapshot sanity — pin present for all 8 targets, per-row guards, no duplicate rows
+    desc: Snapshot sanity — only releases at or above the floor, pin present for all 8 targets (or the known empty state), per-row guards, no duplicate rows
     cmds:
       # The same code path the refresh validates with, so CI actually exercises
       # the per-row guards (stable channel, hex sha256, artifact host) and the

@@ -892,6 +892,77 @@ def test_version_key_orders_numerically_and_dies_on_junk():
     dies(bump_ocx.version_key, "", why="an empty version")
 
 
+# --- The floor: dist.json lists only releases at or above MIN_OCX_VERSION ----
+
+
+@contextlib.contextmanager
+def floored(floor, pin, committed, argv):
+    """sandbox() whose versions.bzl also declares MIN_OCX_VERSION = floor."""
+    with sandbox(pin, committed, argv) as tmp:
+        (tmp / "versions.bzl").write_text(f'DEFAULT_OCX_VERSION = "{pin}"\nMIN_OCX_VERSION = "{floor}"\n')
+        yield tmp
+
+
+def empty_manifest():
+    return {"schema": 1, "latest": None, "latest_next": None, "releases": []}
+
+
+def test_floor_render_keeps_the_upstream_layout():
+    m = manifest("0.5.1", "0.5.2")
+    text = bump_ocx.render(m)
+    assert json.loads(text) == m
+    assert text.count("\n") == len(m["releases"]) + 7, "one row per line"
+    assert json.loads(bump_ocx.render(empty_manifest())) == empty_manifest()
+
+
+def test_floor_refresh_drops_rows_below_it_and_clears_a_stale_latest():
+    committed = empty_manifest()
+    body = json.dumps(manifest("0.5.1", "0.5.2")).encode()
+    with floored("0.6.0", "0.5.2", committed, ["--snapshot-only"]) as tmp, served(body):
+        bump_ocx.main()
+        written = json.loads((tmp / "dist.json").read_text())
+    assert written == empty_manifest(), "every row is below the floor, and `latest` names one"
+
+
+def test_floor_refresh_keeps_rows_at_or_above_it():
+    committed = empty_manifest()
+    body = json.dumps(manifest("0.5.2", "0.6.1")).encode()
+    with floored("0.6.0", "0.6.1", committed, []) as tmp, served(body):
+        bump_ocx.main()
+        written = json.loads((tmp / "dist.json").read_text())
+        assert 'DEFAULT_OCX_VERSION = "0.6.1"' in (tmp / "versions.bzl").read_text()
+    assert {r["version"] for r in written["releases"]} == {"0.6.1"}
+    assert written["latest"]["version"] == "0.6.1"
+
+
+def test_floor_refresh_with_no_supported_release_leaves_the_pin():
+    body = json.dumps(manifest("0.5.1", "0.5.2")).encode()
+    with floored("0.6.0", "0.5.2", empty_manifest(), []) as tmp, served(body):
+        bump_ocx.main()
+        assert 'DEFAULT_OCX_VERSION = "0.5.2"' in (tmp / "versions.bzl").read_text()
+        assert json.loads((tmp / "dist.json").read_text()) == empty_manifest()
+
+
+def test_floor_explicit_version_below_it_is_refused():
+    body = json.dumps(manifest("0.5.2")).encode()
+    with floored("0.6.0", "0.5.2", empty_manifest(), ["--version", "0.5.2"]), served(body):
+        dies(bump_ocx.main, why="a pin below the floor")
+
+
+def test_floor_check_accepts_only_the_known_empty_state():
+    with floored("0.6.0", "0.5.2", empty_manifest(), ["--check"]):
+        bump_ocx.main()  # empty table, pin below the floor: the known state
+    with floored("0.6.0", "0.5.2", manifest("0.6.1"), ["--check"]):
+        dies(bump_ocx.main, why="a listed release with the pin still below the floor")
+    with floored("0.6.0", "0.6.1", manifest("0.5.2", "0.6.1"), ["--check"]):
+        msg = dies(bump_ocx.main, why="rows below the floor")
+        assert "below MIN_OCX_VERSION" in msg
+    with floored("0.6.0", "0.6.1", manifest("0.6.1"), ["--check"]):
+        bump_ocx.main()
+    with floored("0.6.0", "0.6.1", empty_manifest(), ["--check"]):
+        dies(bump_ocx.main, why="a pin at the floor with no row")
+
+
 def test_version_key_die_covers_what_isdigit_would_wave_through():
     """The docstring promises die(), so no input may reach a raw exception —
     and none may parse to a number that is not what it looks like. isdigit()
