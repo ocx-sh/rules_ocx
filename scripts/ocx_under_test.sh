@@ -125,6 +125,15 @@ workspaces=("$root")
 for module in "$root"/examples/*/MODULE.bazel "$root"/e2e/*/MODULE.bazel; do
   [[ -f "$module" ]] && workspaces+=("$(dirname "$module")")
 done
+# Windows: ocx-shim starts its target through a path inside the runfiles tree, and a vendored package sits
+# deep in it (`<output base>\execroot\_main\bazel-out\...\<tool>.exe.runfiles\<repo>\packages\ocx.sh\sha256\..`). On
+# the runner's default output root that path is 267 characters for shellcheck, past MAX_PATH, and the launcher
+# fails with win32 error 3 (path not found). A short output root keeps the CI legs under the limit; a consumer
+# whose output root is long hits the same limit until ocx-shim starts long paths (`\\?\`).
+short_root=()
+case "$(uname -s)" in
+  MINGW* | MSYS* | CYGWIN*) short_root=("startup --output_user_root=C:/b") ;;
+esac
 for workspace in "${workspaces[@]}"; do
   rc="$workspace/.bazelrc.user"
   if [[ -f "$rc" ]]; then
@@ -135,6 +144,7 @@ for workspace in "${workspaces[@]}"; do
   {
     cat "$kept"
     echo "$begin"
+    [[ "${#short_root[@]}" -eq 0 ]] || echo "${short_root[0]}"
     echo "common --lockfile_mode=off"
     echo "common --repo_env=OCX_INSTALL_BINARY=$binary"
     echo "common --repo_env=OCX_INSTALL_BINARY_SHA256=$sha"
