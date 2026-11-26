@@ -113,7 +113,7 @@ package manager (https://ocx.sh, source at `../ocx`).
   run takes the pinned and explicit rows and the tag's attrs, and inherits the
   rest of the process environment through `module_ctx.execute`. That is the
   design: routing configuration (mirrors, registries, index) and credentials
-  must reach it, patches never reach a vendored environment, and any difference
+  must reach it, and any difference
   they cause in the tool list is caught by the set repository's cross-check.
   `OCX_MIRRORS`, `OCX_INSECURE_REGISTRIES` and `OCX_EXTRA_CA_CERTS` can weaken
   transport and `OCX_SIGSTORE_TRUSTED_ROOT` trust unless the
@@ -129,7 +129,7 @@ package manager (https://ocx.sh, source at `../ocx`).
 - Examples under `examples/*` are the integration tests (live ocx.sh
   registry — dogfooding); each is its own module with `local_path_override`.
   No example or e2e module sets `config`, `no_config`,
-  `sigstore_trusted_root` or `isolated_home` — that tier has unit coverage
+  `sigstore_trusted_root` — that tier has unit coverage
   only. `examples/package` does declare `ocx.policy()` at its defaults, so the
   tag's acceptance is covered end to end; its weakening effects are not.
 - `task site:lighthouse` — Lighthouse 100x4 + budgets (`site/lighthouse.budgets.mjs`) over every built

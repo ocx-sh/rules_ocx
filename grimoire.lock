@@ -116,7 +116,7 @@ bundle_tag = "latest"
 [[skill]]
 name = "update-dist"
 path = "./agent-config/update-dist"
-hash = "sha256:c76b8cb0c111ffb6d789dbc76d798c5a45b14869683ee0125a95bd0c411f364a"
+hash = "sha256:6ed3a9b0dc5928930eb99ab686925733cf41f3cf10eacd4c10fdd63d7f61cea1"
 
 [[rule]]
 name = "bazel-quality"
@@ -143,7 +143,7 @@ tag = "latest"
 [[rule]]
 name = "dist-snapshot"
 path = "./agent-config/dist-snapshot.md"
-hash = "sha256:87989cb39893dca7fe23daa3c3c75b2d8b6c18183abb09c33c154018aecd79cb"
+hash = "sha256:8bc3ce499cffffdbece8ce05c2bd87c073dce39494b3c4980a200dd77db6800c"
 
 [[rule]]
 name = "docs-quality"

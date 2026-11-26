@@ -49,6 +49,7 @@ override flag** — the fix is upstream, or a deliberate reviewed commit.
 | a new column on every row | A new field changes what an already-committed row means. |
 | a row is not channel `stable` / sha256 not 64 lowercase hex / url not on the ocx release host / `tag` or `filename` is not a single path segment / an archive extension `archive_type()` does not map | Per-row validation. It covers the pinned version **and every row a refresh adds** — the whole manifest is written, and `ocx.download(version = …)` lets a consumer select any row in it. `--check` re-runs it on every PR via `task lint`. |
 | fewer than 8 targets | The coarse floor: the release may still be publishing; retry. More than 8 is fine — upstream adding a target is a normal release. |
+| `--version` below `MIN_OCX_VERSION` | The floor refuses that version before any download. A refresh drops every row below it, so `dist/dist.json` lists releases at or above the floor only. While none carries `ocx vendor` the table is empty and the pin is below the floor; `--check` accepts exactly that pair. |
 | the bump drops a target the current pin covers | Measured against the target set in the *committed* snapshot, so upstream cannot shrink what it is judged against. A rename lands here: the host that lost its row would hit `select_release()`'s `fail()` in `ocx/private/manifest.bzl`. Check the releases page before pinning. |
 
 `--version` is the only bypass, and it bypasses exactly two things: the
