@@ -135,7 +135,7 @@ def test_directory_labels_give_the_file_label_input_list(workspace: Workspace) -
     repo = c.external("tools_linux_amd64_libc_glibc")
     reference = sorted(
         str(p.relative_to(repo)) for p in repo.rglob("*")
-        if (p.is_file() or p.is_symlink()) and p.relative_to(repo).parts[0] in ("packages", "selections")
+        if (p.is_file() or p.is_symlink()) and p.relative_to(repo).parts[0] in ("p", "l")
     )  # fmt: skip
     assert reference, f"no vendored file under {repo}"
     spawn = next(s for s in res.spawns() if "set_inputs" in json.dumps(s.get("listedOutputs", [])))
@@ -183,7 +183,7 @@ def test_tag_locked_tool_runs_remotely(lockrig) -> None:
     b = ws.client("b")
     rb = b.run("build", *targets, config=CONFIG, lockfile="error")
     assert_ok(rb, "client b, tag moved")
-    assert rb.processes().get("remote", 0) >= 1, rb.processes()
+    assert rb.processes().get("remote", 0) + rb.processes().get("remote_cache_hit", 0) >= 1, rb.processes()  # same set, same action key: a cache hit
     assert tool_report(b, hub) == "tool v1"
     da = set_digests(ra)
     assert da, "no set input in the execution log"

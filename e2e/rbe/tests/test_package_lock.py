@@ -21,6 +21,7 @@ from conftest import (
     LOCK_MUSL,
     LOCK_P as P,
     REGISTRY,
+    RBE,
     ROOT,
     RUN,
     Workspace,
@@ -191,7 +192,7 @@ def test_offline_fresh_tag_names_the_fix(lockrig) -> None:
     ws = _tag_ws(lockrig)
     host = ws.client("host")
     assert_ok(host.run("build", "--nobuild", f"//:run_{H}", lockfile="update"), "modules and the first resolution, online")
-    (ws.path / "MODULE.bazel.lock").unlink()
+    drop_fact(ws, KEY)  # the lock keeps its registry file hashes: the network-less client reads those files from the repository cache
     res = offline(ws.client("offline"), host, f"//:run_{H}")
     out = res.stdout + res.stderr
     assert res.returncode != 0 and "bcr.bazel.build" not in out, out[-2000:]
@@ -269,18 +270,8 @@ def test_refresh_and_off_modes(lockrig) -> None:
     assert (ws.path / "MODULE.bazel.lock").read_text(encoding="utf-8") == lock_text, "off writes nothing"
 
 
-def _project_ws(lockrig):
-    lockrig.push("1.0", "tool v1")
-    decls = (
-        'ocx.project(name = "proj", groups = ["default"], ocx_lock = "//:ocx.lock", ocx_toml = "//:ocx.toml", '
-        f'platforms = ["{P}"])\n' + pkg_decl("tg", lockrig.ident("1.0"))
-    )
-    toml = '[tools]\ntool = "@REGISTRY@/rig/tool:1.0.0"\n'
-    return lockrig.workspace(decls, {"proj": [P], "tg": [P]}, toml=toml)
-
-
 def test_switch_naming_a_project_does_not_resolve(lockrig) -> None:
-    ws = _project_ws(lockrig)
+    ws, _, _ = _project_and_tag(lockrig)
     assert_ok(hub_query(ws.client("a"), "proj"), "client a, both declarations")
     n = len(ws.ocx_calls())
     assert_ok(hub_query(ws.client("b"), "proj", "--repo_env=RULES_OCX_UPDATE=proj"), "switch naming the project")
@@ -402,14 +393,14 @@ def test_project_update_writes_only_ocx_lock(lockrig) -> None:
     ws = _project_ws(lockrig)
     u = update_client(ws, "u")
     _settle(u, "@proj//:update")
-    before = ws_bytes(ws)
+    before, ocx_dirs = ws_bytes(ws), sorted(ws.path.rglob(".ocx"))  # `ocx lock` of the setup left its own
     lockrig.push("1.0", "tool v2")
     assert_ok(run_update(u, "@proj//:update"), "bazel run @proj//:update")
     after = ws_bytes(ws)
     changed = {k for k in before.keys() | after.keys() if before.get(k) != after.get(k)}
     assert changed == {"ocx.lock", "MODULE.bazel.lock"}, changed
     assert after["ocx.toml"] == before["ocx.toml"]
-    assert not list(ws.path.rglob(".ocx")), "the render of `ocx update` belongs in the scratch copy"
+    assert sorted(ws.path.rglob(".ocx")) == ocx_dirs, "the render of `ocx update` belongs in the scratch copy"
 
 
 def test_update_selection_errors(lockrig) -> None:
@@ -483,11 +474,12 @@ def test_update_skips_a_dependency_snapshot(lockrig) -> None:
     shutil.rmtree(ws_dir, ignore_errors=True)
     (ws_dir / "dep").mkdir(parents=True)
     (ws_dir / "MODULE.bazel").write_text(
-        'module(name = "e5_root")\nbazel_dep(name = "dep", version = "0.0.0")\n'
+        'module(name = "e5_root")\nbazel_dep(name = "dep", version = "0.0.0")\nbazel_dep(name = "platforms", version = "1.0.0")\n'
         'local_path_override(module_name = "dep", path = "dep")\n'
         f'bazel_dep(name = "rules_ocx", version = "0.0.0")\nlocal_path_override(module_name = "rules_ocx", path = "{ROOT}")\n'
     )  # fmt: skip
     (ws_dir / "BUILD.bazel").write_text("")
+    shutil.copytree(RBE / "workspace" / "platforms", ws_dir / "platforms")  # the update run selects //platforms:exec_glibc
     (ws_dir / ".bazelversion").write_text((ROOT / ".bazelversion").read_text())
     (ws_dir / "dep" / "MODULE.bazel").write_text(
         'module(name = "dep", version = "0.0.0")\nbazel_dep(name = "rules_ocx", version = "0.0.0")\n'

@@ -425,7 +425,10 @@ def lock_facts(ws: Workspace) -> dict[str, dict]:
             for item in node:
                 walk(item)
 
-    walk(json.loads((ws.path / "MODULE.bazel.lock").read_text(encoding="utf-8")).get("moduleExtensions", {}))
+    doc = json.loads((ws.path / "MODULE.bazel.lock").read_text(encoding="utf-8"))
+    walk(doc.get("moduleExtensions", {}))
+    for table in doc.get("facts", {}).values():  # lock file version 28 and later: top-level `facts`, per extension
+        found.update(table)
     return {k: json.loads(v) if isinstance(v, str) else v for k, v in found.items()}
 
 
@@ -443,6 +446,7 @@ def _fact_tables(lock_json: dict, key: str) -> list[dict]:
                 walk(item)
 
     walk(lock_json.get("moduleExtensions", {}))
+    hits += [table for table in lock_json.get("facts", {}).values() if key in table]
     return hits
 
 
