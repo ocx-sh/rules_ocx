@@ -322,6 +322,17 @@ def _project_ws(lockrig, *, dir_name: str | None = None):
     return ws
 
 
+def _project_and_tag(lockrig, *, dir_name: str | None = None):
+    """A project over a second repository and a tag over the first, both resolved once; returns (workspace, project repository, its leaf)."""
+    repo_b = lockrig.repo + "-b"
+    lockrig.push("1.0", "a v1")
+    leaf_b = lockrig.push("1.0", "b v1", repo=repo_b)
+    decls = _project_decl() + pkg_decl("tg", lockrig.ident("1.0"))
+    ws = lockrig.workspace(decls, {"proj": [P], "tg": [P]}, toml=_project_toml(lockrig, repo_b), dir_name=dir_name)
+    assert_ok(hub_query(ws.client("a"), "proj"), "first resolution of both declarations")
+    return ws, repo_b, leaf_b
+
+
 def _settle(client, target: str) -> None:
     """Builds the update target once, so that `MODULE.bazel.lock` is what this client writes before a byte comparison."""
     assert_ok(client.run("build", target, "--spawn_strategy=local", lockfile="update"), f"build {target}")
