@@ -1,10 +1,20 @@
 #!/usr/bin/env bash
-set -euo pipefail
+# --- begin runfiles.bash initialization v3 ---
+# Copy-pasted from the Bazel Bash runfiles library v3.
+set -uo pipefail; set +e; f=bazel_tools/tools/bash/runfiles/runfiles.bash
+# shellcheck disable=SC1090
+source "${RUNFILES_DIR:-/dev/null}/$f" 2>/dev/null || \
+  source "$(grep -sm1 "^$f " "${RUNFILES_MANIFEST_FILE:-/dev/null}" | cut -f2- -d' ')" 2>/dev/null || \
+  source "$0.runfiles/$f" 2>/dev/null || \
+  source "$(grep -sm1 "^$f " "$0.runfiles_manifest" | cut -f2- -d' ')" 2>/dev/null || \
+  source "$(grep -sm1 "^$f " "$0.exe.runfiles_manifest" | cut -f2- -d' ')" 2>/dev/null || \
+  { echo>&2 "ERROR: cannot find $f"; exit 1; }; f=; set -e
+# --- end runfiles.bash initialization v3 ---
 
-# The launcher, started by an action of the same build, finds its files and
-# prints its version. On Windows Bazel builds the runfiles tree it looks in
-# only with `--enable_runfiles`, which this example's .bazelrc sets.
-cat "$WITH_RUNFILES"
-grep -q "^jq-" "$WITH_RUNFILES"
-grep -q "^exit=0$" "$WITH_RUNFILES"
+# The launcher, started by an action of the same build, finds its files in the
+# runfiles tree of that action and prints its version.
+status="$(rlocation "$WITH_RUNFILES")"
+cat "$status"
+grep -q "^jq-" "$status"
+grep -q "^exit=0$" "$status"
 echo "launcher with a runfiles tree OK"

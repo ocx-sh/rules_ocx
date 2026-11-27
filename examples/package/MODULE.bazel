@@ -19,8 +19,9 @@ ocx.policy()
 # `platforms` is required: it names every platform a build may run the tool on.
 # A build fetches only the set of the platform it executes on.
 
-# Floating tag: resolves each time the extension runs, so it records no fact
-# and the extension is not reproducible. Use it to try a package out.
+# Tag: the first resolution records one platform manifest digest per platform
+# in MODULE.bazel.lock, and every later build vendors those digests. Run
+# `bazel run @jq//:update` to read the tag again.
 ocx.package(
     name = "jq",
     package = "ocx.sh/jqlang/jq:latest",

@@ -57,6 +57,8 @@ tasks:
       - defer: { task: junit:collect, vars: { DIR: ".", PREFIX: basic } }
       - "{{.BAZEL}} test --config=basic {{.CI_CFG}} --verbose_test_summary -- //..."
       - task: test:install-binary
+      - task: test:no-runfiles
+        if: '{{eq OS "linux"}}'
 
   ci:build:
     desc: Build every Bazel target
@@ -80,6 +82,11 @@ tasks:
       - task: deep:test
         vars: { BAZEL_VERSION: rolling }
         ignore_error: true
+      # Before deep:examples: the copies below are taken while the examples hold no bazel-* links.
+      - task: deep:windows-runfiles
+        if: '{{eq OS "windows"}}'
+      - task: deep:windows-update-target
+        if: '{{eq OS "windows"}}'
       - task: deep:examples
       - task: deep:bcr-parity
       - task: deep:offline
@@ -108,6 +115,77 @@ tasks:
     cmds:
       - defer: { task: junit:collect, vars: { DIR: "{{.EXAMPLE}}", PREFIX: "example-{{base .EXAMPLE}}-{{.BAZEL_VERSION}}" } }
       - cd {{.EXAMPLE}} && ocx --project ../../ocx.toml exec -g test -- bazelisk test //... --verbose_test_summary
+
+  # Windows without `--enable_runfiles`, the consumer default the examples now keep: deep:examples runs
+  # examples/cross_platform:manifest_runfiles_test as is (V-L46). This runs it again in a workspace copy and an
+  # output root whose paths hold non-ASCII characters (V-L47).
+  deep:windows-runfiles:
+    internal: true
+    env:
+      USE_BAZEL_VERSION: 9.x
+    cmds:
+      - cmd: |
+          set -eu
+          base="${RUNNER_TEMP:-{{.ROOT_DIR}}/e2e/.copies}/rules_ocx-ünïcødé"
+          rm -rf "$base"
+          mkdir -p "$base"
+          cp -r examples/cross_platform "$base/"
+          # The copy cannot reach the module through `../..`.
+          echo 'common --override_module=rules_ocx={{toSlash .ROOT_DIR}}' >> "$base/cross_platform/.bazelrc.user"
+          cd "$base/cross_platform"
+          ocx --project "{{.ROOT_DIR}}/ocx.toml" exec -g test -- bazelisk --output_user_root="$base/bazel" \
+            test --noenable_runfiles --verbose_test_summary //:manifest_runfiles_test //:host_test
+
+  # ADR 0003 § Test plan `windows-update-target`: the generated update.bat, in workspace copies under a path with
+  # a space. examples/package holds a tag and a pinned hub, examples/project a project hub with its ocx.lock.
+  deep:windows-update-target:
+    internal: true
+    env:
+      USE_BAZEL_VERSION: 9.x
+      # The nested bazel call of the update program; the `bazel` it defaults to is not on PATH here.
+      RULES_OCX_BAZEL: bazelisk
+    cmds:
+      - cmd: |
+          set -eu
+          base="${RUNNER_TEMP:-{{.ROOT_DIR}}/e2e/.copies}/rules_ocx update copies"
+          rm -rf "$base"
+          mkdir -p "$base"
+          for example in package project; do
+            cp -r "examples/$example" "$base/"
+            # The copies cannot reach the module through `../..`; the rc line also reaches the nested call.
+            echo 'common --override_module=rules_ocx={{toSlash .ROOT_DIR}}' >> "$base/$example/.bazelrc.user"
+          done
+          bz() { ocx --project "{{.ROOT_DIR}}/ocx.toml" exec -g test -- bazelisk "$@"; }
+          # expect CODE TEXT ARGS...: `bazel ARGS` exits CODE and prints TEXT.
+          expect() {
+            want="$1"; text="$2"; shift 2
+            set +e; out="$(bz "$@" 2>&1)"; got=$?; set -e
+            printf '%s\n' "$out" | tail -n 30
+            if [ "$got" != "$want" ]; then echo "expected exit $want, got $got: bazel $*" >&2; exit 1; fi
+            if ! printf '%s\n' "$out" | grep -qF -- "$text"; then echo "expected '$text' from: bazel $*" >&2; exit 1; fi
+          }
+
+          cd "$base/package"
+          # The first evaluation records the tag's fact; the update then finds it unchanged.
+          bz mod deps --lockfile_mode=update
+          expect 0 "rules_ocx: jq: unchanged" run @jq//:update
+          expect 0 "rules_ocx: jq_pinned: pinned by digest in MODULE.bazel" run @jq_pinned//:update
+
+          cd "$base/project"
+          # ocx writes the lock without this comment, so its absence afterwards shows the file was replaced.
+          echo '# rules_ocx: replaced by the update' >> ocx.lock
+          expect 0 "" run @tools//:update
+          if grep -qF '# rules_ocx: replaced by the update' ocx.lock || [ -L ocx.lock ]; then
+            echo "bazel run @tools//:update did not replace ocx.lock with a file" >&2
+            exit 1
+          fi
+          expect 64 "rules_ocx: an update argument holds one of" run @tools//:update -- -g "a&b"
+          (
+            RULES_OCX_BAZEL="$base/no-such-bazel.exe"
+            export RULES_OCX_BAZEL
+            expect 78 "rules_ocx: no bazel found; put bazel on PATH or set RULES_OCX_BAZEL" run @tools//:update
+          )
+          echo "windows update target OK"
 
   # Reproduces the BCR presubmit for e2e/bzlmod. Deliberately no remote cache: a hit would hide a break
   # BCR would then find in the submission PR (e2e/ is its own workspace and does not import the baseline rc).
@@ -255,6 +333,16 @@ tasks:
     desc: Local-ocx install path — hash check, copy, immunity to later edits (Linux only)
     cmds:
       - BAZEL=bazelisk ocx exec -g test -- bash e2e/install_binary/run.sh
+
+  # A locally executed action gets no runfiles tree and no sandbox staging, so the launcher has only the runfiles
+  # manifest (V-L48); `bazel coverage` starts the same tools (V-L49). Linux leg of C-RO-27.
+  test:no-runfiles:
+    desc: Vendored tools start without a runfiles tree and under bazel coverage (examples/cross_platform, Linux)
+    dir: examples/cross_platform
+    cmds:
+      - defer: { task: junit:collect, vars: { DIR: examples/cross_platform, PREFIX: basic-no-runfiles } }
+      - ocx --project ../../ocx.toml exec -g test -- bazelisk test --noenable_runfiles --spawn_strategy=local --verbose_test_summary //:manifest_runfiles_test
+      - ocx --project ../../ocx.toml exec -g test -- bazelisk coverage --verbose_test_summary //:host_test //:manifest_runfiles_test
 
   test:examples:
     desc: Example workspaces — integration tests against live ocx.sh

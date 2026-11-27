@@ -1,9 +1,12 @@
 # One package, vendored for five platforms behind the @jq hub.
-#   abi_test          a foreign platform's files are fetched without running them
-#   host_test         the hub tool of the platform the test runs on runs
-#   runfiles_test     an action finds its launcher's files in the runfiles tree
-#   no_runfiles_test  Windows only: without a runfiles tree the launcher exits 78
-#   signature_test    macOS only: the arm64 launcher carries a valid ad-hoc signature and verifies and runs; a changed copy and an unsigned copy fail `codesign --verify`
+#   abi_test                a foreign platform's files are fetched without running them
+#   host_test               the hub tool of the platform the test runs on runs
+#   runfiles_test           an action finds its launcher's files in the runfiles tree
+#   manifest_runfiles_test  without a runfiles tree the launcher finds its root through the runfiles manifest
+#
+# The tests read their data through the runfiles library, so they also run on Windows without
+# `--enable_runfiles`, the consumer default.
+#   signature_test          macOS only: the arm64 launcher carries a valid ad-hoc signature and verifies and runs; a changed copy and an unsigned copy fail `codesign --verify`
 
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load(":launcher_status.bzl", "launcher_status")
@@ -17,9 +20,10 @@ sh_test(
         "@jq_windows_amd64//:set",
     ],
     env = {
-        "JQ_LINUX_ARM64": "$(locations @jq_linux_arm64//:set)",
-        "JQ_WINDOWS_AMD64": "$(locations @jq_windows_amd64//:set)",
+        "JQ_LINUX_ARM64": "$(rlocationpaths @jq_linux_arm64//:set)",
+        "JQ_WINDOWS_AMD64": "$(rlocationpaths @jq_windows_amd64//:set)",
     },
+    deps = ["@rules_shell//shell/runfiles"],
 )
 
 sh_test(
@@ -27,7 +31,8 @@ sh_test(
     size = "small",
     srcs = ["host_test.sh"],
     data = ["@jq"],
-    env = {"JQ_BIN": "$(rootpath @jq//:jq)"},
+    env = {"JQ_BIN": "$(rlocationpath @jq//:jq)"},
+    deps = ["@rules_shell//shell/runfiles"],
 )
 
 launcher_status(
@@ -39,7 +44,13 @@ launcher_status(
 launcher_status(
     name = "without_runfiles",
     runfiles = False,
-    target_compatible_with = ["@platforms//os:windows"],
+    tool = "@jq",
+)
+
+launcher_status(
+    name = "without_runfiles_by_name",
+    by_name = True,
+    runfiles = False,
     tool = "@jq",
 )
 
@@ -48,18 +59,25 @@ sh_test(
     size = "small",
     srcs = ["runfiles_test.sh"],
     data = [":with_runfiles"],
-    env = {"WITH_RUNFILES": "$(rootpath :with_runfiles)"},
+    env = {"WITH_RUNFILES": "$(rlocationpath :with_runfiles)"},
+    deps = ["@rules_shell//shell/runfiles"],
 )
 
-# Windows only: elsewhere the launcher follows the symlink Bazel makes to the
-# vendored files, so a configuration without runfiles still finds its root.
+# On Linux and macOS a sandboxed action gets a tree anyway; the Linux CI job runs this test with
+# `--noenable_runfiles --spawn_strategy=local` so the manifest lookup is what it exercises there too.
 sh_test(
-    name = "no_runfiles_test",
+    name = "manifest_runfiles_test",
     size = "small",
-    srcs = ["no_runfiles_test.sh"],
-    data = [":without_runfiles"],
-    env = {"WITHOUT_RUNFILES": "$(rootpath :without_runfiles)"},
-    target_compatible_with = ["@platforms//os:windows"],
+    srcs = ["manifest_runfiles_test.sh"],
+    data = [
+        ":without_runfiles",
+        ":without_runfiles_by_name",
+    ],
+    env = {
+        "BY_NAME": "$(rlocationpath :without_runfiles_by_name)",
+        "BY_PATH": "$(rlocationpath :without_runfiles)",
+    },
+    deps = ["@rules_shell//shell/runfiles"],
 )
 
 sh_test(

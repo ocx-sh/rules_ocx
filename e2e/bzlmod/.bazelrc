@@ -1,9 +1,6 @@
-# Consumer defaults, mirrored from the repo root so the launcher resolves the
-# host platform and works under Windows runfiles.
+# Consumer defaults: no runfiles flags, so a Windows build runs the vendored
+# launcher through the runfiles manifest, as a consumer's build does.
 common --enable_platform_specific_config
-
-startup --windows_enable_symlinks
-common:windows --enable_runfiles
 
 # The ocx build under test (scripts/ocx_under_test.sh) writes this file in CI; absent otherwise.
 try-import %workspace%/.bazelrc.user

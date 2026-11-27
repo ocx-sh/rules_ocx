@@ -1,5 +1,6 @@
-# Provisioned tools as `tools =` of a genrule and as `data =` of an sh_test
-# via $(location).
+# Provisioned tools as `tools =` of a genrule and as `data =` of an sh_test,
+# read through the runfiles library so the test also runs on Windows without
+# `--enable_runfiles`.
 
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
 
@@ -22,9 +23,10 @@ sh_test(
         "@jq_pinned//:jq",
     ],
     env = {
-        "JQ_BIN": "$(location @jq//:jq)",
-        "JQ_FROZEN_BIN": "$(location @jq_frozen//:jq)",
-        "JQ_PINNED_BIN": "$(location @jq_pinned//:jq)",
-        "PRETTY_JSON": "$(location :pretty)",
+        "JQ_BIN": "$(rlocationpath @jq//:jq)",
+        "JQ_FROZEN_BIN": "$(rlocationpath @jq_frozen//:jq)",
+        "JQ_PINNED_BIN": "$(rlocationpath @jq_pinned//:jq)",
+        "PRETTY_JSON": "$(rlocationpath :pretty)",
     },
+    deps = ["@rules_shell//shell/runfiles"],
 )

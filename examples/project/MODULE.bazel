@@ -47,14 +47,16 @@ use_repo(
 
 host_tool_version = use_repo_rule("//:host_tool_version.bzl", "host_tool_version")
 
-# Runs a tool of a set repository while Bazel fetches this repository.
+# Runs a tool of a set repository while Bazel fetches this repository. The
+# label is the tool's `launcher_path` in the set's manifest.json: a default
+# selection keeps its launchers in `l/`.
 host_tool_version(
     name = "shellcheck_version",
     tools = {
-        "darwin/amd64": "@tools_darwin_amd64//:selections/default/shells/default/bin/shellcheck",
-        "darwin/arm64": "@tools_darwin_arm64//:selections/default/shells/default/bin/shellcheck",
-        "linux/amd64": "@tools_linux_amd64//:selections/default/shells/default/bin/shellcheck",
-        "linux/arm64": "@tools_linux_arm64//:selections/default/shells/default/bin/shellcheck",
-        "windows/amd64": "@tools_windows_amd64//:selections/default/shells/default/bin/shellcheck.exe",
+        "darwin/amd64": "@tools_darwin_amd64//:l/shellcheck",
+        "darwin/arm64": "@tools_darwin_arm64//:l/shellcheck",
+        "linux/amd64": "@tools_linux_amd64//:l/shellcheck",
+        "linux/arm64": "@tools_linux_arm64//:l/shellcheck",
+        "windows/amd64": "@tools_windows_amd64//:l/shellcheck.exe",
     },
 )

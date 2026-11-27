@@ -26,9 +26,10 @@ sh_test(
         "@tools//:shfmt",
     ],
     env = {
-        "FETCH_VERSION": "$(location @shellcheck_version//:version.txt)",
-        "REPORT": "$(location :shell_report)",
-        "SHELLCHECK_BIN": "$(location @tools//:shellcheck)",
-        "SHFMT_BIN": "$(location @tools//:shfmt)",
+        "FETCH_VERSION": "$(rlocationpath @shellcheck_version//:version.txt)",
+        "REPORT": "$(rlocationpath :shell_report)",
+        "SHELLCHECK_BIN": "$(rlocationpath @tools//:shellcheck)",
+        "SHFMT_BIN": "$(rlocationpath @tools//:shfmt)",
     },
+    deps = ["@rules_shell//shell/runfiles"],
 )
