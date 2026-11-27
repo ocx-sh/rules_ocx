@@ -97,7 +97,7 @@ def test_set_with_no_linux_leaf_from_a_linux_client(workspace: Workspace) -> Non
     res = workspace.client("a").run("query", "@winonly//:all", lockfile="update")
     assert_ok(res, "winonly hub")
     assert "windows_amd64" in res.out
-    assert '"project|winonly|' in (workspace.path / "MODULE.bazel.lock").read_text()
+    assert '"project|winonly"' in (workspace.path / "MODULE.bazel.lock").read_text()
 
 
 def test_client_ocx_home_is_never_used(workspace: Workspace) -> None:

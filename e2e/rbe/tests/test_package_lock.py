@@ -531,8 +531,9 @@ def test_update_refuses_a_locked_output_base(lockrig) -> None:
     lockrig.push("1.0", "tool v1")
     ws = _tag_ws(lockrig)
     assert_ok(hub_query(ws.client("a"), H), "first resolution")
+    held = ws.path.parent / f"{ws.test_id}-held"
     (ws.path / "BUILD.bazel").write_text(
-        (ws.path / "BUILD.bazel").read_text() + 'genrule(name = "hold", outs = ["hold.txt"], cmd = "sleep 900; touch $@")\n'
+        (ws.path / "BUILD.bazel").read_text() + f'genrule(name = "hold", outs = ["hold.txt"], cmd = "touch {held}; sleep 900; touch $@")\n'
     )  # fmt: skip
     holder = ws.client("holder")
     u = update_client(ws, "u", nested=holder)
@@ -542,12 +543,10 @@ def test_update_refuses_a_locked_output_base(lockrig) -> None:
     # The startup option is the one the program passes, so the holder's server and the program's calls agree.
     hold = holder.start("build", "//:hold", "--spawn_strategy=local", startup=("--noblock_for_lock",), lockfile="update")
     try:
-        probe = [*holder.startup("--noblock_for_lock"), "info", "output_base"]
+        # The action's marker, not an `info` probe: a probe takes the lock itself and makes a starting holder exit 9.
         deadline = time.monotonic() + 300
-        while True:
+        while not held.exists():
             assert hold.poll() is None and time.monotonic() < deadline, "the holder never took the output-base lock"
-            if subprocess.run(probe, cwd=ws.path, env=holder.env(), capture_output=True, timeout=120).returncode == 9:
-                break
             time.sleep(0.5)
         res = run_update(u, f"@{H}//:update", timeout=240)  # without --noblock_for_lock this waits for the lock
     finally:
