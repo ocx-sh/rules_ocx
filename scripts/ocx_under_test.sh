@@ -79,12 +79,20 @@ fi
 #
 # The deep tier runs this script once per task. ocx 0.6.5 fails a second pull of a package whose manifest it
 # already holds locally (ghcr.io's referrers endpoint answers "Not authorized"), so the first run records the
-# binary it verified and later runs reuse it; the SHA-256 below is always recomputed from the file.
+# binary it verified and later runs reuse it, only while the file still has the SHA-256 recorded at verification
+# time; a missing or different digest re-verifies, so the hash below vouches for the verified package.
+sha256_of() {
+  if command -v sha256sum > /dev/null 2>&1; then
+    sha256sum "$1" | cut -d' ' -f1
+  else
+    shasum -a 256 "$1" | cut -d' ' -f1
+  fi
+}
 memo="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/ocx-under-test.memo"
 binary=""
 if [[ -f "$memo" ]]; then
-  IFS=$'\t' read -r memo_id memo_binary < "$memo" || true
-  if [[ "${memo_id:-}" == "$identifier" && -f "${memo_binary:-}" ]]; then
+  IFS=$'\t' read -r memo_id memo_binary memo_sha < "$memo" || true
+  if [[ "${memo_id:-}" == "$identifier" && -f "${memo_binary:-}" && -n "${memo_sha:-}" && "$(sha256_of "$memo_binary")" == "$memo_sha" ]]; then
     binary="$memo_binary"
   fi
 fi
@@ -100,18 +108,14 @@ if [[ -z "$binary" ]]; then
   fi
   binary="$(find "$pulled/content" -type f \( -name ocx -o -name ocx.exe \) -print -quit)"
   if [[ -n "$binary" ]]; then
-    printf '%s\t%s\n' "$identifier" "$binary" > "$memo"
+    printf '%s\t%s\t%s\n' "$identifier" "$binary" "$(sha256_of "$binary")" > "$memo"
   fi
 fi
 if [[ -z "$binary" ]]; then
   echo "::error::no ocx binary in the pulled package" >&2
   exit 1
 fi
-if command -v sha256sum > /dev/null 2>&1; then
-  sha="$(sha256sum "$binary" | cut -d' ' -f1)"
-else
-  sha="$(shasum -a 256 "$binary" | cut -d' ' -f1)"
-fi
+sha="$(sha256_of "$binary")"
 if command -v cygpath > /dev/null 2>&1; then
   binary="$(cygpath -m "$binary")"
 fi
