@@ -18,7 +18,7 @@ bazel_dep(name = "rules_shell", version = "0.6.1", dev_dependency = True)
 bazel_dep(name = "stardoc", version = "0.8.0", dev_dependency = True)
 
 ocx = use_extension("//ocx:extensions.bzl", "ocx")
-use_repo(ocx, "ocx_tool")
+use_repo(ocx, "ocx_tool", "ocx_update")
 
 # Dogfooding: rules_ocx provisions its own dev toolchain from ocx.toml.
 # dev_dependency keeps these tags out of consumer builds (project tags are
