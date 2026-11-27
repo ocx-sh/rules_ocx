@@ -260,12 +260,16 @@ def same_index_check(name, manifests):
             package whose digest is `selections[0].roots[0]`.
 
     Returns:
-        "" when all roots share one `index_digest` or none has one, else X3
+        "" when all roots share one `index_digest` or none has one, else X2 for
+        a manifest without exactly one root, else X3
         (`rules_ocx: the tag of '<name>' moved while it was resolved; run the update again`).
     """
     digests = {}
     for manifest in manifests:
-        root = manifest.selections[0].roots[0]
+        found = root_digest(name, manifest)
+        if found.error:
+            return found.error
+        root = found.digest
         for package in manifest.packages:
             index_digest = getattr(package, "index_digest", None)
             if package.digest == root and index_digest:

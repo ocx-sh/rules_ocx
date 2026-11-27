@@ -301,6 +301,13 @@ def _same_index_test_impl(ctx):
         same_index_check("jq", [_root_manifest(_D1, one), _root_manifest(_D2, other)]),
         "X3 for two image indexes",
     )
+    for bad in [[], [struct(roots = [])]]:
+        asserts.equals(
+            env,
+            "rules_ocx: 'jq': ocx package vendor reported 0 selections or roots; a package needs exactly one",
+            same_index_check("jq", [struct(selections = bad, packages = [])]),
+            "X2, not an index error, for a manifest without a root",
+        )
     return unittest.end(env)
 
 declaration_kind_test = unittest.make(_declaration_kind_test_impl)
