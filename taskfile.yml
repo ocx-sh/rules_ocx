@@ -180,6 +180,8 @@ tasks:
             exit 1
           fi
           expect 64 "rules_ocx: an update argument holds one of" run @tools//:update -- -g "a&b"
+          # `)` is not in E13's set: it must pass the argument capture and reach ocx, which refuses the group with 64.
+          expect 64 "-g a)b failed (exit 64)" run @tools//:update -- -g "a)b"
           (
             RULES_OCX_BAZEL="$base/no-such-bazel.exe"
             export RULES_OCX_BAZEL
