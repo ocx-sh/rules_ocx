@@ -13,7 +13,7 @@ rem
 rem Delayed expansion is never enabled: a path or a value may hold "!". A plan value is used inside quotes, except in
 rem a few `if defined` lookups of declaration names, whose safe set holds no character cmd acts on. An argument is
 rem read only after E13 has accepted the whole line: for @rules_ocx//:update every character is in the declaration-name
-rem set and the name lookup compares through findstr; for a hub target the arguments are not looked at again and
+rem set and the name lookup compares with a case-sensitive `if` string test; for a hub target the arguments are not looked at again and
 rem reach the command line of ocx unquoted, where E13 has refused every character cmd would act on.
 setlocal DisableDelayedExpansion
 
@@ -71,10 +71,6 @@ set "KNOWN="
 set "T_KIND="
 set "T_NAME="
 
-rem Pass 1: the known names and the target's kind. findstr /n keeps empty lines; the number prefix is cut off again.
-call :read_plan
-if not "%ST%"=="1" goto :e70plan
-
 set "HAS_DASH="
 set "BAD_ARG="
 :args_loop
@@ -83,15 +79,25 @@ set /a NARGS+=1
 set "ARG=%~1"
 if "%ARG:~0,1%"=="-" set "HAS_DASH=1"
 if not "%TARGET%"=="0" goto :arg_next
-rem A known name is one whole line of the variable listing, KN_ then the name then =1; findstr reads ARG as a literal, never as program text.
-set "ARG_HIT="
-set KN_ 2>nul | findstr /x /c:"KN_%ARG%=1" >nul && set "ARG_HIT=1"
-if not defined ARG_HIT if not defined BAD_ARG set "BAD_ARG=%ARG%"
+set "ARGV_%NARGS%=%ARG%"
 set "ARGSET_%ARG%=1"
 :arg_next
 shift
 goto :args_loop
 :args_done
+
+rem Pass 1: the known names and the target's kind. findstr /n keeps empty lines; the number prefix is cut off again.
+rem For @rules_ocx//:update each declaration marks the arguments equal to its name (ARGHIT_n, in :hit_names).
+call :read_plan
+if not "%ST%"=="1" goto :e70plan
+if not "%TARGET%"=="0" goto :names_done
+set "I=0"
+:names_check
+set /a I+=1
+if %I% GTR %NARGS% goto :names_done
+if defined ARGHIT_%I% goto :names_check
+call set "BAD_ARG=%%ARGV_%I%%%"
+:names_done
 
 if not "%TARGET%"=="0" goto :check_hub
 if defined HAS_DASH goto :e3
@@ -278,7 +284,7 @@ goto :decl_%PASS%
 
 :decl_1
 set /a COUNT+=1
-set "KN_%D_NAME%=1"
+if "%TARGET%"=="0" call :hit_names
 if "%COUNT%"=="%TARGET%" set "T_KIND=%D_KIND%" & set "T_NAME=%D_NAME%"
 if defined KNOWN goto :known_more
 set "KNOWN=%D_NAME%"
@@ -286,6 +292,17 @@ exit /b 0
 :known_more
 set "KNOWN=%KNOWN%, %D_NAME%"
 exit /b 0
+
+rem Marks every argument that equals the declaration name. `if "a"=="b"` is case-sensitive and compares text, so a name
+rem differing in case is not a hit (E1) and nothing is read as program text.
+:hit_names
+set "J=0"
+:hit_next
+set /a J+=1
+if %J% GTR %NARGS% exit /b 0
+call set "AV=%%ARGV_%J%%%"
+if "%AV%"=="%D_NAME%" set "ARGHIT_%J%=1"
+goto :hit_next
 
 :decl_2
 set /a POS+=1
