@@ -60,7 +60,7 @@ It skips a lock or snapshot that lies outside your workspace, because that file 
 
 The extension prints one line per declaration and platform.
 
-```text
+```console
 DEBUG: rules_ocx: jq linux/amd64: sha256:<old> -> sha256:<new>
 DEBUG: rules_ocx: jq: unchanged
 ```
@@ -93,7 +93,7 @@ Use `error` in CI to catch a declaration that was added without its lock.
 Tell git to merge `MODULE.bazel.lock` with the Bazel merge driver, one key at a time.
 Add this line to `.gitattributes`:
 
-```text
+```ini
 MODULE.bazel.lock merge=bazel-lockfile-merge
 ```
 
