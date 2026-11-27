@@ -247,8 +247,9 @@ Guide: <https://ocx.sh/integrations/bazel/guides/ci-reproducible/>.
     produces are reproducible.
   - Neither: a floating tag resolves once, and the extension records the
     platform manifest digests in `MODULE.bazel.lock`. A moved tag changes
-    nothing until `bazel run @<hub>//:update` (one hub) or
-    `bazel run @rules_ocx//:update` (all). See
+    nothing until `bazel mod deps --lockfile_mode=update
+    --repo_env=RULES_OCX_UPDATE=<hub>`. A `project` or `index` hub updates its
+    own files with `bazel run @<hub>//:update`. See
     [Update locked tools](docs/guides/update-locks.md).
 - Commit `MODULE.bazel.lock`, so that a fresh checkout reads the facts and runs
   no `ocx` before a set is fetched.

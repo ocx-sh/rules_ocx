@@ -18,6 +18,17 @@
 
 **Classification:** blast radius cross-area (rules_ocx, plus manifest and behaviour requirements on `ocx`, listed as MR-1 to MR-14). One-way door, medium: the fact JSON is persisted in users' `MODULE.bazel.lock`, and the `update` targets are user-facing names.
 
+## Amendment 2026-11-27: the update program is a pre-configured `ocx` target
+
+The owner replaced the update program with a pre-configured `ocx` target.
+Where this record describes the program, the plan file, the nested Bazel call or the error texts E1-E3, E8, E9, E11-E14, E17 and E18, the text below replaces it; the superseded sections stay as the record of what was built before.
+
+- `@<hub>//:update` exists only for a `project` declaration whose `ocx.toml` and `ocx.lock` are main-repository files named so, in one package, and for an `index` declaration whose snapshot is a main-repository file. It is the fetched `ocx` binary (a symlink rule in the `ocx_update` repository) with `--project <toml> update --no-pull [-g <group>]... [<binding>]...` or `--index <dir> index update <identifier>` baked into its `args`, each argument single-quoted for Bazel's tokenizer, and the environment of the old program (the pinned rows of `OCX_ENV_CLASSES`, the `no_config` blanks, `OCX_CONFIG`, `OCX_SIGSTORE_TRUSTED_ROOT`, `OCX_NO_VERIFY`, `OCX_ALLOW_YANKED`) baked into `RunEnvironmentInfo`. Arguments after `--` follow the baked ones.
+- `tag` and `pinned` declarations, and a declaration whose file is not in the main repository, have no target and no hub alias. A `tag` moves with `bazel mod deps --lockfile_mode=update --repo_env=RULES_OCX_UPDATE=<name>`.
+- The all-declarations target (`@rules_ocx//:update`) is gone, and so are `plan.txt`, both templates, `RULES_OCX_BAZEL` and the nested Bazel call: the extension watches `ocx.lock` and the snapshot, so `MODULE.bazel.lock` follows on the next Bazel command (checked on Linux for a project and an index).
+- Lost knowingly: the scratch copy of `ocx.toml` and `ocx.lock` (`ocx` writes the lock by one atomic rename itself), the symlink and write-target refusals, the exit codes 64, 70, 74, 75 and 78 of the program, and refusing arguments on an index hub. The target runs under the invoker's `OCX_HOME`, and `ocx update` may create `.ocx/` beside the `ocx.toml`.
+- Windows: no batch wrapper. The `deep:windows-update-target` task runs the new target; Windows behaviour is established only by that CI run.
+
 ## Context
 
 A package declared by tag is not locked today.
@@ -657,6 +668,7 @@ Platforms (claims until these run):
 | Date | Author | Change |
 |------|--------|--------|
 | 2026-11-26 | owner | Initial record (Proposed) |
+| 2026-11-27 | owner | the update program replaced by a pre-configured `ocx` target (see the amendment above) |
 | 2026-11-26 | owner | review round 1 applied |
 | 2026-11-26 | owner | re-validation warns applied (identifier is an input, refusal exits, test rows for E8, E12-E14, X8) |
 | 2026-11-26 | goal loop | reconciled with the ocx record `adr_unified_launcher.md`: MR-6 refused (platform check stays here), MR-8 `packages[].index_digest`, MR-9 `index_lookups[]`, MR-10, MR-12, MR-13, MR-14 statements; pin trust decided; Accepted under goal-loop authority |

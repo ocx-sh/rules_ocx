@@ -25,7 +25,7 @@ Bazel selects the toolchain of the platform an action runs on, so a build fetche
 
 A tool is reached by its hub label only, such as `@tools//:jq`.
 rules_ocx generates no `alias` target per tool.
-The name `update` is reserved: the hub's `update` target is the update program, and a tool of that name is refused.
+The name `update` is reserved: a `project` or `index` hub's `update` target is a configured `ocx`, and a tool of that name is refused.
 See [Update locked tools](../guides/update-locks.md).
 
 ## Facts

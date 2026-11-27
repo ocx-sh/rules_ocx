@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 The OCX Authors
 
-"""The hub repository: one toolchain per platform, one `ocx_tool` per tool name, and `:update`.
+"""The hub repository: one toolchain per platform, one `ocx_tool` per tool name, and `:update` when the hub has an update target.
 
 The hub names a set repository only inside `toolchain()`, a label analysis
 follows only for the platform toolchain resolution selects, so `bazel build`,
@@ -53,8 +53,8 @@ def hub_build_content(sets, tools, name = ""):
         sets: dict platform string -> label string of that platform's
             `ocx_set_toolchain` target.
         tools: sorted tool names.
-        name: the hub name; when given, the hub carries `alias(name = "update")`
-            for `@ocx_update//:hub_<name>`.
+        name: the hub name when it has an update target, else ""; a hub that
+            has one carries `alias(name = "update")` for `@ocx_update//:hub_<name>`.
 
     Returns:
         BUILD.bazel text.
@@ -143,7 +143,7 @@ def hub_platform_error(platforms, available_platforms):
     return ""
 
 def _ocx_hub_repo_impl(rctx):
-    rctx.file("BUILD.bazel", hub_build_content(rctx.attr.sets, rctx.attr.tools, name = rctx.attr.hub))
+    rctx.file("BUILD.bazel", hub_build_content(rctx.attr.sets, rctx.attr.tools, name = rctx.attr.hub if rctx.attr.update else ""))
     rctx.file("tool.bzl", hub_tool_bzl())
 
 ocx_hub_repo = repository_rule(
@@ -151,12 +151,14 @@ ocx_hub_repo = repository_rule(
     doc = """The hub of a vendored tool collection.
 
 Holds one toolchain per platform (each naming that platform's set repository
-only inside `toolchain()`), one `ocx_tool` per tool name, and `update`, an alias
-of the hub's update program in `@ocx_update`. Register it with
+only inside `toolchain()`), one `ocx_tool` per tool name, and, when `update` is
+set, `update`: an alias of the hub's pre-configured `ocx` target in
+`@ocx_update`. Register it with
 `register_toolchains("@<hub>//:all")`.""",
     attrs = {
         "hub": attr.string(doc = "The hub's own name; `update` aliases `@ocx_update//:hub_<hub>`."),
         "sets": attr.string_dict(doc = "platform -> label of that platform's `ocx_set_toolchain`."),
         "tools": attr.string_list(doc = "Tool names."),
+        "update": attr.bool(doc = "Whether `@ocx_update` has an update target for this hub; the hub then aliases it as `update`."),
     },
 )

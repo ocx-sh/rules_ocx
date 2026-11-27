@@ -147,8 +147,7 @@ def reserved_moves(manifest):
     return struct(moves = moves, error = "")
 
 _TAILS = {
-    "tag": "run bazel run @{hub}//:update",
-    "pinned": "run bazel run @{hub}//:update",
+    "tag": "run bazel mod deps --lockfile_mode=update --repo_env=RULES_OCX_UPDATE={hub}",
     "index": "the snapshot changed outside the update: run bazel run @{hub}//:update or restore the snapshot",
 }
 
@@ -337,7 +336,8 @@ def vendor_failure(args, code, stderr, kind = "", hub = ""):
     hint = SYSEXIT_HINTS.get(code)
     text = "ocx {} failed (exit {}): {}{}".format(" ".join(args), code, stderr.strip(), "\nhint: " + hint if hint else "")
     if kind in ["tag", "pinned"] and code != 65:
-        text += "\nhint: the platform manifest MODULE.bazel.lock pins for '{}' may be gone from the registry; run bazel run @{}//:update".format(hub, hub)
+        fix = "run bazel mod deps --lockfile_mode=update --repo_env=RULES_OCX_UPDATE={}".format(hub) if kind == "tag" else "pin another digest in the identifier"
+        text += "\nhint: the platform manifest MODULE.bazel.lock pins for '{}' may be gone from the registry; {}".format(hub, fix)
     return text
 
 def _path_flag(rctx, label):

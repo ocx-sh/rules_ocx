@@ -5,10 +5,10 @@
 
 Usage: check_ocx_interface.py [ROOT]   (default: the repository root)
 
-Scans ROOT/ocx/**/*.bzl and ROOT/ocx/**/*.tpl and prints one
+Scans ROOT/ocx/**/*.bzl and prints one
 `path:line: <class>: <text>` line per finding (at most one per line and class);
 exit 1 on any finding, 0 when clean, 2 when ROOT/ocx is not a directory, holds
-no .bzl or .tpl file, or a file cannot be read (a wrong ROOT or a partial scan
+no .bzl file, or a file cannot be read (a wrong ROOT or a partial scan
 must never read as green or as findings). The count of files read goes to stderr.
 
 Comments and true docstrings (a triple-quoted string that is a statement of
@@ -53,17 +53,12 @@ Classes:
   parse       Unbalanced brackets (an unclosed opener or a stray closer); the
               literal is then skipped by the other classes.
 
-Templates (`.tpl`, a program text rather than Starlark) are scanned for the
-class `subcommand` only, line by line: a comment (`#` in sh; `rem`, `@rem`, `::`
-in a `.bat.tpl`) and text inside a quoted sh string or after `echo` in a bat
-line are not commands. An ocx command line is the binary (`ocx`, `ocx.exe`,
-`$ocx`, `"$ocx"`, `${ocx}`, `%OCX%`, any case), then flags (`-x`, `--format
-json`, a value starting with `"`, `$` or `%`), then the subcommand. DP-44 admits
-two argv forms, and only in the two generated update programs
-(`ocx/private/update.sh.tpl`, `ocx/private/update.bat.tpl`, exact paths):
-`--project <toml> update --no-pull ...` and `--index <dir> index update <id>`.
-Every other subcommand there is a finding, and so is every one in any other
-template; `vendor` and `package vendor` are allowed everywhere.
+The update targets are the one exception: `ocx/private/update_repo.bzl` builds
+the arguments of `ocx --project <toml> update --no-pull ...` and
+`ocx --index <dir> index update <id>`, and its unit test
+(`ocx/tests/update_repo_test.bzl`) spells them out. In exactly those two files
+(exact paths) a `subcommand` finding for `update` or `index` is dropped; every
+other finding there, and every subcommand in any other file, still counts.
 
 Limits (a regex guard, not a Starlark parser): a key or segment built from a
 variable, an argv split across several variables or functions, and a subcommand
@@ -93,12 +88,9 @@ FORMAT_PAIR = re.compile(r"""["']--format["']\s*,\s*["']json["']""")
 APPEND = re.compile(r"""\.(?:append|extend)\(\s*\[?\s*["'](\w+)["']""")
 POP_GET = re.compile(r"\.(?:get|pop)\(\s*$")
 OPEN, CLOSE = "([{", ")]}"
-# DP-44: the two generated update programs may hold the two argv forms of `ocx update`.
-TEMPLATE_UPDATE_FORMS = frozenset({"ocx/private/update.sh.tpl", "ocx/private/update.bat.tpl"})
-OCX_BIN = re.compile(
-    r'''(?<![\w.\-/$%])(?:"?\$\{?ocx\}?"?|"?%ocx%"?|ocx(?:\.exe)?)(?=[\s;|&)]|$)''', re.IGNORECASE
-)
-LIST_END = frozenset({"&&", "||", "|", ";", "&"})
+# The update targets bake the argv of `ocx update` / `ocx index update`; these two files may hold those two names.
+UPDATE_ARGV_FILES = frozenset({"ocx/private/update_repo.bzl", "ocx/tests/update_repo_test.bzl"})
+UPDATE_ARGV_FINDINGS = tuple(f": subcommand: ocx subcommand `{name}` is not a vendor form" for name in ("update", "index"))
 # The one parse surface: it builds the manifest struct, so class 3 skips it.
 METADATA_EXEMPT = "ocx/private/vendor_manifest.bzl"
 
@@ -335,98 +327,13 @@ def scan_text(src, name):
     return [f"{name}:{ln}: {cls}: {msg}" for (ln, cls), msg in first.items()]
 
 
-def sh_code(line):
-    """The part of an sh line before a comment, and the offsets that sit inside a quoted string."""
-    quoted = set()
-    state = ""
-    i = 0
-    while i < len(line):
-        c = line[i]
-        if state == "'":
-            quoted.add(i)
-            state = "" if c == "'" else state
-        elif state == '"':
-            quoted.add(i)
-            if c == "\\":
-                i += 1
-                quoted.add(i)
-            elif c == '"':
-                state = ""
-        elif c == "\\":
-            i += 1
-        elif c in "\"'":
-            state = c
-        elif c == "#" and (i == 0 or line[i - 1] in " \t;"):
-            return line[:i], quoted
-        i += 1
-    return line, quoted
-
-
-def bat_code(line):
-    """The part of a bat line that can run: "" for a comment, `echo` text only up to the match."""
-    low = line.strip().lower()
-    return "" if low in ("rem", "@rem") or low.startswith(("rem ", "@rem ", "::")) else line
-
-
-def template_findings(src, name):
-    bat = name.endswith(".bat.tpl")
-    allowed = name in TEMPLATE_UPDATE_FORMS
-    out = []
-    for ln, raw in enumerate(src.splitlines(), 1):
-        if bat:
-            line, quoted = bat_code(raw), set()
-        else:
-            line, quoted = sh_code(raw)
-        for m in OCX_BIN.finditer(line):
-            if m.start() in quoted:
-                continue
-            if bat:
-                lead = re.sub(r"^[\s@(]*(?:>&2\s*)?", "", line[: m.start()]).lower()
-                if lead.startswith("echo") and not re.search(r"[&|]", lead):
-                    continue
-            hit = template_sub(line[m.end() :].split(), allowed)
-            if hit:
-                out.append(f"{name}:{ln}: subcommand: ocx subcommand `{hit}` is not a vendor form")
-                break
-    return out
-
-
-def has_flag(flags, flag):
-    return any(f == flag or f.startswith(flag + "=") for f in flags)
-
-
-def template_sub(tokens, allowed):
-    """The offending subcommand after an ocx binary, or None."""
-    flags = []
-    i = 0
-    while i < len(tokens):
-        t = tokens[i]
-        i += 1
-        if t in LIST_END:
-            return None
-        if t.startswith("-"):
-            flags.append(t)
-            if t == "--format" and tokens[i : i + 1] == ["json"]:
-                i += 1
-        elif re.fullmatch(r"[a-z][a-z-]*", t):
-            nxt = tokens[i] if i < len(tokens) else ""
-            if t not in SUBCOMMANDS or (t == "package" and nxt == "vendor"):
-                return None
-            if allowed and t == "update" and has_flag(flags, "--project") and nxt == "--no-pull":
-                return None
-            if allowed and t == "index" and nxt == "update" and has_flag(flags, "--index"):
-                return None
-            return f"{t} {nxt}" if t == "index" and nxt == "update" else t
-    return None
-
-
 class UnreadableError(Exception):
     """A scanned file could not be read; the scan is incomplete, so it must not read as findings."""
 
 
 def scan_tree(root):
     root = pathlib.Path(root)
-    files = sorted((root / "ocx").rglob("*.bzl")) + sorted((root / "ocx").rglob("*.tpl")) if (root / "ocx").is_dir() else []
+    files = sorted((root / "ocx").rglob("*.bzl")) if (root / "ocx").is_dir() else []
     lines = []
     for path in files:
         try:
@@ -434,7 +341,10 @@ def scan_tree(root):
         except (OSError, UnicodeDecodeError) as e:
             raise UnreadableError(f"cannot read {path}: {e}") from e
         rel = path.relative_to(root).as_posix()
-        lines += template_findings(src, rel) if path.suffix == ".tpl" else scan_text(src, rel)
+        found = scan_text(src, rel)
+        if rel in UPDATE_ARGV_FILES:
+            found = [f for f in found if not f.endswith(UPDATE_ARGV_FINDINGS)]
+        lines += found
     return lines, len(files)
 
 
@@ -446,7 +356,7 @@ def main(argv):
         print(f"check_ocx_interface: {e}", file=sys.stderr)
         return 2
     if count == 0:
-        print(f"check_ocx_interface: no .bzl or .tpl file under {root}/ocx; wrong ROOT?", file=sys.stderr)
+        print(f"check_ocx_interface: no .bzl file under {root}/ocx; wrong ROOT?", file=sys.stderr)
         return 2
     print(f"check_ocx_interface: read {count} files", file=sys.stderr)
     for line in lines:

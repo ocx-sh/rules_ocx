@@ -72,6 +72,8 @@ def _update_alias_test_impl(ctx):
     asserts.true(env, 'name = "update"' in content, "the hub carries an update alias")
     asserts.true(env, '"@ocx_update//:hub_jq"' in content, "aliasing the update repository's target for this hub")
     asserts.true(env, "alias(" in content)
+    asserts.false(env, "alias(" in hub_build_content(_SETS, ["jq"]), "a hub without an update target carries no alias")
+    asserts.false(env, "ocx_update" in hub_build_content(_SETS, ["jq"]), "and names nothing of the update repository")
     return unittest.end(env)
 
 def _update_reserved_test_impl(ctx):

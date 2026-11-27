@@ -158,12 +158,13 @@ def _failure_test_impl(ctx):
     asserts.true(env, vendor_failure(["vendor"], 2, "") != "", "an unmapped code still fails")
 
     # X6: a failed set fetch of a pinned manifest may mean the registry dropped it.
-    hint = "hint: the platform manifest MODULE.bazel.lock pins for 'jq' may be gone from the registry; run bazel run @jq//:update"
-    for kind in ["tag", "pinned"]:
-        asserts.true(env, hint in vendor_failure(["vendor"], 69, "unreachable", kind, "jq"), "{}: the X6 hint for exit 69".format(kind))
-    asserts.false(env, "bazel run @jq//:update" in vendor_failure(["vendor"], 65, "no binary", "tag", "jq"), "no hint on exit 65")
-    asserts.false(env, "bazel run @jq//:update" in vendor_failure(["vendor"], 69, "unreachable", "project", "jq"), "no hint under project")
-    asserts.false(env, "bazel run @jq//:update" in vendor_failure(["vendor"], 69, "unreachable", "index", "jq"), "no hint under index")
+    head = "hint: the platform manifest MODULE.bazel.lock pins for 'jq' may be gone from the registry; "
+    fixes = {"tag": "run bazel mod deps --lockfile_mode=update --repo_env=RULES_OCX_UPDATE=jq", "pinned": "pin another digest in the identifier"}
+    for kind, fix in fixes.items():
+        asserts.true(env, head + fix in vendor_failure(["vendor"], 69, "unreachable", kind, "jq"), "{}: the X6 hint for exit 69".format(kind))
+    asserts.false(env, head in vendor_failure(["vendor"], 65, "no binary", "tag", "jq"), "no hint on exit 65")
+    asserts.false(env, head in vendor_failure(["vendor"], 69, "unreachable", "project", "jq"), "no hint under project")
+    asserts.false(env, head in vendor_failure(["vendor"], 69, "unreachable", "index", "jq"), "no hint under index")
     return unittest.end(env)
 
 def _cross_check_test_impl(ctx):
@@ -294,11 +295,12 @@ def _root_digest_test_impl(ctx):
     m = _root_manifest()
     asserts.equals(env, "", cross_check(m, _expect(m, "tag", available = [])), "control: the recorded digest matches")
     clause = "the root package is {} where the fact recorded {}".format(_ROOT, _OTHER)
-    for kind in ["tag", "pinned"]:
-        err = cross_check(m, _expect(m, kind, digest = _OTHER, available = []))
-        asserts.true(env, clause in err, "{}: the clause is named: {}".format(kind, err))
-        asserts.true(env, err.endswith("run bazel run @jq//:update"), "{} tail: {}".format(kind, err))
-        asserts.false(env, "mod deps" in err, "a tag fact reuses a stale value under mod deps")
+    tag = cross_check(m, _expect(m, "tag", digest = _OTHER, available = []))
+    asserts.true(env, clause in tag, "the clause is named: " + tag)
+    asserts.true(env, tag.endswith("run bazel mod deps --lockfile_mode=update --repo_env=RULES_OCX_UPDATE=jq"), "tag tail: " + tag)
+    pinned = cross_check(m, _expect(m, "pinned", digest = _OTHER, available = []))
+    asserts.true(env, clause in pinned, "the clause is named: " + pinned)
+    asserts.true(env, pinned.endswith("run bazel mod deps --lockfile_mode=update"), "pinned tail: " + pinned)
     index = cross_check(m, _expect(m, "index", digest = _OTHER, hub = "tool"))
     asserts.true(env, clause in index, index)
     asserts.true(env, index.endswith("the snapshot changed outside the update: run bazel run @tool//:update or restore the snapshot"), "index tail: " + index)

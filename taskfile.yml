@@ -184,13 +184,11 @@ tasks:
           probe "non-ASCII workspace" "$tmp/$u-ws" "$tmp/rules_ocx_rf_ws-bazel"
           exit "$rc"
 
-  # ADR 0003 § Test plan `windows-update-target`: the generated update.bat, in workspace copies under a path with
-  # a space. examples/package holds a tag and a pinned hub, examples/project a project hub with its ocx.lock.
+  # ADR 0003 § Test plan `windows-update-target`: the pre-configured `ocx` update target, in workspace copies under a
+  # path with a space. examples/project holds a project hub with its ocx.lock, examples/package a tag and a pinned hub.
   deep:windows-update-target:
     env:
       USE_BAZEL_VERSION: 9.x
-      # The nested bazel call of the update program; the `bazel` it defaults to is not on PATH here.
-      RULES_OCX_BAZEL: bazelisk
     cmds:
       - cmd: |
           set -eu
@@ -199,7 +197,7 @@ tasks:
           mkdir -p "$base"
           for example in package project; do
             cp -r "examples/$example" "$base/"
-            # The copies cannot reach the module through `../..`; the rc line also reaches the nested call.
+            # The copies cannot reach the module through `../..`.
             echo 'common --override_module=rules_ocx={{toSlash .ROOT_DIR}}' >> "$base/$example/.bazelrc.user"
           done
           bz() { ocx --project "{{.ROOT_DIR}}/ocx.toml" exec -g test -- bazelisk "$@"; }
@@ -217,71 +215,35 @@ tasks:
           fails=""
 
           cd "$base/package"
-          # The first evaluation records the tag's fact; the update then finds it unchanged.
+          # A tag and a pinned hub have no update target; the tag's one command re-reads the tag and prints the W1 warning.
+          expect 7 "not declared in package" query @jq//:update
+          expect 7 "not declared in package" query @jq_pinned//:update
           bz mod deps --lockfile_mode=update
-          expect 0 "rules_ocx: jq: unchanged" run @jq//:update
-          expect 0 "rules_ocx: jq_pinned: pinned by digest in MODULE.bazel" run @jq_pinned//:update
+          expect 0 "RULES_OCX_UPDATE=jq is set" mod deps --lockfile_mode=update --repo_env=RULES_OCX_UPDATE=jq
 
           cd "$base/project"
-          # A first evaluation records no result line (nothing stored to compare with), so record the fact now.
-          bz mod deps --lockfile_mode=update
-          # ocx writes the lock without this comment, so its absence afterwards shows the file was replaced.
+          # ocx writes the lock without this comment, so its absence afterwards shows the file was replaced. The fact
+          # is recorded over the commented text, so the replacement makes it stale.
           echo '# rules_ocx: replaced by the update' >> ocx.lock
-          # The nested bazel call prints one `rules_ocx: tools: ...` line per selected declaration; ocx itself prints none.
-          expect 0 "rules_ocx: tools: " run @tools//:update
+          bz mod deps --lockfile_mode=update
+          bz mod deps --lockfile_mode=error
+          cp MODULE.bazel.lock "$base/before.module.lock"
+          # The workspace path holds a space and, on Windows, backslashes: each reaches ocx as one argument.
+          expect 0 "" run @tools//:update
           if grep -qF '# rules_ocx: replaced by the update' ocx.lock || [ -L ocx.lock ]; then
             echo "bazel run @tools//:update did not replace ocx.lock with a file" >&2
             fails="$fails
             ocx.lock not replaced"
           fi
-          # Bazel starts the program through cmd.exe, which splits an unquoted `&` before update.bat runs (the log showed
-          # `'b' is not recognized`), so E13 for `&` is not reachable through `bazel run`: print what happens, never gate.
-          # `%` is not split and E13 refuses it, so these two rows check E13 end to end.
-          set +e; out="$(bz run @tools//:update -- -g 'a&b' 2>&1)"; echo "ampersand probe (hub target): exit $?"; printf '%s\n' "$out" | tail -n 4; set -e
-          expect 64 "rules_ocx: an update argument holds one of" run @tools//:update -- -g "a%b"
-          # `)` is not in E13's set: it must pass the argument capture and reach ocx, which refuses the group with 64.
-          expect 64 "-g a)b failed (exit 64)" run @tools//:update -- -g "a)b"
-          # @rules_ocx//:update takes declaration names: a known one is found, an unknown one is E1, and a name holding
-          # a character cmd splits or acts on (space, tab, comma, semicolon, equals sign) is refused before any lookup.
-          expect 0 "rules_ocx: tools: " run @rules_ocx//:update -- tools
-          expect 64 "no ocx declaration is named 'nope'" run @rules_ocx//:update -- nope
-          expect 64 "rules_ocx: an update argument holds one of" run @rules_ocx//:update -- "x y"
-          expect 64 "any character outside A-Z a-z 0-9" run @rules_ocx//:update -- "x,y"
-          expect 64 "any character outside A-Z a-z 0-9" run @rules_ocx//:update -- "x;y"
-          expect 64 "any character outside A-Z a-z 0-9" run @rules_ocx//:update -- "x=y"
-          set +e; out="$(bz run @rules_ocx//:update -- 'a&b' 2>&1)"; echo "ampersand probe (names target): exit $?"; printf '%s\n' "$out" | tail -n 4; set -e
-          expect 64 "rules_ocx: an update argument holds one of" run @rules_ocx//:update -- "a%b"
-          expect 64 "any character outside A-Z a-z 0-9" run @rules_ocx//:update -- "a)b"
-          (
-            RULES_OCX_BAZEL="$base/no-such-bazel.exe"
-            export RULES_OCX_BAZEL
-            expect 78 "rules_ocx: no bazel found; put bazel on PATH or set RULES_OCX_BAZEL" run @tools//:update
-          )
-          # update.bat cannot follow a link, so a junction in a parent directory of ocx.lock is refused, and the
-          # file behind it is left as it was.
-          cp -r "{{.ROOT_DIR}}/examples/project" "$base/project_sub"
-          echo 'common --override_module=rules_ocx={{toSlash .ROOT_DIR}}' >> "$base/project_sub/.bazelrc.user"
-          cd "$base/project_sub"
-          mkdir sub
-          mv ocx.toml ocx.lock sub/
-          printf 'exports_files(["ocx.lock", "ocx.toml"])\n' > sub/BUILD.bazel
-          # A sed script file: MSYS rewrites an argument that looks like a path list, and this one holds `//` and `:`.
-          printf 's#"//:ocx\\.#"//sub:ocx.#\n' > "$base/sub.sed"
-          sed -i -f "$base/sub.sed" MODULE.bazel
-          grep -F '//sub:ocx.' MODULE.bazel
-          bz mod deps --lockfile_mode=update
-          mv sub "$base/outside_sub"
-          MSYS2_ARG_CONV_EXCL='*' cmd /c mklink /J "$(cygpath -w "$base/project_sub/sub")" "$(cygpath -w "$base/outside_sub")"
-          # Diagnostic for the link walk, which reads the `l` of the attribute string `%~a` gives: the listing shows
-          # whether Windows reports the junction as one, so a red row below can be told from a wrong attribute reading.
-          MSYS2_ARG_CONV_EXCL='*' cmd /c dir /al "$(cygpath -w "$base/project_sub")" || true
-          # The attribute string the link walk reads; a link shows an `l` in it.
-          printf '@for %%%%I in (%%1) do @echo attr=%%%%~aI\r\n' > "$base/attr.bat"
-          (cd "$base" && MSYS2_ARG_CONV_EXCL='*' cmd /c attr.bat 'project_sub\sub' || true)
-          cp "$base/outside_sub/ocx.lock" "$base/before.lock"
-          expect 78 "is a link on the path of the write target" run @tools//:update
-          cmp "$base/before.lock" "$base/outside_sub/ocx.lock" || fails="$fails
-          the file behind the junction changed"
+          # The update ran no Bazel: the fact is stale until the next plain command, which moves it.
+          cmp -s "$base/before.module.lock" MODULE.bazel.lock || fails="$fails
+          MODULE.bazel.lock moved before a Bazel command"
+          expect 0 "" mod deps --lockfile_mode=update
+          if cmp -s "$base/before.module.lock" MODULE.bazel.lock; then fails="$fails
+          MODULE.bazel.lock did not move on the next Bazel command"; fi
+          # Arguments after `--` follow the baked ones and reach ocx unchanged; ocx refuses a group it does not know.
+          expect 64 "a)b" run @tools//:update -- -g "a)b"
+          expect 64 "a b" run @tools//:update -- -g "a b"
           if [ -n "$fails" ]; then printf 'windows update target: failed expectations:%s\n' "$fails" >&2; exit 1; fi
           echo "windows update target OK"
 

@@ -31,15 +31,20 @@ package manager (https://ocx.sh, source at `../ocx`).
   platforms) and fails naming `bazel mod deps --lockfile_mode=update`.
 - **Update targets.** Each tag has a kind: `project`, `pinned` (digest in the
   identifier), `index` or `tag`. A `tag` fact holds one platform manifest digest
-  per platform, so a moved tag changes nothing until
-  `bazel run @<hub>//:update` or `bazel run @rules_ocx//:update [-- names]`. The
-  `ocx_update` repository (a reserved name, as is a tool named `update`) writes
-  `plan.txt` and one program; the program runs `ocx update --no-pull` or
-  `ocx index update` on scratch copies, then `bazel mod deps
-  --lockfile_mode=update --repo_env=RULES_OCX_UPDATE=<names>`. Each declaration
-  and platform prints `sha256:<old> -> sha256:<new>` or `unchanged`; a set
-  `RULES_OCX_UPDATE` prints a warning on every evaluation. Behaviour per
-  `--lockfile_mode` → `.agents/adr/adr_0003_package_locking.md`.
+  per platform, so a moved tag changes nothing until `bazel mod deps
+  --lockfile_mode=update --repo_env=RULES_OCX_UPDATE=<names>`. Only a `project`
+  (its `ocx.toml` and `ocx.lock`, named so and in one package, in the main
+  repository) and an `index` (its snapshot in the main repository) get a target:
+  `@<hub>//:update`, an alias of `@ocx_update//:hub_<name>`, which is the fetched
+  `ocx` binary itself (`ocx/private/update_repo.bzl`, one symlink rule) with the
+  declaration's arguments (`--project <toml> update --no-pull [-g …] [bindings]`
+  or `--index <dir> index update <identifier>`, each single-quoted for Bazel's
+  `args` tokenizer) and its environment (`RunEnvironmentInfo`) baked in;
+  arguments after `--` follow the baked ones. It runs no Bazel: the extension
+  watches the lock and the snapshot, so `MODULE.bazel.lock` follows on the next
+  Bazel command. No all-declarations target. A set `RULES_OCX_UPDATE` prints a
+  warning on every evaluation. Behaviour per `--lockfile_mode` →
+  `.agents/adr/adr_0003_package_locking.md`.
 - **`@ocx_tool`**: pinned ocx binary, downloaded per the vendored
   `dist/dist.json` (snapshot of https://setup.ocx.sh/dist.json, releases
   at or above the floor only; empty until the first release with `ocx vendor`),
@@ -96,11 +101,11 @@ package manager (https://ocx.sh, source at `../ocx`).
 ## ocx CLI contract
 
 - The only ocx argv rules_ocx builds is `ocx --format json vendor …` and
-  `ocx --format json package vendor …`, plus, only inside the generated update
-  program (`bazel run @<name>//:update`), the two forms of the `update`
-  targets: `ocx --project <scratch>/ocx.toml update --no-pull …` and
+  `ocx --format json package vendor …`, plus, only as the baked arguments of
+  the update targets (`bazel run @<name>//:update`), the two forms of the
+  `update` command: `ocx --project <toml> update --no-pull …` and
   `ocx --index <dir> index update <identifier>`
-  (`scripts/check_ocx_interface.py` admits them only in the template files, fails
+  (`scripts/check_ocx_interface.py` admits them only in `update_repo.bzl` and its test, fails
   on any other argv, and on any ocx-home path segment). Root flags precede the
   subcommand: `--format json --project <toml> --index … --blob-dir …`.
 - `manifest.json` (`schema_version` 2) is read by

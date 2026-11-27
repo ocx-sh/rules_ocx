@@ -25,7 +25,7 @@ load("//ocx/private:hub.bzl", "hub_platform_error", "ocx_hub_repo")
 load("//ocx/private:platforms.bzl", "host_info", "platform_constraints", "slug")
 load("//ocx/private:repo_utils.bzl", "POLICY_ATTRS", "policy_kwargs", "resolve_policy", "run_ocx")
 load("//ocx/private:set_repo.bzl", "ocx_set_repo", "vendor_args")
-load("//ocx/private:update_repo.bzl", "in_main_repo", "ocx_update_repo")
+load("//ocx/private:update_repo.bzl", "has_update_target", "ocx_update_repo")
 load("//ocx/private:vendor_manifest.bzl", "parse_manifest", "tag_name_error")
 load("//ocx/private:versions.bzl", "DEFAULT_OCX_VERSION", "MIN_OCX_VERSION")
 
@@ -453,34 +453,41 @@ def _ocx_impl(module_ctx):
                         **policy_kwargs(policy)
                     )
                     sets[platform] = "@{}//:toolchain_impl".format(repos[platform])
+                updatable = has_update_target(
+                    kind,
+                    tag.ocx_lock if tier == "project" else None,
+                    tag.ocx_toml if tier == "project" else None,
+                    tag.index if tier == "package" else None,
+                )
                 ocx_hub_repo(
                     name = tag.name,
                     sets = sets,
                     tools = sorted(names.keys()),
                     hub = tag.name,
+                    update = updatable,
                 )
 
-                declarations.append(json.encode({
-                    "allow_unverified": policy.allow_unverified,
-                    "allow_yanked": policy.allow_yanked,
-                    "bindings": list(tag.bindings) if tier == "project" else [],
-                    "groups": list(tag.groups) if tier == "project" else [],
-                    "identifier": tag.package if tier == "package" else "",
-                    "kind": kind,
-                    "main_repo": in_main_repo(tag.ocx_lock if tier == "project" else tag.index),
-                    "name": tag.name,
-                    "no_config": tag.no_config,
-                }))
-                for suffix, label in [
-                    ("lock", tag.ocx_lock if tier == "project" else None),
-                    ("index", tag.index if tier == "package" else None),
-                    ("config", tag.config),
-                    ("trusted_root", policy.sigstore_trusted_root),
-                ]:
-                    if label:
-                        update_files["{}:{}".format(tag.name, suffix)] = label
+                if updatable:
+                    declarations.append(json.encode({
+                        "allow_unverified": policy.allow_unverified,
+                        "allow_yanked": policy.allow_yanked,
+                        "bindings": list(tag.bindings) if tier == "project" else [],
+                        "groups": list(tag.groups) if tier == "project" else [],
+                        "identifier": tag.package if tier == "package" else "",
+                        "kind": kind,
+                        "name": tag.name,
+                        "no_config": tag.no_config,
+                    }))
+                    for suffix, label in [
+                        ("toml", tag.ocx_toml if tier == "project" else None),
+                        ("index", tag.index if tier == "package" else None),
+                        ("config", tag.config),
+                        ("trusted_root", policy.sigstore_trusted_root),
+                    ]:
+                        if label:
+                            update_files["{}:{}".format(tag.name, suffix)] = label
 
-    # Lazy: nothing of it runs until someone builds an `update` target.
+    # Lazy: a repository is generated only when an `update` target is built.
     ocx_update_repo(
         name = "ocx_update",
         declarations = declarations,

@@ -511,51 +511,18 @@ def ws_bytes(ws: Workspace) -> dict[str, str]:
     return {k: v for k, v in tree_bytes(ws.path).items() if k != ".ocx-calls.log" and not k.startswith("bazel-")}
 
 
-_BAZEL_PY = """\
-import os, sys
-args = sys.argv[1:]
-i = 0
-while i < len(args) and args[i].startswith("-"):
-    i += 1
-startup, cmd, rest = args[:i], args[i : i + 1], args[i + 1 :]
-if cmd == ["mod"] and {fail!r} is not None:
-    sys.exit({fail!r})
-extra = {extra!r} if cmd == ["mod"] else []
-os.execv({bazel!r}, [{bazel!r}, *{base!r}, *startup, *cmd, *rest, *extra])
-"""
+def update_client(ws: Workspace, name: str) -> Client:
+    """A client that runs the `update` targets, which are the `ocx` binary with a declaration's arguments baked in.
 
-
-def update_client(ws: Workspace, name: str, *, nested: Client | None = None, fail_mod: int | None = None,
-                  bazel: str | None = None) -> Client:  # fmt: skip
-    """A client that runs the `update` targets (ADR 0003 § The `update` targets).
-
-    The program reads `RULES_OCX_BAZEL`, adds no startup option of its own and inherits the client's environment, so
-    this sets: `RULES_OCX_BAZEL` to a wrapper that puts this harness's startup options (no rc file, the shared
-    output user root, the output base of `nested`, default: this client's) before the program's and this client's
-    repository flags after its `mod` command; and `OCX_INSECURE_REGISTRIES`, which ocx reads from the environment.
-    `fail_mod` makes the wrapper exit with that code for `mod`; `bazel` sets `RULES_OCX_BAZEL` to that value instead.
+    The target inherits the client's environment, and ocx reads `OCX_INSECURE_REGISTRIES` from it, so this sets it.
     """
     client = ws.client(name)
     client.extra_env["OCX_INSECURE_REGISTRIES"] = REGISTRY
-    if bazel is not None:
-        client.extra_env["RULES_OCX_BAZEL"] = bazel
-        return client
-    target = nested or client
-    extra = [f"--repository_cache={target.repo_cache}", f"--repo_env=OCX_INSTALL_BINARY={target.ws.ocx_binary}",
-             f"--repo_env=OCX_INSTALL_BINARY_SHA256={sha256(target.ws.ocx_binary)}",
-             f"--repo_env=OCX_INSECURE_REGISTRIES={REGISTRY}", "--repo_env=OCX_NO_CONFIG=1"]  # fmt: skip
-    real = shutil.which(BAZEL) or BAZEL
-    script = _BAZEL_PY.format(fail=fail_mod, extra=extra, bazel=real, base=target.startup()[1:])
-    (client.dir / "bazel.py").write_text(script, encoding="utf-8")
-    wrapper = client.dir / "bazel-wrapper"
-    wrapper.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{client.dir / "bazel.py"}" "$@"\n', encoding="utf-8")
-    wrapper.chmod(0o755)
-    client.extra_env["RULES_OCX_BAZEL"] = str(wrapper)
     return client
 
 
 def run_update(client: Client, target: str, *args: str, lockfile: str = "update", timeout: int = 600) -> Result:
-    """`bazel run <target> -- ARGS`; `target` is `@<hub>//:update` or `@rules_ocx//:update`."""
+    """`bazel run <target> -- ARGS`; `target` is `@<hub>//:update`; ARGS follow the arguments baked into the target."""
     tail = ["--", *args] if args else []
     return client.run("run", target, "--spawn_strategy=local", *tail, lockfile=lockfile, timeout=timeout)
 

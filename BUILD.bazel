@@ -2,9 +2,3 @@
 # Copyright 2026 The OCX Authors
 
 # buildifier runs from ocx.toml (`task buildifier:check` / `buildifier:fix`), not as a Bazel dev dependency.
-
-alias(
-    name = "update",
-    actual = "@ocx_update//:update",
-    visibility = ["//visibility:public"],
-)

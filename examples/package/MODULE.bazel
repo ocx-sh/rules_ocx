@@ -21,7 +21,8 @@ ocx.policy()
 
 # Tag: the first resolution records one platform manifest digest per platform
 # in MODULE.bazel.lock, and every later build vendors those digests. Run
-# `bazel run @jq//:update` to read the tag again.
+# `bazel mod deps --lockfile_mode=update --repo_env=RULES_OCX_UPDATE=jq` to read
+# the tag again.
 ocx.package(
     name = "jq",
     package = "ocx.sh/jqlang/jq:latest",

@@ -163,14 +163,15 @@ and manifest schema version 2, the manifest this ruleset reads.
 <pre>
 load("@rules_ocx//ocx:defs.bzl", "ocx_hub_repo")
 
-ocx_hub_repo(<a href="#ocx_hub_repo-name">name</a>, <a href="#ocx_hub_repo-hub">hub</a>, <a href="#ocx_hub_repo-sets">sets</a>, <a href="#ocx_hub_repo-tools">tools</a>)
+ocx_hub_repo(<a href="#ocx_hub_repo-name">name</a>, <a href="#ocx_hub_repo-hub">hub</a>, <a href="#ocx_hub_repo-sets">sets</a>, <a href="#ocx_hub_repo-tools">tools</a>, <a href="#ocx_hub_repo-update">update</a>)
 </pre>
 
 The hub of a vendored tool collection.
 
 Holds one toolchain per platform (each naming that platform's set repository
-only inside `toolchain()`), one `ocx_tool` per tool name, and `update`, an alias
-of the hub's update program in `@ocx_update`. Register it with
+only inside `toolchain()`), one `ocx_tool` per tool name, and, when `update` is
+set, `update`: an alias of the hub's pre-configured `ocx` target in
+`@ocx_update`. Register it with
 `register_toolchains("@<hub>//:all")`.
 
 **ATTRIBUTES**
@@ -182,6 +183,7 @@ of the hub's update program in `@ocx_update`. Register it with
 | <a id="ocx_hub_repo-hub"></a>hub |  The hub's own name; `update` aliases `@ocx_update//:hub_<hub>`.   | String | optional |  `""`  |
 | <a id="ocx_hub_repo-sets"></a>sets |  platform -> label of that platform's `ocx_set_toolchain`.   | <a href="https://bazel.build/rules/lib/dict">Dictionary: String -> String</a> | optional |  `{}`  |
 | <a id="ocx_hub_repo-tools"></a>tools |  Tool names.   | List of strings | optional |  `[]`  |
+| <a id="ocx_hub_repo-update"></a>update |  Whether `@ocx_update` has an update target for this hub; the hub then aliases it as `update`.   | Boolean | optional |  `False`  |
 
 
 <a id="ocx_set_repo"></a>

@@ -10,10 +10,7 @@ Witnesses: MODULE.bazel.lock, the harness's ocx call log, nginx's `/v2/` lines, 
 from __future__ import annotations
 
 import json
-import re
 import shutil
-import subprocess
-import time
 
 import pytest
 from conftest import (
@@ -236,7 +233,7 @@ def test_gone_platform_manifest_names_the_update(lockrig) -> None:
     lockrig.delete(index, leaf[P])
     res = ws.client("b").run("fetch", f"--repo=@{SET}", lockfile="error")
     assert res.rc != 0, res.out[-2000:]
-    hint = f"hint: the platform manifest MODULE.bazel.lock pins for '{H}' may be gone from the registry; run bazel run @{H}//:update"
+    hint = f"hint: the platform manifest MODULE.bazel.lock pins for '{H}' may be gone from the registry; run bazel mod deps --lockfile_mode=update --repo_env=RULES_OCX_UPDATE={H}"
     assert hint in res.out, res.out[-2000:]
 
 
@@ -299,26 +296,13 @@ def test_hub_tool_finds_its_record(lockrig) -> None:
     assert tool_report(a, H) == "tool v1"
 
 
-# ---- The `update` targets (ADR 0003 § The `update` targets, § Publishing, § Error texts).
+# ---- The `update` targets (ADR 0003 § The `update` targets): a pre-configured `ocx`, for a project or an index only.
 
 HB = "lb"
-E3 = "rules_ocx: @rules_ocx//:update takes declaration names only; pass ocx update arguments to @<name>//:update"
-E7 = "rules_ocx: bazel mod deps --lockfile_mode=update failed (exit {n}); no fact moved; the ocx.lock and snapshot files written above stay"
 
 
 def _pin_of(ws, hub: str, platform: str = P) -> str:
     return lock_facts(ws)[f"package|{hub}"]["pins"][platform]
-
-
-def _two_tags(lockrig):
-    """Two tag declarations over two repositories, both resolved once; returns (workspace, second repository)."""
-    repo_b = lockrig.repo + "-b"
-    lockrig.push("1.0", "a v1")
-    lockrig.push("1.0", "b v1", repo=repo_b)
-    decls = pkg_decl(H, lockrig.ident("1.0")) + pkg_decl(HB, lockrig.ident("1.0", repo_b))
-    ws = lockrig.workspace(decls, {H: [P], HB: [P]})
-    assert_ok(hub_query(ws.client("a"), H), "first resolution of both declarations")
-    return ws, repo_b
 
 
 def _project_toml(lockrig, repo: str | None = None) -> str:
@@ -330,144 +314,85 @@ def _project_decl(hub: str = "proj") -> str:
             f'platforms = ["{P}"])\n')  # fmt: skip
 
 
-def _project_ws(lockrig, *, name: str = ""):
+def _project_ws(lockrig, *, dir_name: str | None = None):
     """Only a project declaration, over this test's repository, resolved once."""
     lockrig.push("1.0", "tool v1")
-    ws = lockrig.workspace(_project_decl(), {"proj": [P]}, toml=_project_toml(lockrig), name=name)
+    ws = lockrig.workspace(_project_decl(), {"proj": [P]}, toml=_project_toml(lockrig), dir_name=dir_name)
     assert_ok(hub_query(ws.client("a"), "proj"), "first resolution of the project")
     return ws
 
 
-def _project_and_tag(lockrig, *, dir_name: str | None = None):
-    """A project over a second repository and a tag over the first, both resolved once; returns (workspace, project repository)."""
-    repo_b = lockrig.repo + "-b"
-    lockrig.push("1.0", "a v1")
-    leaf_b = lockrig.push("1.0", "b v1", repo=repo_b)
-    decls = _project_decl() + pkg_decl("tg", lockrig.ident("1.0"))
-    ws = lockrig.workspace(decls, {"proj": [P], "tg": [P]}, toml=_project_toml(lockrig, repo_b), dir_name=dir_name)
-    assert_ok(hub_query(ws.client("a"), "proj"), "first resolution of both declarations")
-    return ws, repo_b, leaf_b
-
-
 def _settle(client, target: str) -> None:
-    """Builds the update program once, so that `MODULE.bazel.lock` is what this client writes before a byte comparison."""
+    """Builds the update target once, so that `MODULE.bazel.lock` is what this client writes before a byte comparison."""
     assert_ok(client.run("build", target, "--spawn_strategy=local", lockfile="update"), f"build {target}")
 
 
-def test_hub_update_moves_only_that_declaration(lockrig) -> None:
-    ws, repo_b = _two_tags(lockrig)
-    old = {h: _pin_of(ws, h) for h in (H, HB)}
-    new_a = lockrig.push("1.0", "a v2")
-    new_b = lockrig.push("1.0", "b v2", repo=repo_b)
-    res = run_update(update_client(ws, "u"), f"@{H}//:update")
-    assert_ok(res, f"bazel run @{H}//:update")
-    assert _pin_of(ws, H) == new_a[P] != old[H]
-    assert _pin_of(ws, HB) == old[HB] != new_b[P], "the other declaration's fact must stay"
-    assert f"rules_ocx: {H} {P}: {old[H]} -> {new_a[P]}" in res.out, res.out[-2000:]
+def _project_fact(ws) -> dict:
+    return lock_facts(ws)["project|proj"]
 
 
-def test_update_writes_a_missing_fact_of_another_hub(lockrig) -> None:
-    ws, repo_b = _two_tags(lockrig)
-    drop_fact(ws, f"package|{HB}")
-    new_a = lockrig.push("1.0", "a v2")
-    new_b = lockrig.push("1.0", "b v2", repo=repo_b)
-    # `off` makes the outer run write nothing: every fact that reaches the lock comes from the nested call.
-    assert_ok(run_update(update_client(ws, "u"), f"@{H}//:update", lockfile="off"), f"bazel run @{H}//:update")
-    assert _pin_of(ws, H) == new_a[P]
-    assert _pin_of(ws, HB) == new_b[P], "a fact that misses is written by the nested call, whatever the switch names"
-
-
-def test_rules_ocx_update_all_and_named(lockrig) -> None:
-    ws, repo_b = _two_tags(lockrig)
-    u = update_client(ws, "u")
-    second = (lockrig.push("1.0", "a v2"), lockrig.push("1.0", "b v2", repo=repo_b))
-    assert_ok(run_update(u, "@rules_ocx//:update"), "update of every declaration")
-    assert (_pin_of(ws, H), _pin_of(ws, HB)) == (second[0][P], second[1][P])
-    third = (lockrig.push("1.0", "a v3"), lockrig.push("1.0", "b v3", repo=repo_b))
-    assert_ok(run_update(u, "@rules_ocx//:update", HB), f"update of {HB} only")
-    assert _pin_of(ws, HB) == third[1][P]
-    assert _pin_of(ws, H) == second[0][P] != third[0][P], "a declaration that is not named stays"
-
-
-def test_project_update_writes_only_ocx_lock(lockrig) -> None:
+def test_project_update_moves_the_lock_and_the_next_command_moves_the_fact(lockrig) -> None:
     ws = _project_ws(lockrig)
     u = update_client(ws, "u")
     _settle(u, "@proj//:update")
-    before, ocx_dirs = ws_bytes(ws), sorted(ws.path.rglob(".ocx"))  # `ocx lock` of the setup left its own
+    before, fact = ws_bytes(ws), _project_fact(ws)
     lockrig.push("1.0", "tool v2")
     assert_ok(run_update(u, "@proj//:update"), "bazel run @proj//:update")
     after = ws_bytes(ws)
     changed = {k for k in before.keys() | after.keys() if before.get(k) != after.get(k)}
-    assert changed == {"ocx.lock", "MODULE.bazel.lock"}, changed
-    assert after["ocx.toml"] == before["ocx.toml"]
-    assert sorted(ws.path.rglob(".ocx")) == ocx_dirs, "the render of `ocx update` belongs in the scratch copy"
+    assert changed == {"ocx.lock"}, changed  # the update runs no Bazel: MODULE.bazel.lock is still the old one
+    assert _project_fact(ws) == fact
+    assert_ok(hub_query(ws.client("next"), "proj"), "the next plain Bazel command")
+    assert _project_fact(ws) != fact, "the extension watches ocx.lock: its fact moves without RULES_OCX_UPDATE"
 
 
-def test_update_selection_errors(lockrig) -> None:
+def test_project_update_appends_user_arguments_after_the_baked_ones(lockrig) -> None:
+    ws = _project_ws(lockrig)
+    u = update_client(ws, "u")
+    _settle(u, "@proj//:update")
+    before, n = ws_bytes(ws), len(ws.ocx_calls())
+    for group in ("a b", "a)b", "x=1"):
+        res = run_update(u, "@proj//:update", "-g", group)
+        assert res.rc == 64 and f"unknown group '{group}'" in res.out, (group, res.rc, res.out[-1500:])
+    assert ws_bytes(ws) == before, "a refused update writes nothing"
+
+
+def test_project_update_in_a_workspace_path_with_a_space(lockrig) -> None:
+    ws = _project_ws(lockrig, dir_name="a workspace")
+    assert " " in str(ws.path)
+    old_lock = (ws.path / "ocx.lock").read_bytes()
+    lockrig.push("1.0", "tool v2")
+    assert_ok(run_update(update_client(ws, "u"), "@proj//:update"), "bazel run @proj//:update in a path with a space")
+    assert (ws.path / "ocx.lock").read_bytes() != old_lock
+
+
+def test_index_update_moves_the_snapshot_and_the_next_command_moves_the_fact(lockrig) -> None:
+    first = lockrig.push("1.0", "tool v1")
+    ws = lockrig.workspace(pkg_decl(H, lockrig.ident("1.0"), index='"//:index"'), {H: [P]}, index=True)
+    assert_ok(hub_query(ws.client("a"), H), "first resolution")
+    assert _pin(ws) == first[P]
+    u = update_client(ws, "u")
+    _settle(u, f"@{H}//:update")
+    snapshot = tree_bytes(ws.path / "index")
+    second = lockrig.push("1.0", "tool v2")
+    assert_ok(run_update(u, f"@{H}//:update"), f"bazel run @{H}//:update")
+    assert tree_bytes(ws.path / "index") != snapshot, "ocx refreshed the snapshot"
+    assert _pin(ws) == first[P], "the update runs no Bazel: the fact is still the old one"
+    assert_ok(hub_query(ws.client("next"), H), "the next plain Bazel command")
+    assert _pin(ws) == second[P] != first[P], "the extension watches the snapshot: its fact moves"
+
+
+def test_tag_and_pinned_declarations_have_no_update_target(lockrig) -> None:
     lockrig.push("1.0", "tool v1")
     pinned = f"{lockrig.ident('1.0')}@{lockrig.index_digest('1.0')}"
     ws = lockrig.workspace(pkg_decl(H, lockrig.ident("1.0")) + pkg_decl("lp", pinned), {H: [P], "lp": [P]})
     assert_ok(hub_query(ws.client("a"), H), "first resolution")
-    u = update_client(ws, "u")
-    _settle(u, "@rules_ocx//:update")
-    lock_before, n = ws_bytes(ws), len(ws.ocx_calls())
-    cases = [  # the order of the checks: E3, then E1; E2 for a package hub with arguments
-        ("@rules_ocx//:update", ["--frozen"], E3),
-        ("@rules_ocx//:update", ["nosuch", "--frozen"], E3),
-        ("@rules_ocx//:update", ["nosuch"], f"rules_ocx: no ocx declaration is named 'nosuch'; known: {H}, lp"),
-        (f"@{H}//:update", ["-g", "x"], f"rules_ocx: '{H}' is an ocx.package declaration; its update takes no arguments"),
-    ]
-    for target, args, text in cases:
-        res = run_update(u, target, *args)
-        assert res.rc == 64 and text in res.out, (target, args, res.rc, res.out[-1500:])
-    res = run_update(u, "@lp//:update")
-    assert_ok(res, "a pinned declaration is a notice")
-    assert "rules_ocx: lp: pinned by digest in MODULE.bazel; edit the identifier to move it" in res.out, res.out[-1500:]
-    assert ocx_work(ws, n) == [], "a refused selection makes no ocx call"
-    assert ws_bytes(ws) == lock_before
-    # E9 comes first: the program started by hand, outside `bazel run`, names no workspace.
-    script = u.external("ocx_update") / "update.sh"
-    proc = subprocess.run(["sh", str(script), "--frozen", "nosuch"], env={"PATH": "/usr/bin:/bin"}, capture_output=True,
-                          text=True, timeout=60)  # fmt: skip
-    assert proc.returncode == 64 and "rules_ocx: run this target with bazel run" in proc.stderr, proc.stderr
+    for hub in (H, "lp"):
+        res = ws.client(f"q-{hub}").run("query", f"@{hub}//:update", lockfile="update")
+        assert res.rc != 0 and "not declared in package" in res.out, (hub, res.rc, res.out[-1500:])
 
 
-def _symlink_ocx_lock(ws, to) -> bytes:
-    """Replaces the workspace `ocx.lock` by a symlink to `to`, which then holds its text; returns that text."""
-    text = (ws.path / "ocx.lock").read_bytes()
-    (ws.path / "ocx.lock").unlink()
-    to.parent.mkdir(parents=True, exist_ok=True)
-    to.write_bytes(text)
-    (ws.path / "ocx.lock").symlink_to(to)
-    return text
-
-
-def test_update_refusals(lockrig) -> None:
-    for case in ("e12", "e14", "e8"):
-        ws = _project_ws(lockrig, name=f"-{case}")
-        lock = ws.path / "ocx.lock"
-        if case == "e8":
-            u = update_client(ws, "u", bazel=str(ws.path.parent / "no-such-bazel"))
-            want, text = "rules_ocx: no bazel found; put bazel on PATH or set RULES_OCX_BAZEL", lock.read_bytes()
-        else:
-            u = update_client(ws, "u")
-            outside = case == "e12"
-            target = ws.path.parent / f"{ws.test_id}-outside" / "ocx.lock" if outside else ws.path / "real.lock"
-            want = ("resolves outside the workspace; refusing to write it" if outside
-                    else "is a symlink; replace it with the file it points to before updating")  # fmt: skip
-            text = _symlink_ocx_lock(ws, target)
-        lockrig.push("1.0", f"tool {case}")  # the lock has something to move
-        _settle(u, "@proj//:update")
-        before, n = ws_bytes(ws), len(ws.ocx_calls())
-        res = run_update(u, "@proj//:update")
-        assert res.rc == 78 and want in res.out, (case, res.rc, res.out[-1500:])
-        if case != "e8":
-            assert f"rules_ocx: proj: {ws.path}/ocx.lock " in res.out, res.out[-1500:]
-            assert lock.is_symlink() and target.read_bytes() == text, case
-        assert lock.read_bytes() == text and ocx_work(ws, n) == [] and ws_bytes(ws) == before, case
-
-
-def test_update_skips_a_dependency_snapshot(lockrig) -> None:
+def test_dependency_snapshot_has_no_update_target(lockrig) -> None:
     lockrig.push("1.0", "tool v1")
     test_id = lockrig.id + "-dep"
     ws_dir = RUN / "ws" / test_id
@@ -479,7 +404,7 @@ def test_update_skips_a_dependency_snapshot(lockrig) -> None:
         f'bazel_dep(name = "rules_ocx", version = "0.0.0")\nlocal_path_override(module_name = "rules_ocx", path = "{ROOT}")\n'
     )  # fmt: skip
     (ws_dir / "BUILD.bazel").write_text("")
-    shutil.copytree(RBE / "workspace" / "platforms", ws_dir / "platforms")  # the update run selects //platforms:exec_glibc
+    shutil.copytree(RBE / "workspace" / "platforms", ws_dir / "platforms")
     (ws_dir / ".bazelversion").write_text((ROOT / ".bazelversion").read_text())
     (ws_dir / "dep" / "MODULE.bazel").write_text(
         'module(name = "dep", version = "0.0.0")\nbazel_dep(name = "rules_ocx", version = "0.0.0")\n'
@@ -493,80 +418,8 @@ def test_update_skips_a_dependency_snapshot(lockrig) -> None:
     lockrig.workspaces.append(ws)
     assert_ok(hub_query(ws.client("a"), "dep_tool"), "first resolution")
     snapshot, n = tree_bytes(ws_dir / "dep" / "index"), len(ws.ocx_calls())
-    res = run_update(update_client(ws, "u"), "@rules_ocx//:update")
-    assert_ok(res, "bazel run @rules_ocx//:update")
-    e5 = "rules_ocx: dep_tool: its index snapshot is not in this workspace; update it in the module that holds it"
-    assert e5 in res.out, res.out[-1500:]
+    res = ws.client("q").run("query", "@@rules_ocx++ocx+dep_tool//:update", lockfile="update")
+    assert res.rc != 0 and "not declared in package" in res.out, res.out[-1500:]
     assert tree_bytes(ws_dir / "dep" / "index") == snapshot
     assert not (ws_dir / "index").exists(), "nothing is written into this workspace"
     assert ocx_work(ws, n) == []
-
-
-def test_update_continues_after_an_ocx_failure(lockrig) -> None:
-    ws, repo_b, leaf_b = _project_and_tag(lockrig)
-    new_a = lockrig.push("1.0", "a v2")
-    # The project's tool is gone from the registry: `ocx update` for it fails, the tag declaration still moves.
-    lockrig.delete(lockrig.index_digest("1.0", repo_b), leaf_b[P], repo=repo_b)
-    lock_before = (ws.path / "ocx.lock").read_bytes()
-    res = run_update(update_client(ws, "u"), "@rules_ocx//:update")
-    failed = re.search(r"rules_ocx: proj: ocx .* failed \(exit (\d+)\)", res.out)
-    assert failed, res.out[-2000:]
-    assert res.rc == int(failed[1]) != 0, "the exit code is the failing ocx run's"
-    assert _pin_of(ws, "tg") == new_a[P], "the loop went on: the tag's fact moved"
-    assert (ws.path / "ocx.lock").read_bytes() == lock_before
-
-
-def test_update_reports_a_failed_nested_call(lockrig) -> None:
-    lockrig.push("1.0", "tool v1")
-    ws = _tag_ws(lockrig)
-    assert_ok(hub_query(ws.client("a"), H), "first resolution")
-    first = _pin(ws)
-    lockrig.push("1.0", "tool v2")
-    res = run_update(update_client(ws, "u", fail_mod=2), f"@{H}//:update")
-    assert res.rc == 2 and E7.format(n=2) in res.out, (res.rc, res.out[-2000:])
-    assert _pin(ws) == first, "no fact moved"
-
-
-def test_update_refuses_a_locked_output_base(lockrig) -> None:
-    lockrig.push("1.0", "tool v1")
-    ws = _tag_ws(lockrig)
-    assert_ok(hub_query(ws.client("a"), H), "first resolution")
-    held = ws.path.parent / f"{ws.test_id}-held"
-    (ws.path / "BUILD.bazel").write_text(
-        (ws.path / "BUILD.bazel").read_text() + f'genrule(name = "hold", outs = ["hold.txt"], cmd = "touch {held}; sleep 900; touch $@")\n'
-    )  # fmt: skip
-    holder = ws.client("holder")
-    u = update_client(ws, "u", nested=holder)
-    _settle(u, f"@{H}//:update")
-    lockrig.push("1.0", "tool v2")
-    before, n = ws_bytes(ws), len(ws.ocx_calls())
-    # The startup option is the one the program passes, so the holder's server and the program's calls agree.
-    hold = holder.start("build", "//:hold", "--spawn_strategy=local", startup=("--noblock_for_lock",), lockfile="update")
-    try:
-        # The action's marker, not an `info` probe: a probe takes the lock itself and makes a starting holder exit 9.
-        deadline = time.monotonic() + 300
-        while not held.exists():
-            assert hold.poll() is None and time.monotonic() < deadline, "the holder never took the output-base lock"
-            time.sleep(0.5)
-        res = run_update(u, f"@{H}//:update", timeout=240)  # without --noblock_for_lock this waits for the lock
-    finally:
-        hold.terminate()
-        try:
-            hold.wait(timeout=60)
-        except subprocess.TimeoutExpired:
-            hold.kill()
-    e11 = "rules_ocx: the Bazel output base is locked (another command, or bazel --batch run); run the update again without --batch"
-    assert res.rc == 75 and e11 in res.out, (res.rc, res.out[-2000:])
-    assert ws_bytes(ws) == before and ocx_work(ws, n) == []
-
-
-def test_update_in_a_workspace_path_with_a_space(lockrig) -> None:
-    ws, repo_b, _ = _project_and_tag(lockrig, dir_name="a workspace")
-    assert " " in str(ws.path)
-    old_lock = (ws.path / "ocx.lock").read_bytes()
-    new_a = lockrig.push("1.0", "a v2")
-    lockrig.push("1.0", "b v2", repo=repo_b)
-    res = run_update(update_client(ws, "u"), "@rules_ocx//:update")
-    assert_ok(res, "bazel run @rules_ocx//:update in a path with a space")
-    assert _pin_of(ws, "tg") == new_a[P]
-    assert (ws.path / "ocx.lock").read_bytes() != old_lock

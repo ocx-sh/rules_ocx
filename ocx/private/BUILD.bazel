@@ -5,13 +5,6 @@ load("@bazel_skylib//:bzl_library.bzl", "bzl_library")
 
 package(default_visibility = ["//visibility:public"])
 
-# The `ocx_update` repository rule reads its program templates by label. Bazel 11 no longer exports a source file
-# implicitly, so say it.
-exports_files([
-    "update.bat.tpl",
-    "update.sh.tpl",
-])
-
 bzl_library(
     name = "private",
     srcs = glob(["*.bzl"]),

@@ -15,56 +15,52 @@ Each kind has one source of truth for its digests.
 | `project` | `ocx.project` | The `ocx.lock` of the tag | `ocx update` on the lock |
 | `pinned` | `ocx.package` whose identifier ends in `@sha256:<digest>` | The digest in the identifier | You edit the identifier |
 | `index` | `ocx.package` with `index` | The committed index snapshot | `ocx index update` on the snapshot |
-| `tag` | any other `ocx.package` | One platform manifest digest per platform, in `MODULE.bazel.lock` | The update target |
+| `tag` | any other `ocx.package` | One platform manifest digest per platform, in `MODULE.bazel.lock` | `bazel mod deps` with `RULES_OCX_UPDATE` |
 
 A moved tag changes nothing until you run an update.
 The registry may point `:latest` at a new image tomorrow, and a build with a stored digest still fetches the old one.
 
-## Update one declaration
+## Update a project or an index
 
-Run the `update` target of the hub.
+The `update` target of a `project` or `index` hub is `ocx` itself, configured for that declaration.
+`bazel run` starts the binary rules_ocx fetched, with the arguments and the environment of the tag already set.
 
 ```console
 $ bazel run @tools//:update
 ```
 
-For a `project` tag, the target copies `ocx.toml` and `ocx.lock` to a scratch directory, runs `ocx update --no-pull` there, and replaces your `ocx.lock` in one rename.
-Arguments after `--` replace the default arguments, which are `-g <group>` for each entry of `groups` and the tag's `bindings` as names.
+For a `project` tag this runs `ocx --project <workspace>/ocx.toml update --no-pull`, with `-g <group>` for each entry of `groups` and the tag's `bindings` as names.
+For an `index` tag it runs `ocx --index <snapshot> index update <identifier>`.
+Arguments after `--` follow the baked ones.
+They do not replace them, so a `-g` you pass adds to the groups of the tag.
 
 ```console
-$ bazel run @tools//:update -- -g lint
+$ bazel run @tools//:update -- --verbose
 ```
 
-For an `index` tag, it runs `ocx index update` on the snapshot.
-For a `tag` declaration it needs no `ocx` step.
-A `pinned` declaration prints a notice and nothing else, because the digest is in `MODULE.bazel`.
-An `ocx.package` hub takes no arguments.
+The target runs no Bazel.
+`MODULE.bazel.lock` follows on your next Bazel command, because the extension watches `ocx.lock` and the snapshot and records a new fact when they change.
+Run `bazel mod deps` right after if you want to commit the lock at once.
 
-The target then runs `bazel mod deps --lockfile_mode=update` once, so that `MODULE.bazel.lock` follows.
-It finds `bazel` on `PATH`, or in the variable `RULES_OCX_BAZEL`.
-Both choose the program the target runs inside your workspace, so they are trusted like `PATH`: an untrusted `PATH` entry or `RULES_OCX_BAZEL` value runs its program with your rights.
+The target exists only where `ocx` may write the file:
 
-## Know what the update needs from the network
+- A `project` tag needs `ocx_toml` and `ocx_lock` in your own repository, in one package, named `ocx.toml` and `ocx.lock`.
+- An `index` tag needs its snapshot in your own repository.
+- A lock or snapshot of a dependency belongs to the module that holds it. Update it there.
 
-An update moves a pin, so it asks the registry what a tag points to now.
+A tag without a target has no `update` label in its hub.
 
-- A `tag` declaration resolves again in the nested Bazel call, and rules_ocx passes `--remote` to `ocx` for it: ocx reads the tag from the registry, not from a local index.
-- A `project` update (`ocx update --no-pull`) and an `index` update (`ocx index update`) also read the registry to resolve tags. `--no-pull` only skips downloading the packages.
-- A `pinned` declaration needs no network, because its digest is in `MODULE.bazel`.
-- `OCX_OFFLINE=1` is forwarded to every `ocx` run of the update, and `ocx` then makes no network access. A tag it cannot answer from its local index exits 81 (blocked by policy). Run the update online.
+## Update a tag
 
-## Update every declaration
-
-`@rules_ocx//:update` covers all declarations of every module, or only the ones you name.
+A `tag` declaration has no target.
+Its fact moves when the extension resolves it again, which one Bazel command does:
 
 ```console
-$ bazel run @rules_ocx//:update
-$ bazel run @rules_ocx//:update -- tools jq
+$ bazel mod deps --lockfile_mode=update --repo_env=RULES_OCX_UPDATE=jq
 ```
 
-The names are hub names.
-This target accepts no `ocx update` arguments: pass those to the hub's own target.
-It skips a lock or snapshot that lies outside your workspace, because that file belongs to the module that holds it.
+The value is a comma-separated list of hub names.
+A `pinned` declaration has no update at all: its digest is in `MODULE.bazel`, so you edit the identifier.
 
 ## Read the result
 
@@ -80,9 +76,8 @@ A `project` declaration whose lock changed prints `rules_ocx: <name>: tools reco
 `git diff MODULE.bazel.lock` shows the same move under one key per declaration.
 Commit the lock together with `ocx.lock` and the index snapshot.
 
-The update target passes `RULES_OCX_UPDATE=<names>` to its one nested Bazel call.
-While that variable is set, the named `tag` declarations resolve again on every evaluation, and rules_ocx prints a warning each time.
-Do not export it in your shell or rc files.
+While `RULES_OCX_UPDATE` is set, the named `tag` declarations resolve again on every evaluation, and rules_ocx prints a warning each time.
+Pass it with `--repo_env` on the one command, and do not export it in your shell or rc files.
 
 ## Choose a lockfile mode
 
@@ -109,12 +104,8 @@ MODULE.bazel.lock merge=bazel-lockfile-merge
 
 ## Fix an update that fails
 
-- An `ocx` failure on one declaration is reported and the others go on. The files already written stay.
-- When the nested `bazel mod deps` fails, no fact moved. Fix the cause and run `bazel mod deps --lockfile_mode=update`.
-- A held output base (another Bazel command, or a `bazel --batch` run) exits 75. Run the update again without `--batch`.
-- A workspace `ocx.lock` that is a symlink, or a path that leaves the workspace, is refused. The error names the path.
-- On Windows the update cannot see where a link leads. It refuses a symlink or junction anywhere on the path of the write target below the workspace root, even one that points back into the workspace, and names the link. Links above the workspace root are not checked.
-- On Windows `@rules_ocx//:update` accepts names made of letters, digits and `. _ : / @ + -`; a tab, `,`, `;` or `=` cannot be passed through `cmd.exe` and exits 64.
-- A preflight `bazel info output_base` that fails for another reason exits with Bazel's exit code. Nothing is written.
-- A failed replace of `ocx.lock` exits 74 after the other declarations ran. The error names the path.
-- A truncated plan, or on Windows an argument line that cannot be read, exits 70. Both are internal errors of the generated update program.
+- The target exits with the exit code of `ocx`, and the `ocx` message names the cause.
+- `ocx` writes the lock by one atomic rename. A failed update leaves the old `ocx.lock` as it was.
+- `ocx update` may create `.ocx/` beside your `ocx.toml` and, for an index, a `config.json` in the snapshot. Both are `ocx` files, not Bazel ones.
+- The target uses your `OCX_HOME`, the `ocx` configuration of your machine and its credentials. It does not use a scratch home.
+- `no_config`, `config` and the `ocx.policy` settings of the module apply to the update as they do to the build.
