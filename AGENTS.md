@@ -11,11 +11,15 @@ package manager (https://ocx.sh, source at `../ocx`).
   and one set repository per entry of its `platforms` (`<name>_<slug>`).
 - **Vendor, not launch.** A set repository runs
   `ocx vendor -o <repo>/.vendor_out -p <platform> --omit-links [-g …] [names…]`
-  (`ocx package vendor` for the package tier), moves the three top-level
-  entries (`manifest.json`, `packages/`, `selections/`) into the repository and
-  generates one `BUILD.bazel` from `manifest.json`. Tools run through the
-  native `.direct` launcher ocx writes: no ocx, no `OCX_HOME`, no network at
-  action time, so the tree runs under remote execution. Reserved names
+  (`ocx package vendor` for the package tier), moves every top-level entry
+  (`manifest.json`, `l/`, `p/<HEX16>/{c,e}`) into the repository and
+  generates one `BUILD.bazel` from `manifest.json`. Launcher and record paths
+  come from the manifest; rules_ocx derives no file name. Tools run through
+  the native launcher and its `.launch` record that ocx writes: no ocx, no
+  `OCX_HOME`, no network at action time, so the tree runs under remote
+  execution. The launcher finds its root through the runfiles tree, then the
+  runfiles manifest, so a Windows build needs no `--enable_runfiles`; this
+  repository's root `.bazelrc` keeps it for its own `sh_test`s. Reserved names
   (`BUILD`, `WORKSPACE`, …, matched case-insensitively) inside a package are
   moved to `_ocx_reserved/<n>` and declared back at their path.
 - **Facts.** What the hub needs before any set is fetched (tool names and
@@ -25,11 +29,22 @@ package manager (https://ocx.sh, source at `../ocx`).
   `ocx vendor --manifest-only` once per platform. Every set repository
   cross-checks its real manifest against the fact (platform, tools, available
   platforms) and fails naming `bazel mod deps --lockfile_mode=update`.
+- **Update targets.** Each tag has a kind: `project`, `pinned` (digest in the
+  identifier), `index` or `tag`. A `tag` fact holds one platform manifest digest
+  per platform, so a moved tag changes nothing until
+  `bazel run @<hub>//:update` or `bazel run @rules_ocx//:update [-- names]`. The
+  `ocx_update` repository (a reserved name, as is a tool named `update`) writes
+  `plan.txt` and one program; the program runs `ocx update --no-pull` or
+  `ocx index update` on scratch copies, then `bazel mod deps
+  --lockfile_mode=update --repo_env=RULES_OCX_UPDATE=<names>`. Each declaration
+  and platform prints `sha256:<old> -> sha256:<new>` or `unchanged`; a set
+  `RULES_OCX_UPDATE` prints a warning on every evaluation. Behaviour per
+  `--lockfile_mode` → `.agents/adr/adr_0003_package_locking.md`.
 - **`@ocx_tool`**: pinned ocx binary, downloaded per the vendored
   `dist/dist.json` (snapshot of https://setup.ocx.sh/dist.json, releases
   at or above the floor only; empty until the first release with `ocx vendor`),
   sha256-enforced. `MIN_OCX_VERSION` is the floor, the first ocx release
-  whose `ocx vendor` writes manifest schema version 1; below it
+  whose `ocx vendor` writes manifest schema version 2; below it
   `ocx.download(version = …)` fails before any download. Mirror knobs (site
   settings, env-only): `OCX_INSTALL_DIST_URL` (manifest),
   `OCX_INSTALL_MIRROR_URL` (artifact host, `<mirror>/<tag>/<filename>`). An
@@ -81,10 +96,14 @@ package manager (https://ocx.sh, source at `../ocx`).
 ## ocx CLI contract
 
 - The only ocx argv rules_ocx builds is `ocx --format json vendor …` and
-  `ocx --format json package vendor …` (`scripts/check_ocx_interface.py` fails
-  on any other, and on any ocx-home path segment). Root flags precede the
+  `ocx --format json package vendor …`, plus, only inside the generated update
+  program (`bazel run @<name>//:update`), the two forms of the `update`
+  targets: `ocx --project <scratch>/ocx.toml update --no-pull …` and
+  `ocx --index <dir> index update <identifier>`
+  (`scripts/check_ocx_interface.py` admits them only in the template files, fails
+  on any other argv, and on any ocx-home path segment). Root flags precede the
   subcommand: `--format json --project <toml> --index … --blob-dir …`.
-- `manifest.json` (`schema_version` 1) is read by
+- `manifest.json` (`schema_version` 2) is read by
   `ocx/private/vendor_manifest.bzl`, which treats it as untrusted: every path
   is label-safe, stays under its `content_dir`, link targets are relative and
   are resolved through the declared links so a chain cannot climb out of the

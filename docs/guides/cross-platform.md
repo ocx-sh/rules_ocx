@@ -86,5 +86,4 @@ Each one fetches only its own set repository.
 
 - A Windows set cannot carry symlinks, because Bazel declares none there. A Windows set whose package lists a link fails and names the package.
 - On macOS, the arm64 launcher carries a valid ad-hoc signature, which Apple silicon requires to start native code. Do not patch or strip a launcher: a changed byte invalidates the signature, which `codesign --verify` reports.
-- On Windows, build with `--enable_runfiles`. The launcher looks for its files in the runfiles tree and exits 78 without it.
 - On Windows, long paths can stop a tool from starting. See [Windows: path length](windows-path-length.md).

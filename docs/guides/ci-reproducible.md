@@ -27,8 +27,9 @@ Each `ocx` run uses a scratch `OCX_HOME` and stores no shell-activation consent 
 
 ## Freeze ad-hoc packages
 
-A floating tag such as `:latest` resolves at fetch time, and the extension then records no fact.
-Pick one of two ways to freeze an `ocx.package`.
+A floating tag such as `:latest` resolves once, and the extension stores the platform manifest digests as a fact in `MODULE.bazel.lock`.
+The tag then moves only when you [run an update](update-locks.md).
+Pick one of two ways to freeze an `ocx.package` independently of that file.
 
 Commit an index snapshot, and the tag resolves from it until you refresh it.
 

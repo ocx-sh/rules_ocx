@@ -53,8 +53,7 @@ register_toolchains("@tools//:all")
 
 Pin Bazel 9 by writing `9.2.0` into `.bazelversion`.
 
-On Windows, put `common:windows --enable_runfiles` in a `.bazelrc`.
-The tools look for their files in the runfiles tree, and without it they exit 78.
+On Windows, the tools find their files through the runfiles manifest, so no extra flag is needed.
 If a tool fails to start on a long path, see [Windows: path length](guides/windows-path-length.md).
 
 ## Write the test

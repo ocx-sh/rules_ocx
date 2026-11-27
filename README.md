@@ -14,11 +14,11 @@ the `manifest.json` that `ocx vendor` writes. The durable contracts are the
 ## Requirements
 
 - Bazel 9. The module declares `bazel_compatibility = [">=9.0.0"]`.
-- An `ocx` release that has `ocx vendor` and writes manifest schema version 1.
+- An `ocx` release that has `ocx vendor` and writes manifest schema version 2.
   rules_ocx downloads a pinned `ocx` itself and runs `ocx vendor` for every set.
-- On Windows, `--enable_runfiles`. The launcher looks for its files in the
-  runfiles tree and exits 78 without it. Long paths also matter there: see
-  [Windows: path length](docs/guides/windows-path-length.md).
+- On Windows, long paths matter: see
+  [Windows: path length](docs/guides/windows-path-length.md). A build needs no
+  `--enable_runfiles`, because the launcher also reads the runfiles manifest.
 - `platforms` on every `ocx.project` and `ocx.package` tag.
 
 ## Quick start
@@ -245,8 +245,11 @@ Guide: <https://ocx.sh/integrations/bazel/guides/ci-reproducible/>.
   - A digest in the identifier (`ocx.sh/jqlang/jq:latest@sha256:...`) pins the
     package. The extension records a fact for it, and the repositories it
     produces are reproducible.
-  - Neither: a floating tag resolves at fetch time, the extension records no
-    fact and it is not reproducible.
+  - Neither: a floating tag resolves once, and the extension records the
+    platform manifest digests in `MODULE.bazel.lock`. A moved tag changes
+    nothing until `bazel run @<hub>//:update` (one hub) or
+    `bazel run @rules_ocx//:update` (all). See
+    [Update locked tools](docs/guides/update-locks.md).
 - Commit `MODULE.bazel.lock`, so that a fresh checkout reads the facts and runs
   no `ocx` before a set is fetched.
 

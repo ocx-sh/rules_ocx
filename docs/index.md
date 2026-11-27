@@ -38,6 +38,7 @@ rules_ocx needs Bazel 9 and a recent `ocx`; see the [requirements](https://githu
 
 - [Share one toolchain between Bazel and developers](guides/pin-toolchain.md): one `ocx.toml` and `ocx.lock` for both
 - [Fail CI on a stale lock](guides/ci-reproducible.md): freeze ad-hoc packages
+- [Update locked tools](guides/update-locks.md): move the pins with `bazel run @hub//:update`
 - [Build behind a corporate mirror](guides/offline-mirror.md): mirrors, proxy CAs and offline fetches
 - [Use tools for several platforms](guides/cross-platform.md): one hub, one set per platform
 - [Windows: path length](guides/windows-path-length.md): keep paths short enough for tools to start

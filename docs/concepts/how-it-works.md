@@ -22,15 +22,20 @@ A missing capability becomes an issue against [ocx-sh/ocx](https://github.com/oc
 
 ## A vendored set
 
-A set is a directory of real files.
-Package content, the launchers and their `.direct` sidecars are file labels or directory labels of the set repository.
+A set is a directory of real files in a short layout.
+Launchers and their `.launch` records sit in `l/`.
+Each package sits in `p/<HEX16>/`, with its content in `c/` and its entry points in `e/`.
+`<HEX16>` is a key of 16 hex digits that `ocx` derives from the package digest.
+The rules read each launcher and record path from `manifest.json` and derive no file name.
+
+Package content, the launchers and their records are file labels or directory labels of the set repository.
 Links that a package declares become symlinks that the `ocx_set` rule declares.
 The set repository generates its `BUILD.bazel` from `manifest.json` alone and reads no store layout.
 
 Each launcher is a small native program, not a script.
 It applies the package environment and starts the binary.
 It needs no shell, no `ocx` and no network, so it runs on a remote executor that has none of them.
-It looks for its files beside itself, then in the runfiles tree of the action.
+It finds its record beside itself, and its root through the runfiles tree of the action, then through the runfiles manifest.
 
 Bazel declares no symlinks on Windows, so a Windows set whose manifest lists a link fails and names the package.
 Empty directories of a package are not visible to actions on a remote executor.

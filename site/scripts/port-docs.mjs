@@ -16,6 +16,7 @@ const PAGES = [
   hand('tutorial.md', 'Run shellcheck in a Bazel test without installing it', 'Add rules_ocx to a workspace and run a pinned shellcheck in an sh_test.'),
   hand('guides/pin-toolchain.md', 'Share one toolchain between Bazel and developers', 'Use one ocx.toml and ocx.lock for Bazel targets and the developer shell.'),
   hand('guides/ci-reproducible.md', 'Fail CI on a stale lock', 'Make a stale pin fail the build and freeze ad-hoc packages.'),
+  hand('guides/update-locks.md', 'Update locked tools', 'Move the pins of project, pinned, index and tag declarations with the update targets.'),
   hand('guides/offline-mirror.md', 'Build behind a corporate mirror', 'Point rules_ocx at an internal mirror, proxy CA and registry credentials.'),
   hand('guides/cross-platform.md', 'Use tools for several platforms', 'Vendor one package for several platforms and run the right one on each machine.'),
   hand('guides/windows-path-length.md', 'Windows: path length', 'Keep Bazel paths short enough for tools to start on Windows, and know the limits that remain.'),

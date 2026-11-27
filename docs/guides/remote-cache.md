@@ -19,10 +19,7 @@ Remote execution is supported.
 
 - Bazel 9. The module declares `bazel_compatibility = [">=9.0.0"]` and needs Bazel 9 or newer.
 - A supported `ocx`, because the extension and every set repository run it: see [what ocx is for](../concepts/design.md#what-ocx-is-for).
-- On Windows, `--enable_runfiles`. The launcher looks in the runfiles tree, and without it the launcher exits 78.
 - `platforms` on every tag, naming each platform an executor may have.
-
-Put the line `common:windows --enable_runfiles` in the `.bazelrc` of the workspace.
 
 ## Keep action keys stable
 
@@ -49,7 +46,8 @@ ocx.project(
 
 Pin the packages.
 A project tag is pinned by its lock.
-An `ocx.package` is pinned by a digest in its identifier, and a floating tag makes the extension not reproducible.
+An `ocx.package` is pinned by a digest in its identifier or by an index snapshot.
+A floating tag is pinned by the digests in `MODULE.bazel.lock` until you [update it](update-locks.md).
 
 ## Share the repository contents cache with trusted lanes only
 
