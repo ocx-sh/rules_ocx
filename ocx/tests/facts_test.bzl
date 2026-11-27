@@ -4,63 +4,58 @@
 """Unit tests for ocx/private/facts.bzl."""
 
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
-load("//ocx/private:facts.bzl", "declaration_kind", "fact_cacheable", "fact_decode", "fact_decode_v2", "fact_hit", "fact_key", "fact_value", "fact_value_v2", "index_inputs", "manifest_env", "same_index_check")
+load("//ocx/private:facts.bzl", "declaration_kind", "fact_decode_v2", "fact_hit", "fact_key", "fact_value_v2", "index_inputs", "index_paths", "manifest_env", "pinned_identifier", "resolve_args", "result_lines", "root_digest", "same_index_check", "update_names", "w1_line")
 
 def _tag(**kwargs):
-    base = dict(kind = "project", name = "tools", lock = "abc", identifier = "", groups = [], bindings = [], platforms = [])
+    base = dict(kind = "project", name = "tools", lock = "abc", identifier = "", index = "", groups = [], bindings = [], platforms = [], snapshot_files = None)
     base.update(kwargs)
     return struct(**base)
 
 _TOOLS = {"linux/amd64": [["cmake", "binary"]]}
 _PLATFORMS = ["linux/amd64"]
 
+def _value(tag, **kwargs):
+    # A v2 value of the tag's own kind; a project value holds no pins.
+    args = dict(kind = tag.kind, available_platforms = _PLATFORMS, tools = _TOOLS, pins = {} if tag.kind == "project" else {p: "sha256:" + "1" * 64 for p in tag.platforms})
+    args.update(kwargs)
+    return fact_value_v2(tag, **args)
+
 def _key_test_impl(ctx):
     env = unittest.begin(ctx)
-    asserts.true(env, fact_key(_tag()) != fact_key(_tag(kind = "package", identifier = "ocx.sh/x:1")))
+    asserts.true(env, fact_key(_tag()) != fact_key(_tag(kind = "tag", identifier = "ocx.sh/x:1")))
     asserts.true(env, fact_key(_tag()) != fact_key(_tag(name = "other")))
     asserts.equals(env, fact_key(_tag()), fact_key(_tag()))
-    asserts.equals(env, "project|tools|{}:3".format(hash("abc")), fact_key(_tag()))
-    asserts.equals(env, "package|tools|ocx.sh/x:1@sha256:aa", fact_key(_tag(kind = "package", identifier = "ocx.sh/x:1@sha256:aa")))
-    asserts.true(env, fact_key(_tag(lock = "abc")) != fact_key(_tag(lock = "abd")), "a lock edit moves the key")
+    asserts.equals(env, "project|tools", fact_key(_tag()))
+    asserts.equals(env, "package|tools", fact_key(_tag(kind = "tag", identifier = "ocx.sh/x:1@sha256:aa")))
+    asserts.equals(env, fact_key(_tag(lock = "abc")), fact_key(_tag(lock = "abd")), "a lock edit stays on the same key and misses on the value")
     return unittest.end(env)
 
 def _hit_test_impl(ctx):
     env = unittest.begin(ctx)
-    stored = fact_value(_tag(), _PLATFORMS, _TOOLS)
+    stored = _value(_tag())
     asserts.true(env, fact_hit(_tag(), stored))
     asserts.false(env, fact_hit(_tag(), None))
     return unittest.end(env)
 
 def _miss_test_impl(ctx):
     env = unittest.begin(ctx)
-    stored = fact_value(_tag(), _PLATFORMS, _TOOLS)
+    stored = _value(_tag())
     for change in [
         {"lock": "def"},
         {"groups": ["g"]},
         {"bindings": ["cmake"]},
         {"platforms": ["linux/amd64"]},
         {"name": "other"},
-        {"kind": "package"},
+        {"kind": "tag"},
         {"identifier": "ocx.sh/x:1"},
     ]:
         asserts.false(env, fact_hit(_tag(**change), stored), "a changed {} must miss".format(change.keys()))
     return unittest.end(env)
 
-def _cacheable_test_impl(ctx):
-    env = unittest.begin(ctx)
-    asserts.true(env, fact_cacheable(_tag()), "a project tag is always pinned by its lock")
-    digest = "a" * 64
-    asserts.true(env, fact_cacheable(_tag(kind = "package", identifier = "ocx.sh/x:1@sha256:" + digest)))
-    asserts.true(env, fact_cacheable(_tag(kind = "package", identifier = "ocx.sh/x@sha256:" + digest)))
-    for bad in ["@sha256:aa", "@sha256:" + "A" * 64, "@sha256:" + digest + "0", "@sha256:" + "g" * 64, "@sha256:"]:
-        asserts.false(env, fact_cacheable(_tag(kind = "package", identifier = "ocx.sh/x:1" + bad)), "'{}' is no digest".format(bad))
-    asserts.false(env, fact_cacheable(_tag(kind = "package", identifier = "ocx.sh/x:1")), "a floating tag gets no fact")
-    return unittest.end(env)
-
 def _populated_test_impl(ctx):
     env = unittest.begin(ctx)
     tag = _tag(groups = ["a", "b"], bindings = ["cmake", "ninja"], platforms = ["linux/amd64", "darwin/arm64"])
-    stored = fact_value(tag, _PLATFORMS, _TOOLS)
+    stored = _value(tag)
     asserts.true(env, fact_hit(tag, stored), "control: the same populated tag hits")
     for change in [
         {"groups": ["b", "a"]},
@@ -74,9 +69,9 @@ def _populated_test_impl(ctx):
 
 def _stored_shape_test_impl(ctx):
     env = unittest.begin(ctx)
-    good = json.decode(fact_value(_tag(), _PLATFORMS, _TOOLS))
+    good = json.decode(_value(_tag()))
     asserts.true(env, fact_hit(_tag(), json.encode(good)), "control: an intact value hits")
-    for field in ["available_platforms", "tools", "platforms", "lock"]:
+    for field in ["available_platforms", "tools", "platforms", "lock", "pins", "kind"]:
         broken = {k: v for k, v in good.items() if k != field}
         asserts.false(env, fact_hit(_tag(), json.encode(broken)), "a value without `{}` must miss".format(field))
     return unittest.end(env)
@@ -101,28 +96,36 @@ def _manifest_env_test_impl(ctx):
 
 def _decode_test_impl(ctx):
     env = unittest.begin(ctx)
-    decoded = fact_decode(fact_value(_tag(), _PLATFORMS, _TOOLS))
-    asserts.equals(env, "", decoded.error)
-    asserts.equals(env, _PLATFORMS, decoded.available_platforms)
-    asserts.equals(env, _TOOLS, decoded.tools)
-    asserts.true(env, fact_decode("not json").error != "")
-    asserts.true(env, fact_decode("[1]").error != "", "not an object")
-    asserts.true(env, fact_decode("{\"v\": 2}").error != "", "an unknown version")
-    asserts.true(env, fact_decode("{\"v\": 1}").error != "", "a missing field")
-    asserts.false(env, fact_hit(_tag(), "{\"v\": 2}"), "an unknown version is a miss")
+    decoded = fact_decode_v2(_value(_tag()))
+    asserts.equals(env, _PLATFORMS, decoded["available_platforms"])
+    asserts.equals(env, _TOOLS, decoded["tools"])
+    asserts.equals(env, None, fact_decode_v2("not json"))
+    asserts.equals(env, None, fact_decode_v2("[1]"), "not an object")
+    asserts.equals(env, None, fact_decode_v2(None), "not a string")
+    asserts.equals(env, None, fact_decode_v2("{\"v\": 3}"), "an unknown version")
+    asserts.equals(env, None, fact_decode_v2("{\"v\": 2}"), "a missing field")
+    asserts.false(env, fact_hit(_tag(), "{\"v\": 3}"), "an unknown version is a miss")
     asserts.false(env, fact_hit(_tag(), "garbage"), "an unreadable value is a miss")
+    return unittest.end(env)
+
+def _update_names_test_impl(ctx):
+    env = unittest.begin(ctx)
+    asserts.equals(env, [], update_names(None))
+    asserts.equals(env, [], update_names(""))
+    asserts.equals(env, ["jq"], update_names("jq"))
+    asserts.equals(env, ["jq", "cmake"], update_names(" jq, cmake ,,"))
     return unittest.end(env)
 
 key_test = unittest.make(_key_test_impl)
 hit_test = unittest.make(_hit_test_impl)
 miss_test = unittest.make(_miss_test_impl)
-cacheable_test = unittest.make(_cacheable_test_impl)
 populated_test = unittest.make(_populated_test_impl)
 stored_shape_test = unittest.make(_stored_shape_test_impl)
 manifest_env_test = unittest.make(_manifest_env_test_impl)
 decode_test = unittest.make(_decode_test_impl)
+update_names_test = unittest.make(_update_names_test_impl)
 
-# ---- Run 2 contract (C-RO-18, C-RO-19): declaration kinds and v2 facts. Red until the facts pipeline lands. ----
+# ---- Run 2 contract (C-RO-18, C-RO-19): declaration kinds and v2 facts. ----
 
 _D1 = "sha256:" + "1" * 64
 _D2 = "sha256:" + "2" * 64
@@ -310,10 +313,119 @@ index_inputs_test = unittest.make(_index_inputs_test_impl)
 snapshot_paths_test = unittest.make(_snapshot_paths_test_impl)
 same_index_test = unittest.make(_same_index_test_impl)
 
+def _resolve_args_test_impl(ctx):
+    env = unittest.begin(ctx)
+    base = ["--format", "json", "package", "vendor", "-o", "/o", "-p", "linux/amd64", "--omit-links", "ghcr.io/acme/jq:1.8"]
+    tag = resolve_args("tag", base)
+    asserts.equals(env, ["--format", "json", "--remote", "package", "vendor", "-o", "/o", "-p", "linux/amd64", "--omit-links", "ghcr.io/acme/jq:1.8", "--manifest-only"], tag, "tag: --remote after --format json, then --manifest-only")
+    asserts.false(env, "--frozen" in tag, "tag is never frozen")
+    for kind in ["pinned", "project"]:
+        got = resolve_args(kind, base)
+        asserts.equals(env, base + ["--manifest-only"], got, kind)
+    frozen = ["--format", "json", "--index", "/snap", "--frozen", "package", "vendor", "-o", "/o"]
+    got = resolve_args("index", frozen)
+    asserts.equals(env, frozen + ["--manifest-only"], got, "index keeps what vendor_args gave")
+    asserts.false(env, "--remote" in got)
+    return unittest.end(env)
+
+def _manifest_of(selections):
+    return struct(selections = selections)
+
+def _root_digest_test_impl(ctx):
+    env = unittest.begin(ctx)
+    ok = root_digest("jq", _manifest_of([struct(roots = [_D1])]))
+    asserts.equals(env, struct(digest = _D1, error = ""), ok)
+
+    # n counts the selections, or the roots of the one selection there is.
+    for bad, n in [([], 0), ([struct(roots = [])], 0), ([struct(roots = [_D1, _D2])], 2), ([struct(roots = [_D1]), struct(roots = [_D2])], 2)]:
+        got = root_digest("jq", _manifest_of(bad))
+        asserts.equals(env, "", got.digest)
+        asserts.equals(env, "rules_ocx: 'jq': ocx package vendor reported {} selections or roots; a package needs exactly one".format(n), got.error, "X2")
+    return unittest.end(env)
+
+def _pinned_identifier_test_impl(ctx):
+    env = unittest.begin(ctx)
+    a = "sha256:" + "a" * 64
+    for identifier, want in [
+        ("ghcr.io/acme/jq:1.8", "ghcr.io/acme/jq@" + _D1),
+        ("ghcr.io/acme/jq:1.8@" + a, "ghcr.io/acme/jq@" + _D1),
+        ("ghcr.io/acme/jq@" + a, "ghcr.io/acme/jq@" + _D1),
+        ("ghcr.io/acme/jq", "ghcr.io/acme/jq@" + _D1),
+        ("localhost:5000/rig/tool:1.0.0", "localhost:5000/rig/tool@" + _D1),
+        ("localhost:5000/tool", "localhost:5000/tool@" + _D1),
+    ]:
+        asserts.equals(env, want, pinned_identifier(identifier, _D1), identifier)
+    return unittest.end(env)
+
+def _index_paths_test_impl(ctx):
+    env = unittest.begin(ctx)
+    one = struct(index_lookups = [struct(path = "b/x.json"), struct(path = "a/y.json")])
+    two = struct(index_lookups = [struct(path = "a/y.json"), struct(path = "c/z.json")])
+    none = struct(index_lookups = None)
+    asserts.equals(env, ["a/y.json", "b/x.json", "c/z.json"], index_paths([one, two]), "sorted unique union")
+    asserts.equals(env, ["a/y.json", "b/x.json"], index_paths([one, none]), "None lookups contribute nothing")
+    asserts.equals(env, [], index_paths([none]))
+    return unittest.end(env)
+
+resolve_args_test = unittest.make(_resolve_args_test_impl)
+root_digest_test = unittest.make(_root_digest_test_impl)
+pinned_identifier_test = unittest.make(_pinned_identifier_test_impl)
+index_paths_test = unittest.make(_index_paths_test_impl)
+
+def _result_lines_test_impl(ctx):
+    env = unittest.begin(ctx)
+    p0, p1 = _PLATS
+    d3 = "sha256:" + "3" * 64
+    old = _value2()
+
+    # A first resolve prints nothing, with or without the switch.
+    asserts.equals(env, [], result_lines("jq", "tag", None, old, []))
+    asserts.equals(env, [], result_lines("jq", "tag", None, old, ["jq"]))
+
+    # A replaced v1 fact.
+    v1 = json.encode({"v": 1, "kind": "tag", "name": "jq"})
+    asserts.equals(env, ["rules_ocx: jq: resolved again (the stored fact was from an older rules_ocx)"], result_lines("jq", "tag", v1, old, []))
+
+    # One line per platform whose pin moved; a platform with no old pin is skipped.
+    for kind in ["tag", "pinned", "index"]:
+        files = [["a.json", 1, 2]] if kind == "index" else None
+        tag = _tag2(kind = kind, snapshot_files = files)
+        stored = _value2(tag)
+        moved = _value2(tag, pins = {p0: _D1, p1: d3})
+        asserts.equals(env, ["rules_ocx: jq {}: {} -> {}".format(p1, _D2, d3)], result_lines("jq", kind, stored, moved, []), kind)
+        both = _value2(tag, pins = {p0: _D2, p1: d3})
+        asserts.equals(env, ["rules_ocx: jq {}: {} -> {}".format(p0, _D1, _D2), "rules_ocx: jq {}: {} -> {}".format(p1, _D2, d3)], result_lines("jq", kind, stored, both, []), kind)
+        one = _value2(_tag2(kind = kind, platforms = [p0], snapshot_files = files), pins = {p0: _D1})
+        grown = _value2(tag, pins = {p0: _D1, p1: d3})
+        asserts.equals(env, [], result_lines("jq", kind, one, grown, []), "a new platform has no old pin: " + kind)
+
+    # A project fact names no pin; it says its tools were recomputed.
+    proj = _tag2(kind = "project", lock = "a")
+    stored = _value2(proj, pins = {})
+    changed = _value2(_tag2(kind = "project", lock = "b"), pins = {})
+    asserts.equals(env, ["rules_ocx: jq: tools recomputed from the new ocx.lock"], result_lines("jq", "project", stored, changed, []))
+
+    # `unchanged` only for a declaration the switch names.
+    asserts.equals(env, ["rules_ocx: jq: unchanged"], result_lines("jq", "tag", old, old, ["jq"]))
+    asserts.equals(env, [], result_lines("jq", "tag", old, old, []))
+    asserts.equals(env, [], result_lines("jq", "tag", old, old, ["other"]))
+    return unittest.end(env)
+
+def _w1_line_test_impl(ctx):
+    env = unittest.begin(ctx)
+    asserts.equals(env, "rules_ocx: RULES_OCX_UPDATE=jq,cmake is set; those tag declarations resolve again on every evaluation while it is set", w1_line("jq,cmake"))
+    asserts.equals(env, "", w1_line(None))
+    asserts.equals(env, "", w1_line(""))
+    asserts.equals(env, "", w1_line(" , "))
+    return unittest.end(env)
+
+result_lines_test = unittest.make(_result_lines_test_impl)
+w1_line_test = unittest.make(_w1_line_test_impl)
+
 def facts_test_suite(name):
     """Instantiates the facts.bzl test suite.
 
     Args:
         name: name of the test suite target.
     """
-    unittest.suite(name, key_test, hit_test, miss_test, populated_test, stored_shape_test, manifest_env_test, cacheable_test, decode_test, declaration_kind_test, key_v2_test, v1_misses_test, golden_kinds_test, bad_pin_test, update_switch_test, index_inputs_test, snapshot_paths_test, same_index_test)
+    unittest.suite(name, key_test, hit_test, miss_test, populated_test, stored_shape_test, manifest_env_test, decode_test, update_names_test, declaration_kind_test, key_v2_test, v1_misses_test, golden_kinds_test, bad_pin_test, update_switch_test, index_inputs_test, snapshot_paths_test, same_index_test, resolve_args_test, root_digest_test, pinned_identifier_test, index_paths_test, result_lines_test, w1_line_test)

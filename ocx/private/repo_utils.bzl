@@ -609,7 +609,7 @@ def execute_ocx(ctx, binary, args, env, is_windows):
             )
     return result
 
-def run_ocx(ctx, binary, args, env, what, is_windows):
+def run_ocx(ctx, binary, args, env, what, is_windows, extra_hint = None):
     """Runs the ocx CLI, mapping a failure to an actionable message.
 
     Args:
@@ -619,6 +619,8 @@ def run_ocx(ctx, binary, args, env, what, is_windows):
         env: environment dict (from make_ocx_env().env).
         what: short human description used in error messages.
         is_windows: host flag (from host_info()); Windows has no `sleep`.
+        extra_hint: optional function exit code -> text; a non-empty result is
+            appended as one more `hint:` line.
 
     Returns:
         stdout string.
@@ -627,12 +629,14 @@ def run_ocx(ctx, binary, args, env, what, is_windows):
     if result.return_code == 0:
         return result.stdout
     hint = SYSEXIT_HINTS.get(result.return_code, "")
-    fail("rules_ocx: {} failed (exit {}): ocx {}\n{}{}".format(
+    extra = extra_hint(result.return_code) if extra_hint else ""
+    fail("rules_ocx: {} failed (exit {}): ocx {}\n{}{}{}".format(
         what,
         result.return_code,
         " ".join([str(a) for a in args]),
         result.stderr.strip(),
         "\nhint: " + hint if hint else "",
+        "\nhint: " + extra if extra else "",
     ))
 
 def make_isolated_ocx_env(rctx, home):

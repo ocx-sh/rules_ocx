@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 The OCX Authors
 
-"""The hub repository: one toolchain per platform, one `ocx_tool` per tool name.
+"""The hub repository: one toolchain per platform, one `ocx_tool` per tool name, and `:update`.
 
 The hub names a set repository only inside `toolchain()`, a label analysis
 follows only for the platform toolchain resolution selects, so `bazel build`,
@@ -16,7 +16,7 @@ _MUSL = "@rules_ocx//ocx/constraints:musl"
 
 # Names the hub's BUILD file already owns.
 _TOOLCHAIN_PREFIX = "ocx_toolchain_"
-_RESERVED_TOOLS = ["toolchain_type", "tool.bzl", "build", "build.bazel"]
+_RESERVED_TOOLS = ["toolchain_type", "tool.bzl", "build", "build.bazel", "update"]
 
 def _q(text):
     """A string literal; JSON strings are valid Starlark."""
@@ -41,7 +41,7 @@ def hub_content_error(sets, tools):
             return "rules_ocx: a tool named '{}' collides with a target of the generated hub".format(name)
     return ""
 
-def hub_build_content(sets, tools):
+def hub_build_content(sets, tools, name = ""):
     """The hub's BUILD.bazel text.
 
     Toolchains are listed musl first and named `ocx_toolchain_<nnn>_<slug>`
@@ -53,6 +53,8 @@ def hub_build_content(sets, tools):
         sets: dict platform string -> label string of that platform's
             `ocx_set_toolchain` target.
         tools: sorted tool names.
+        name: the hub name; when given, the hub carries `alias(name = "update")`
+            for `@ocx_update//:hub_<name>`.
 
     Returns:
         BUILD.bazel text.
@@ -86,10 +88,16 @@ def hub_build_content(sets, tools):
         out.append("    toolchain_type = \":toolchain_type\",")
         out.append(")")
         out.append("")
-    for name in tools:
+    for tool in tools:
         out.append("ocx_tool(")
-        out.append("    name = {},".format(_q(name)))
-        out.append("    tool = {},".format(_q(name)))
+        out.append("    name = {},".format(_q(tool)))
+        out.append("    tool = {},".format(_q(tool)))
+        out.append(")")
+        out.append("")
+    if name:
+        out.append("alias(")
+        out.append("    name = \"update\",")
+        out.append("    actual = {},".format(_q("@ocx_update//:hub_" + name)))
         out.append(")")
         out.append("")
     return "\n".join(out)
@@ -135,7 +143,7 @@ def hub_platform_error(platforms, available_platforms):
     return ""
 
 def _ocx_hub_repo_impl(rctx):
-    rctx.file("BUILD.bazel", hub_build_content(rctx.attr.sets, rctx.attr.tools))
+    rctx.file("BUILD.bazel", hub_build_content(rctx.attr.sets, rctx.attr.tools, name = rctx.attr.hub))
     rctx.file("tool.bzl", hub_tool_bzl())
 
 ocx_hub_repo = repository_rule(
@@ -143,9 +151,11 @@ ocx_hub_repo = repository_rule(
     doc = """The hub of a vendored tool collection.
 
 Holds one toolchain per platform (each naming that platform's set repository
-only inside `toolchain()`), and one `ocx_tool` per tool name. Register it with
+only inside `toolchain()`), one `ocx_tool` per tool name, and `update`, an alias
+of the hub's update program in `@ocx_update`. Register it with
 `register_toolchains("@<hub>//:all")`.""",
     attrs = {
+        "hub": attr.string(doc = "The hub's own name; `update` aliases `@ocx_update//:hub_<hub>`."),
         "sets": attr.string_dict(doc = "platform -> label of that platform's `ocx_set_toolchain`."),
         "tools": attr.string_list(doc = "Tool names."),
     },
