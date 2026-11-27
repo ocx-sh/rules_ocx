@@ -223,6 +223,8 @@ tasks:
           expect 0 "rules_ocx: jq_pinned: pinned by digest in MODULE.bazel" run @jq_pinned//:update
 
           cd "$base/project"
+          # A first evaluation records no result line (nothing stored to compare with), so record the fact now.
+          bz mod deps --lockfile_mode=update
           # ocx writes the lock without this comment, so its absence afterwards shows the file was replaced.
           echo '# rules_ocx: replaced by the update' >> ocx.lock
           # The nested bazel call prints one `rules_ocx: tools: ...` line per selected declaration; ocx itself prints none.
@@ -232,7 +234,11 @@ tasks:
             fails="$fails
             ocx.lock not replaced"
           fi
-          expect 64 "rules_ocx: an update argument holds one of" run @tools//:update -- -g "a&b"
+          # Bazel starts the program through cmd.exe, which splits an unquoted `&` before update.bat runs (the log showed
+          # `'b' is not recognized`), so E13 for `&` is not reachable through `bazel run`: print what happens, never gate.
+          # `%` is not split and E13 refuses it, so these two rows check E13 end to end.
+          set +e; out="$(bz run @tools//:update -- -g 'a&b' 2>&1)"; echo "ampersand probe (hub target): exit $?"; printf '%s\n' "$out" | tail -n 4; set -e
+          expect 64 "rules_ocx: an update argument holds one of" run @tools//:update -- -g "a%b"
           # `)` is not in E13's set: it must pass the argument capture and reach ocx, which refuses the group with 64.
           expect 64 "-g a)b failed (exit 64)" run @tools//:update -- -g "a)b"
           # @rules_ocx//:update takes declaration names: a known one is found, an unknown one is E1, and a name holding
@@ -243,7 +249,8 @@ tasks:
           expect 64 "any character outside A-Z a-z 0-9" run @rules_ocx//:update -- "x,y"
           expect 64 "any character outside A-Z a-z 0-9" run @rules_ocx//:update -- "x;y"
           expect 64 "any character outside A-Z a-z 0-9" run @rules_ocx//:update -- "x=y"
-          expect 64 "rules_ocx: an update argument holds one of" run @rules_ocx//:update -- "a&b"
+          set +e; out="$(bz run @rules_ocx//:update -- 'a&b' 2>&1)"; echo "ampersand probe (names target): exit $?"; printf '%s\n' "$out" | tail -n 4; set -e
+          expect 64 "rules_ocx: an update argument holds one of" run @rules_ocx//:update -- "a%b"
           expect 64 "any character outside A-Z a-z 0-9" run @rules_ocx//:update -- "a)b"
           (
             RULES_OCX_BAZEL="$base/no-such-bazel.exe"
@@ -258,13 +265,19 @@ tasks:
           mkdir sub
           mv ocx.toml ocx.lock sub/
           printf 'exports_files(["ocx.lock", "ocx.toml"])\n' > sub/BUILD.bazel
-          sed -i 's#"//:ocx\.#"//sub:ocx.#' MODULE.bazel
+          # A sed script file: MSYS rewrites an argument that looks like a path list, and this one holds `//` and `:`.
+          printf 's#"//:ocx\\.#"//sub:ocx.#\n' > "$base/sub.sed"
+          sed -i -f "$base/sub.sed" MODULE.bazel
+          grep -F '//sub:ocx.' MODULE.bazel
           bz mod deps --lockfile_mode=update
           mv sub "$base/outside_sub"
           MSYS2_ARG_CONV_EXCL='*' cmd /c mklink /J "$(cygpath -w "$base/project_sub/sub")" "$(cygpath -w "$base/outside_sub")"
           # Diagnostic for the link walk, which reads the `l` of the attribute string `%~a` gives: the listing shows
           # whether Windows reports the junction as one, so a red row below can be told from a wrong attribute reading.
           MSYS2_ARG_CONV_EXCL='*' cmd /c dir /al "$(cygpath -w "$base/project_sub")" || true
+          # The attribute string the link walk reads; a link shows an `l` in it.
+          printf '@for %%%%I in (%%1) do @echo attr=%%%%~aI\r\n' > "$base/attr.bat"
+          (cd "$base" && MSYS2_ARG_CONV_EXCL='*' cmd /c attr.bat 'project_sub\sub' || true)
           cp "$base/outside_sub/ocx.lock" "$base/before.lock"
           expect 78 "is a link on the path of the write target" run @tools//:update
           cmp "$base/before.lock" "$base/outside_sub/ocx.lock" || fails="$fails
