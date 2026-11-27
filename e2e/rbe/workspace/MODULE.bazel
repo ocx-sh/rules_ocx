@@ -1,0 +1,164 @@
+# The rig workspace: rules_ocx from this checkout over the seeded fixtures.
+# tests/conftest.py renders a copy per test: it swaps the local_path_override path for the absolute
+# checkout, fills @REGISTRY@ and @PIN(<repo>,<platform>)@ (the pinned identifier from fixtures.json), writes
+# ocx.lock, and appends the lines a test adds (module_extra).
+module(name = "rbe_workspace")
+
+bazel_dep(name = "rules_ocx", version = "0.0.0")
+bazel_dep(name = "platforms", version = "1.0.0")
+
+local_path_override(
+    module_name = "rules_ocx",
+    path = "../../..",
+)
+
+ocx = use_extension("@rules_ocx//ocx:extensions.bzl", "ocx")
+
+# Default group: one tool on a glibc and a musl leaf.
+ocx.project(
+    name = "tools",
+    groups = ["default"],
+    ocx_lock = "//:ocx.lock",
+    ocx_toml = "//:ocx.toml",
+    platforms = [
+        "linux/amd64+libc.glibc",
+        "linux/amd64+libc.musl",
+    ],
+)
+
+# cmake needs ccache, which only the group declares.
+ocx.project(
+    name = "build",
+    groups = ["build"],
+    ocx_lock = "//:ocx.lock",
+    ocx_toml = "//:ocx.toml",
+    platforms = ["linux/amd64"],
+)
+
+# Relative links, one to a directory.
+ocx.project(
+    name = "links",
+    groups = ["links"],
+    ocx_lock = "//:ocx.lock",
+    ocx_toml = "//:ocx.toml",
+    platforms = ["linux/amd64"],
+)
+
+# An entry point.
+ocx.project(
+    name = "entry",
+    groups = ["entry"],
+    ocx_lock = "//:ocx.lock",
+    ocx_toml = "//:ocx.toml",
+    platforms = ["linux/amd64"],
+)
+
+# An author env template.
+ocx.project(
+    name = "envtpl",
+    groups = ["envtpl"],
+    ocx_lock = "//:ocx.lock",
+    ocx_toml = "//:ocx.toml",
+    platforms = ["linux/amd64"],
+)
+
+# BUILD.bazel and a case variant `build` inside the package.
+ocx.project(
+    name = "buildfiles",
+    groups = ["buildfiles"],
+    ocx_lock = "//:ocx.lock",
+    ocx_toml = "//:ocx.toml",
+    platforms = ["linux/amd64"],
+)
+
+# 100000 files.
+ocx.project(
+    name = "big",
+    groups = ["big"],
+    ocx_lock = "//:ocx.lock",
+    ocx_toml = "//:ocx.toml",
+    platforms = ["linux/amd64"],
+)
+
+# A login-required package.
+ocx.project(
+    name = "private",
+    groups = ["private"],
+    ocx_lock = "//:ocx.lock",
+    ocx_toml = "//:ocx.toml",
+    platforms = ["linux/amd64"],
+)
+
+# A set with no Linux leaf, declared from a Linux client.
+ocx.project(
+    name = "winonly",
+    groups = ["winonly"],
+    ocx_lock = "//winonly:ocx.lock",
+    ocx_toml = "//winonly:ocx.toml",
+    platforms = ["windows/amd64"],
+)
+
+# A wasip1/wasm package: no ocx launcher exists for it.
+ocx.package(
+    name = "wasm",
+    package = "@PIN(rig/wasm,wasip1/wasm)@",
+    platforms = ["wasip1/wasm"],
+)
+
+# cmake alone, without the group's ccache.
+ocx.package(
+    name = "cmake_alone",
+    package = "@PIN(rig/cmake,linux/amd64)@",
+    platforms = ["linux/amd64"],
+)
+
+# A digest-pinned package, reproducible.
+ocx.package(
+    name = "pinned",
+    package = "@PIN(rig/tool,linux/amd64+libc.glibc)@",
+    platforms = ["linux/amd64+libc.glibc"],
+)
+use_repo(
+    ocx,
+    "big",
+    "big_linux_amd64",
+    "build",
+    "build_linux_amd64",
+    "buildfiles",
+    "buildfiles_linux_amd64",
+    "cmake_alone",
+    "cmake_alone_linux_amd64",
+    "entry",
+    "entry_linux_amd64",
+    "envtpl",
+    "envtpl_linux_amd64",
+    "links",
+    "links_linux_amd64",
+    "ocx_tool",  # only the ocx-input control uses it as an input
+    "pinned",
+    "pinned_linux_amd64_libc_glibc",
+    "private",
+    "private_linux_amd64",
+    "tools",
+    "tools_linux_amd64_libc_glibc",
+    "tools_linux_amd64_libc_musl",
+    "wasm",
+    "wasm_wasip1_wasm",
+    "winonly",
+    "winonly_windows_amd64",
+)
+
+register_toolchains(
+    "@big//:all",
+    "@build//:all",
+    "@buildfiles//:all",
+    "@cmake_alone//:all",
+    "@entry//:all",
+    "@envtpl//:all",
+    "@links//:all",
+    "@pinned//:all",
+    "@private//:all",
+    "@tools//:all",
+    "@wasm//:all",
+    "@winonly//:all",
+)

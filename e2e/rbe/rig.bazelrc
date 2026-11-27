@@ -1,0 +1,42 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The OCX Authors
+#
+# Remote flags for the e2e/rbe rig, read as a flag list: tests/conftest.py (rc_flags) expands `common`,
+# `build` and `build:<config>` lines itself and passes them on a Bazel call that starts with
+# --ignore_all_rc_files, which also ignores any --bazelrc, so no rc file on the host is ever read.
+# Ports are the rig defaults (RIG_PORT=18500, RIG_PORT_NL=18502); the harness rewrites them.
+# Per-test cache silo (RESULTS.md, rig question 1): Buildbarn takes an instance-name suffix
+# (hardlinking/<test-id>); NativeLink serves only `main`, so it gets --action_env=OCX_RIG_SILO=<test-id>.
+
+# Nothing on this host's shared caches: no disk cache, no repository cache shared with other runs.
+common --disk_cache=
+common --noshow_progress
+common --color=no
+common --curses=no
+
+# Everything runs remotely or fails; a silent local fallback would hide a network-less executor's red.
+build --remote_local_fallback=false
+build --spawn_strategy=remote
+build --remote_timeout=600
+# Local results never land in the rig's AC: the action that ran remotely is the only writer.
+build --remote_upload_local_results=false
+build --incompatible_strict_action_env
+build --test_output=errors
+
+# Buildbarn: nginx :18500 -> bb frontend. The worker's instance-name prefix is `hardlinking`.
+build:buildbarn --remote_executor=grpc://127.0.0.1:18500
+build:buildbarn --remote_cache=grpc://127.0.0.1:18500
+build:buildbarn --remote_instance_name=hardlinking
+build:buildbarn --remote_default_exec_properties=OSFamily=linux
+build:buildbarn --remote_default_exec_properties=container-image=docker://ghcr.io/catthehacker/ubuntu:act-22.04@sha256:dd7654ffb01d5b7b54b23b9ce928a1f7f2d08c7b3d7e320b6574b55d7ccde78b
+
+# Buildbarn's no-shell runner (distroless/static): an action can exec only a static file.
+build:buildbarn_noshell --config=buildbarn
+build:buildbarn_noshell --remote_default_exec_properties=OSFamily=linux
+build:buildbarn_noshell --remote_default_exec_properties=container-image=docker://gcr.io/distroless/static@sha256:8ce6dd87e9823c5b48dcfb2c8604714ccb351ce59607327bcc4957448da279b5#noshell
+
+# NativeLink (compose profile `nativelink`): nginx :18502 -> nativelink. Instance name `main`.
+build:nativelink --remote_executor=grpc://127.0.0.1:18502
+build:nativelink --remote_cache=grpc://127.0.0.1:18502
+build:nativelink --remote_instance_name=main
+build:nativelink --remote_default_exec_properties=OSFamily=linux

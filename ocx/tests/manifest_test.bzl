@@ -6,38 +6,38 @@
 load("@bazel_skylib//lib:partial.bzl", "partial")
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
 load("//ocx/private:manifest.bzl", "archive_type", "artifact_url", "manifest_sha256", "select_release")
-load("//ocx/private:versions.bzl", "DEFAULT_OCX_VERSION", "MIN_OCX_VERSION", "min_version_error")
+load("//ocx/private:versions.bzl", "DEFAULT_OCX_VERSION", "MIN_OCX_VERSION", "NO_SUPPORTED_RELEASE_NOTE", "local_binary_version_error", "min_version_error")
 
 _MANIFEST = {
     "schema": 1,
-    "latest": {"version": "0.3.10", "channel": "stable"},
+    "latest": {"version": "0.7.1", "channel": "stable"},
     "releases": [
         {
-            "version": "0.3.10",
+            "version": "0.7.1",
             "channel": "stable",
-            "tag": "v0.3.10",
+            "tag": "v0.7.1",
             "target": "x86_64-unknown-linux-musl",
-            "filename": "ocx-x86_64-unknown-linux-musl.tar.xz",
+            "filename": "ocx-x86_64-unknown-linux-musl.tar.gz",
             "sha256": "a" * 64,
-            "url": "https://github.com/ocx-sh/ocx/releases/download/v0.3.10/ocx-x86_64-unknown-linux-musl.tar.xz",
+            "url": "https://github.com/ocx-sh/ocx/releases/download/v0.7.1/ocx-x86_64-unknown-linux-musl.tar.gz",
         },
         {
-            "version": "0.3.9",
+            "version": "0.7.0",
             "channel": "stable",
-            "tag": "v0.3.9",
+            "tag": "v0.7.0",
             "target": "x86_64-unknown-linux-musl",
-            "filename": "ocx-x86_64-unknown-linux-musl.tar.xz",
+            "filename": "ocx-x86_64-unknown-linux-musl.tar.gz",
             "sha256": "b" * 64,
-            "url": "https://github.com/ocx-sh/ocx/releases/download/v0.3.9/ocx-x86_64-unknown-linux-musl.tar.xz",
+            "url": "https://github.com/ocx-sh/ocx/releases/download/v0.7.0/ocx-x86_64-unknown-linux-musl.tar.gz",
         },
     ],
 }
 
 def _select_release_test_impl(ctx):
     env = unittest.begin(ctx)
-    row = select_release(_MANIFEST, "0.3.9", ["x86_64-unknown-linux-musl"])
+    row = select_release(_MANIFEST, "0.7.0", ["x86_64-unknown-linux-musl"])
     asserts.equals(env, "b" * 64, row["sha256"])
-    asserts.equals(env, "v0.3.9", row["tag"])
+    asserts.equals(env, "v0.7.0", row["tag"])
     return unittest.end(env)
 
 _WIN_GNULLVM = "x86_64-pc-windows-gnullvm"
@@ -82,14 +82,14 @@ select_release_none_test = analysistest.make(
 
 def _artifact_url_test_impl(ctx):
     env = unittest.begin(ctx)
-    row = select_release(_MANIFEST, "0.3.10", ["x86_64-unknown-linux-musl"])
+    row = select_release(_MANIFEST, "0.7.1", ["x86_64-unknown-linux-musl"])
 
     # No mirror: manifest URL verbatim.
     asserts.equals(env, row["url"], artifact_url(row, None))
     asserts.equals(env, row["url"], artifact_url(row, ""))
 
     # Mirror: <mirror>/<tag>/<filename>, trailing slash tolerated.
-    expected = "https://mirror.corp/ocx/v0.3.10/ocx-x86_64-unknown-linux-musl.tar.xz"
+    expected = "https://mirror.corp/ocx/v0.7.1/ocx-x86_64-unknown-linux-musl.tar.gz"
     asserts.equals(env, expected, artifact_url(row, "https://mirror.corp/ocx"))
     asserts.equals(env, expected, artifact_url(row, "https://mirror.corp/ocx/"))
     return unittest.end(env)
@@ -98,11 +98,9 @@ def _archive_type_test_impl(ctx):
     env = unittest.begin(ctx)
     asserts.equals(env, "zip", archive_type("ocx-x86_64-pc-windows-msvc.zip"))
     asserts.equals(env, "tar.gz", archive_type("ocx-x86_64-unknown-linux-musl.tar.gz"))
-    asserts.equals(env, "tar.xz", archive_type("ocx-x86_64-unknown-linux-musl.tar.xz"))
     return unittest.end(env)
 
-# The two message fragments, held in constants (.claude/rules/starlark.md).
-_FLOOR_FRAGMENT = "requires ocx 0.6.1 or newer"
+# The message fragment, held in a constant (.claude/rules/starlark.md).
 _MALFORMED_FRAGMENT = "is not a dotted-numeric version"
 
 # 64 lowercase hex characters.
@@ -110,54 +108,70 @@ _HEX = "0123456789abcdef" * 4
 
 _DIST = "https://mirror.example/dist/"
 
-# Covers: C-012, S-008 — ocx.download(version) below the 0.6.1 floor is refused
-# before any download; at or above it the floor is silent.
+# The comparison, against a floor of its own so that raising MIN_OCX_VERSION
+# changes no case: below, equal, a pre-release of equal, above and malformed.
 def _min_version_error_test_impl(ctx):
     env = unittest.begin(ctx)
+    floor = "1.2.3"
+    fragment = "requires ocx 1.2.3 or newer"
 
-    asserts.equals(env, "0.6.1", MIN_OCX_VERSION)
+    for below in ["1.2.2", "1.1.9", "0.9.9", "1.2", "1.2.2-rc1+5"]:
+        got = min_version_error(below, floor)
+        asserts.true(env, fragment in got, "%r must be refused with the floor message, got: %r" % (below, got))
 
-    below = min_version_error("0.5.8")
-    asserts.true(
-        env,
-        _FLOOR_FRAGMENT in below,
-        "0.5.8 must be refused with the floor message, got: %r" % below,
-    )
+    asserts.equals(env, "", min_version_error("1.2.3", floor))
+    asserts.equals(env, "", min_version_error("1.2.3-pr784+20261126073008", floor))
+    asserts.equals(env, "", min_version_error("1.2.4", floor))
+    asserts.equals(env, "", min_version_error("1.3.0", floor))
 
-    # 0.6.0 has neither `--pinned` nor OCX_NO_CONSENT.
-    below_patch = min_version_error("0.6.0")
-    asserts.true(
-        env,
-        _FLOOR_FRAGMENT in below_patch,
-        "0.6.0 must be refused with the floor message, got: %r" % below_patch,
-    )
-    asserts.equals(env, "", min_version_error("0.6.1"))
-    asserts.equals(env, "", min_version_error("0.7.1"))
+    # Numeric, not lexical: "1.10.0" < "1.2.3" as strings.
+    asserts.equals(env, "", min_version_error("1.10.0", floor))
 
-    # Numeric, not lexical: "0.10.0" < "0.6.0" as strings.
-    asserts.equals(env, "", min_version_error("0.10.0"))
+    # Malformed versions get their own message, since the floor would
+    # misdiagnose a spelling problem as an out-of-date pin.
+    for bad in ["v1.2.3", "", " 1.2.3", "1.2.", "-rc1", "x.y.z", "1", "2026-11-26"]:
+        got = min_version_error(bad, floor)
+        asserts.true(env, _MALFORMED_FRAGMENT in got, "%r must be refused as malformed, got: %r" % (bad, got))
 
-    # Malformed versions are refused, not waved through as a skylib dev build
-    # ("v0.6.0", "") or crashed on ("0.6.") — and with their own message, since
-    # the floor would misdiagnose a spelling problem as an out-of-date pin.
-    for bad in ["v0.6.0", "", " 0.5.8", "0.6."]:
-        got = min_version_error(bad)
-        asserts.true(
-            env,
-            _MALFORMED_FRAGMENT in got,
-            "%r must be refused as malformed, got: %r" % (bad, got),
-        )
+    # Both messages name the floor they were given.
+    asserts.true(env, "1.2.3" in min_version_error("0.1.0", floor))
+    asserts.true(env, MIN_OCX_VERSION in min_version_error("0.0.1"))
+    asserts.true(env, "OCX_INSTALL_BINARY" in NO_SUPPORTED_RELEASE_NOTE)
+    return unittest.end(env)
 
-    # Well-formed but below (0, 6, 0): the floor message, not the malformed one.
-    below_short = min_version_error("0.6")
-    asserts.true(
-        env,
-        _FLOOR_FRAGMENT in below_short,
-        "0.6 must be refused with the floor message, got: %r" % below_short,
-    )
+# A locally supplied binary is checked on what `ocx version` printed.
+def _local_binary_version_test_impl(ctx):
+    env = unittest.begin(ctx)
+    asserts.equals(env, "", local_binary_version_error(0, MIN_OCX_VERSION + "-pr784+20261126073008\n"))
+    asserts.equals(env, "", local_binary_version_error(0, MIN_OCX_VERSION + "\n"))
+    asserts.equals(env, "", local_binary_version_error(0, "ocx 9.9.9-fake-one\n"))
+    asserts.equals(env, "", local_binary_version_error(0, "ocx " + MIN_OCX_VERSION + "\n"))
 
-    # Invariant: the shipped pin always satisfies the floor.
-    asserts.equals(env, "", min_version_error(DEFAULT_OCX_VERSION))
+    # Below the floor and unreadable are different messages, both naming the variable.
+    below = local_binary_version_error(0, "0.0.1\n")
+    asserts.true(env, "OCX_INSTALL_BINARY is ocx 0.0.1" in below, below)
+    for code, out in [(2, ""), (0, ""), (0, "ocx\n"), (0, "v0.7.0\n"), (0, "garbage text")]:
+        got = local_binary_version_error(code, out)
+        asserts.true(env, "OCX_INSTALL_BINARY did not report a version" in got, got)
+    asserts.true(env, "exited 2" in local_binary_version_error(2, ""))
+
+    # A lone integer or a date is not a version.
+    for out in ["ocx built 2026-11-26 0.5.0\n", "ocx 1\n", "2026-11-26\n"]:
+        got = local_binary_version_error(0, out)
+        asserts.true(env, "did not report a version" in got or "OCX_INSTALL_BINARY is ocx" in got, got)
+    asserts.false(env, _MALFORMED_FRAGMENT in below)
+    return unittest.end(env)
+
+# The shipped default satisfies the floor, except in the one known state: the
+# default is still the last release without `ocx vendor` (none carries it yet).
+# Remove _KNOWN_PRE_VENDOR_DEFAULT when DEFAULT_OCX_VERSION moves to a release
+# that has `ocx vendor`.
+_KNOWN_PRE_VENDOR_DEFAULT = "0.6.6"
+
+def _default_satisfies_floor_test_impl(ctx):
+    env = unittest.begin(ctx)
+    if DEFAULT_OCX_VERSION != _KNOWN_PRE_VENDOR_DEFAULT:
+        asserts.equals(env, "", min_version_error(DEFAULT_OCX_VERSION))
     return unittest.end(env)
 
 # Covers: C-014, S-009 — a self-verifying dist manifest name
@@ -195,6 +209,8 @@ select_release_windows_test = unittest.make(_select_release_windows_test_impl)
 artifact_url_test = unittest.make(_artifact_url_test_impl)
 archive_type_test = unittest.make(_archive_type_test_impl)
 min_version_error_test = unittest.make(_min_version_error_test_impl)
+local_binary_version_test = unittest.make(_local_binary_version_test_impl)
+default_satisfies_floor_test = unittest.make(_default_satisfies_floor_test_impl)
 manifest_sha256_test = unittest.make(_manifest_sha256_test_impl)
 
 def manifest_test_suite(name):
@@ -213,5 +229,7 @@ def manifest_test_suite(name):
         artifact_url_test,
         archive_type_test,
         min_version_error_test,
+        local_binary_version_test,
+        default_satisfies_floor_test,
         manifest_sha256_test,
     )

@@ -1,0 +1,24 @@
+name: ocx-under-test
+description: >-
+  Point rules_ocx at the ocx build named in e2e/rbe/ocx-under-test.txt (a dev package of the ocx repository,
+  signature-verified) and export OCX_INSTALL_BINARY and OCX_INSTALL_BINARY_SHA256 to the later steps. The
+  template-owned verify-basic and verify-deep workflows get the same effect from the ci:* and deep:* tasks;
+  both run scripts/ocx_under_test.sh. No file, no effect: the released pin stays in force.
+
+inputs:
+  token:
+    description: >-
+      Registry token for the pull. Kept in case the dev package is private; then the calling job also needs
+      `packages: read` (the owner decides).
+    required: false
+    default: ${{ github.token }}
+
+runs:
+  using: composite
+  steps:
+    - name: Pull and verify the ocx under test
+      shell: bash
+      env:
+        WORKSPACE: ${{ github.workspace }}
+        GITHUB_TOKEN: ${{ inputs.token }}
+      run: bash "$WORKSPACE/scripts/ocx_under_test.sh"

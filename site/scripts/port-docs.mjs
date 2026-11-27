@@ -15,12 +15,15 @@ const PAGES = [
   hand('index.md', 'rules_ocx', 'Provision development tools in Bazel through the OCX package manager.'),
   hand('tutorial.md', 'Run shellcheck in a Bazel test without installing it', 'Add rules_ocx to a workspace and run a pinned shellcheck in an sh_test.'),
   hand('guides/pin-toolchain.md', 'Share one toolchain between Bazel and developers', 'Use one ocx.toml and ocx.lock for Bazel targets and the developer shell.'),
-  hand('guides/ci-reproducible.md', 'Fail CI on a stale lock', 'Make a stale pin fail the build and freeze ad-hoc packages and site patches.'),
+  hand('guides/ci-reproducible.md', 'Fail CI on a stale lock', 'Make a stale pin fail the build and freeze ad-hoc packages.'),
+  hand('guides/update-locks.md', 'Update locked tools', 'Move the pins of project, index and tag declarations.'),
   hand('guides/offline-mirror.md', 'Build behind a corporate mirror', 'Point rules_ocx at an internal mirror, proxy CA and registry credentials.'),
-  hand('guides/cross-platform.md', 'Use per-platform tools with transitions', 'Build tools for a platform other than the host with a transition.'),
-  hand('guides/remote-cache.md', 'Keep tool bytes out of remote-cached actions', 'Use lazy provisioning so a remote-cached build downloads no tool content.'),
-  hand('concepts/how-it-works.md', 'How rules_ocx works', 'Why rules_ocx shells out to ocx, and what is shared between Bazel and the shell.'),
-  hand('concepts/trust-and-config.md', 'Trust, config and patches', 'How verification posture, host config and patches reach a fetch.'),
+  hand('guides/cross-platform.md', 'Use tools for several platforms', 'Vendor one package for several platforms and run the right one on each machine.'),
+  hand('guides/windows-path-length.md', 'Windows: path length', 'Keep Bazel paths short enough for tools to start on Windows, and know the limits that remain.'),
+  hand('guides/remote-cache.md', 'Build with remote execution and a remote cache', 'Run vendored tools on remote executors that have no network and no ocx, and keep the actions cacheable.'),
+  hand('concepts/design.md', 'The vendor model', 'The manifest contract, tool sets, facts, the native launcher and remote execution.'),
+  hand('concepts/how-it-works.md', 'How rules_ocx works', 'How rules_ocx builds a tool set from ocx vendor, and what is shared between Bazel and the shell.'),
+  hand('concepts/trust-and-config.md', 'Trust and config', 'How verification posture and host config reach a fetch.'),
   hand('reference/environment.md', 'Environment variables', 'Which OCX environment variables reach the repository rules and which never do.'),
   generated('extensions.md', 'Module extension', 'API reference for the ocx module extension and its tag classes.', `${SOURCE}ocx/extensions.bzl`),
 ];
@@ -44,8 +47,10 @@ const escapeBareTags = (line) =>
     .join('');
 
 // Stardoc writes `<a id="X"></a>` above `## X`; the heading already carries id X, and a second
-// element with the same id is invalid HTML. Anchors whose id differs from the heading stay.
-const dropDuplicateAnchors = (text) => text.replace(/^<a id="([^"]+)"><\/a>\n+(?=#+ \1$)/gm, '');
+// element with the same id is invalid HTML. Anchors whose id differs from the heading stay, and so does one
+// with capitals (`OcxSetInfo`): the heading's own id is lowercased, so the anchor is the only element with it.
+const dropDuplicateAnchors = (text) =>
+  text.replace(/^(<a id="([^"]+)"><\/a>\n+)(?=#+ \2$)/gm, (m, anchor, id) => (id === id.toLowerCase() ? '' : m));
 
 export function port(page, text) {
   // Hand-written sources keep their H1 for GitHub; the front matter title renders it on the site.
@@ -77,15 +82,15 @@ export function splitDefs(text) {
   const parts = rules.map((body) => {
     const name = body.match(/^## (.+)$/m)[1];
     const lead = body.split('</pre>')[1]?.trim().split('\n')[0].replace(/[`*]/g, '').trim() || `Reference for ${name}.`;
-    return { name, body, lead };
+    return { name, slug: name.toLowerCase(), body, lead };
   });
   const home = new Map(); // anchor id -> page slug
-  for (const { name, body } of parts) for (const [, id] of body.matchAll(/<a id="([^"]+)"/g)) home.set(id, name);
+  for (const { slug, body } of parts) for (const [, id] of body.matchAll(/<a id="([^"]+)"/g)) home.set(id, slug);
   const fix = (slug, body) => body.replace(/(href="|\]\()#([^"')]+)/g, (m, pre, id) => (home.get(id) && home.get(id) !== slug ? `${pre}${BASE}defs/${home.get(id)}/#${id}` : m));
-  const list = parts.map(({ name, lead }) => `- [\`${name}\`](${BASE}defs/${name}/): ${lead}`).join('\n');
+  const list = parts.map(({ name, slug, lead }) => `- [\`${name}\`](${BASE}defs/${slug}/): ${lead}`).join('\n');
   return [
     { to: 'defs/index.md', title: 'Rules and macros', description: 'API reference for defs.bzl: the public repository rules and macros of rules_ocx.', text: `${intro.trimEnd()}\n\n${list}\n` },
-    ...parts.map(({ name, body, lead }) => ({ to: `defs/${name}.md`, title: name, description: lead.slice(0, 160), text: fix(name, body) })),
+    ...parts.map(({ name, slug, body, lead }) => ({ to: `defs/${slug}.md`, title: name, description: lead.slice(0, 160), text: fix(slug, body) })),
   ];
 }
 

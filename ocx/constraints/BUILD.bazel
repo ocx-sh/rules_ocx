@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The OCX Authors
+
+package(default_visibility = ["//visibility:public"])
+
+# No default value: a platform that does not name a libc matches neither.
+constraint_setting(name = "libc")
+
+constraint_value(
+    name = "glibc",
+    constraint_setting = ":libc",
+)
+
+constraint_value(
+    name = "musl",
+    constraint_setting = ":libc",
+)

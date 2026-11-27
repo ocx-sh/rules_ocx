@@ -18,8 +18,12 @@ Thanks for helping out! Ground rules:
   [ocx-sh/ocx](https://github.com/ocx-sh/ocx) instead.
 - The pinned ocx version (`ocx/private/versions.bzl`) and the vendored
   manifest (`dist/dist.json`) are bumped together, deliberately.
-- Host detection lives in repository rules only — module extension
-  implementations must stay reproducible pure functions of their tags.
+- The extension reads only `module_ctx.os`, the tags, the tag's `ocx.lock` and
+  the `OCX_INSTALL_*` variables, and runs `ocx vendor --manifest-only` only to
+  compute facts that miss; every other host interaction lives in repository
+  rules (`AGENTS.md`, invariant 3).
+- `ocx vendor` is the only ocx command rules_ocx runs and `manifest.json` the
+  only ocx document it reads; `task guard:check` enforces both.
 
 ## Toolchain
 

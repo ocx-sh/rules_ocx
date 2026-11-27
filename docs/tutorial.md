@@ -6,9 +6,9 @@ In this tutorial you add rules_ocx to a Bazel workspace and run `shellcheck` in 
 You never install `shellcheck` on your machine.
 It takes about ten minutes.
 
-You need Bazel 8 or later.
+You need Bazel 9.
 You also need the `ocx` CLI to write the lock file ([install it](https://ocx.sh/install/)).
-rules_ocx wraps `ocx`. It downloads a pinned `ocx` build itself and runs it for every fetch.
+rules_ocx downloads a pinned `ocx` build itself and runs it for every fetch; read [the vendor model](concepts/design.md) first if you want the whole picture.
 
 ## Pin the tool
 
@@ -30,11 +30,13 @@ Commit both files later. The lock file is what makes every build use the same by
 ## Declare the module
 
 Create `MODULE.bazel`.
+`platforms` names every platform a build may run the tool on, spelled as the lock keys them.
+Each one must be a platform the lock serves.
 
 ```starlark
 module(name = "tutorial")
 
-bazel_dep(name = "rules_ocx", version = "0.5.0")
+bazel_dep(name = "rules_ocx", version = "0.5.1")
 bazel_dep(name = "rules_shell", version = "0.6.1")
 
 ocx = use_extension("@rules_ocx//ocx:extensions.bzl", "ocx")
@@ -42,13 +44,21 @@ ocx.project(
     name = "tools",
     ocx_toml = "//:ocx.toml",
     ocx_lock = "//:ocx.lock",
+    platforms = ["linux/amd64", "darwin/arm64"],
 )
 use_repo(ocx, "tools")
+
+register_toolchains("@tools//:all")
 ```
+
+Pin Bazel 9 by writing `9.2.0` into `.bazelversion`.
+
+On Windows, the tools find their files through the runfiles manifest, so no extra flag is needed.
+If a tool fails to start on a long path, see [Windows: path length](guides/windows-path-length.md).
 
 ## Write the test
 
-Create `lint_test.sh` and make it executable.
+Create `lint_test.sh` and run `chmod +x lint_test.sh`.
 
 ```bash
 #!/usr/bin/env bash
@@ -56,10 +66,6 @@ set -euo pipefail
 
 grep -q "version:" <<<"$("$SHELLCHECK_BIN" --version)"
 echo "shellcheck OK"
-```
-
-```console
-$ chmod +x lint_test.sh
 ```
 
 Create `BUILD.bazel`.
@@ -82,7 +88,8 @@ sh_test(
 $ bazel test //:lint
 ```
 
-The first run fetches `ocx` and `shellcheck`, then reports `//:lint` as `PASSED`.
+The first run fetches `ocx` and the `shellcheck` set for your platform, then reports `//:lint` as `PASSED`.
+The sets of the other platforms stay unfetched.
 
 ## Check what you got
 
@@ -92,8 +99,8 @@ List the targets that rules_ocx created.
 $ bazel query @tools//...
 ```
 
-The list contains `@tools//:shellcheck`.
-A tool that is declared but missing from this list raises no error, so run this query whenever a target you expect is absent.
+The list contains `@tools//:shellcheck` and one toolchain per platform.
+A platform the lock does not serve fails the build and names the platform, so the list never drops one silently.
 
 ## Next steps
 

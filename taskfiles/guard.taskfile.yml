@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The OCX Authors
+#
+# The ocx-interface guard. Included from the root taskfile under the namespace `guard` (guard:check, guard:test) by its owner.
+
+version: "3"
+
+tasks:
+  check:
+    desc: Fail when rules_ocx runs an ocx command other than vendor, or reads ocx internals
+    cmds:
+      - python3 scripts/check_ocx_interface.py
+
+  test:
+    desc: Self-test of the ocx-interface guard
+    cmds:
+      - python3 scripts/tests/test_check_ocx_interface.py

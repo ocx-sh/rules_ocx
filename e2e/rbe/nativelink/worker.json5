@@ -1,0 +1,22 @@
+// Copyright 2026 The OCX Authors
+// SPDX-License-Identifier: Apache-2.0
+{
+  stores: [
+    { name: "GRPC_CAS", grpc: { instance_name: "main", endpoints: [{ address: "grpc://nativelink:50051" }], store_type: "cas" } },
+    { name: "GRPC_AC", grpc: { instance_name: "main", endpoints: [{ address: "grpc://nativelink:50051" }], store_type: "ac" } },
+    { name: "FAST_SLOW", fast_slow: {
+        fast: { filesystem: { content_path: "/worker/content", temp_path: "/worker/tmp", eviction_policy: { max_bytes: 10000000000 } } },
+        slow: { ref_store: { name: "GRPC_CAS" } },
+    } },
+  ],
+  workers: [
+    { local: {
+      worker_api_endpoint: { uri: "grpc://nativelink:50061" },
+      cas_fast_slow_store: "FAST_SLOW",
+      upload_action_result: { ac_store: "GRPC_AC" },
+      work_directory: "/worker/work",
+      platform_properties: { OSFamily: { values: ["linux"] } },
+    } },
+  ],
+  servers: [],
+}

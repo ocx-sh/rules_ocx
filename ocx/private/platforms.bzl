@@ -9,16 +9,19 @@ repository rules pass `repository_ctx.os.name` / `.arch` in.
 
 visibility(["//ocx", "//ocx/tests"])
 
-# os/arch prefix of an ocx platform key -> Bazel constraint labels.
-_OS = {
+# ocx os/arch -> constraint label.
+_OS_C = {
+    "darwin": "@platforms//os:macos",
     "linux": "@platforms//os:linux",
-    "darwin": "@platforms//os:osx",
+    "wasip1": "@platforms//os:wasi",
     "windows": "@platforms//os:windows",
 }
-_CPU = {
+_CPU_C = {
     "amd64": "@platforms//cpu:x86_64",
     "arm64": "@platforms//cpu:aarch64",
+    "wasm": "@platforms//cpu:wasm32",
 }
+_MUSL = "@rules_ocx//ocx/constraints:musl"
 _SLUG_OK = "abcdefghijklmnopqrstuvwxyz0123456789"
 
 _CPUS = {
@@ -41,34 +44,35 @@ def os_arch(platform):
     """The 'os/arch' prefix of a platform key (drops '/variant' and '+features')."""
     return "/".join(platform.split("+")[0].split("/")[:2])
 
-def ocx_platform_constraints(platform):
-    """Bazel constraint labels for the os/arch prefix of an ocx platform key.
+def platform_constraints(platform):
+    """Bazel constraint labels of an ocx platform string.
 
-    'linux/arm64+libc.musl' -> ['@platforms//os:linux', '@platforms//cpu:aarch64'].
-    For toolchain authors composing exec_compatible_with; also the hub's source
-    of config_setting constraint_values. Fails on an unmappable os/arch.
+    OS `linux`, `darwin`, `windows`, `wasip1` map to `@platforms//os:{linux,
+    macos,windows,wasi}` and arch `amd64`, `arm64`, `wasm` to
+    `@platforms//cpu:{x86_64,aarch64,wasm32}`. The feature `libc.musl` adds
+    `@rules_ocx//ocx/constraints:musl`; `libc.glibc`, no libc feature, any
+    other feature and any variant add nothing (open vocabulary: an unknown
+    feature must not break a lock that a newer ocx wrote).
 
     Args:
         platform: an ocx platform key ('os/arch[/variant][+feature,...]').
 
     Returns:
-        [os_constraint_label, cpu_constraint_label].
+        struct(constraints, error): `constraints` is [os, cpu] plus the musl
+        label when the platform names it; `error` is "" on success, else
+        names the platform and `constraints` is [].
     """
     parts = os_arch(platform).split("/")
-    if len(parts) != 2 or not parts[0] or not parts[1]:
-        fail("rules_ocx: platform '{}' is not 'os/arch[...]' — cannot derive constraints".format(platform))
-    os_c = _OS.get(parts[0])
-    cpu_c = _CPU.get(parts[1])
+    os_c = _OS_C.get(parts[0]) if len(parts) == 2 else None
+    cpu_c = _CPU_C.get(parts[1]) if len(parts) == 2 else None
     if not os_c or not cpu_c:
-        fail(("rules_ocx: cannot map platform '{}' to Bazel constraints " +
-              "(unknown os '{}' or arch '{}'; known os {}, arch {})").format(
-            platform,
-            parts[0],
-            parts[1],
-            _OS.keys(),
-            _CPU.keys(),
-        ))
-    return [os_c, cpu_c]
+        return struct(constraints = [], error = ("rules_ocx: cannot map platform '{}' to Bazel constraints " +
+                                                 "(known os {}, arch {})").format(platform, _OS_C.keys(), _CPU_C.keys()))
+    constraints = [os_c, cpu_c]
+    features = platform.split("+", 1)[1].split(",") if "+" in platform else []
+    if "libc.musl" in features:
+        constraints.append(_MUSL)
+    return struct(constraints = constraints, error = "")
 
 def host_info(os_name, arch):
     """Maps a host OS name and arch to ocx release and platform identifiers.
@@ -84,7 +88,7 @@ def host_info(os_name, arch):
     Returns:
         struct with fields:
           triples: cargo-dist target triples of the ocx release artifact, most
-            preferred first (Windows: gnullvm, then msvc for older releases).
+            preferred first (Windows: gnullvm where a release ships one, then msvc).
           ocx_platform: ocx "os/arch" key for `-p` / ocx.lock.
           is_windows: bool.
           exe_ext: "" or ".exe".

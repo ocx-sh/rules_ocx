@@ -1,0 +1,70 @@
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The OCX Authors
+#
+# The remote-execution rig (e2e/rbe). Included from the root taskfile under the namespace `rig`
+# (rig:up, rig:seed, rig:test, rig:down). Run state lives under RIG_RUN_DIR; every Bazel call
+# drops all rc files and loads only e2e/rbe/rig.bazelrc, and every ocx call gets a scratch OCX_HOME.
+
+version: "3"
+
+vars:
+  RIG_PROJECT: '{{.RIG_PROJECT | default "rules-ocx-rig"}}'
+  RIG_PORT: '{{.RIG_PORT | default "18500"}}'
+  RIG_PORT_NL: '{{.RIG_PORT_NL | default "18502"}}'
+  RIG_RUN_DIR: '{{.RIG_RUN_DIR | default (printf "%s/../e2e/rbe/.run" .TASKFILE_DIR)}}'
+  RIG_OUTPUT_ROOT: '{{.RIG_OUTPUT_ROOT | default (printf "%s/bazel" .RIG_RUN_DIR)}}'
+  RIG_PROFILES: '{{.RIG_PROFILES | default "nativelink"}}'
+  # The ocx under test: the OCX_INSTALL_BINARY of the ocx-under-test action when it is set.
+  OCX: '{{.OCX | default (env "OCX_INSTALL_BINARY") | default "ocx"}}'
+  BAZEL: '{{.BAZEL | default "bazel"}}'
+  RIG_BACKEND: '{{.RIG_BACKEND | default "buildbarn"}}'
+
+env:
+  RIG_PROJECT: "{{.RIG_PROJECT}}"
+  RIG_PORT: "{{.RIG_PORT}}"
+  RIG_PORT_NL: "{{.RIG_PORT_NL}}"
+  RIG_RUN_DIR: "{{.RIG_RUN_DIR}}"
+  RIG_BACKEND: "{{.RIG_BACKEND}}"
+
+tasks:
+  up:
+    desc: Start the rig (zot, nginx, Buildbarn, NativeLink) and wait until the registry answers
+    dir: "{{.TASKFILE_DIR}}/../e2e/rbe"
+    cmds:
+      - bash prepare_run_dir.sh "{{.RIG_RUN_DIR}}"
+      - uv run --project . python fixtures/gen_htpasswd.py "{{.RIG_RUN_DIR}}/state"
+      - docker compose -p "{{.RIG_PROJECT}}" {{range (splitList "," .RIG_PROFILES)}}--profile {{.}} {{end}}up -d --build --remove-orphans
+      - |
+        for _ in $(seq 1 60); do
+          code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:{{.RIG_PORT}}/v2/" || true)
+          case "$code" in 200|401) exit 0 ;; esac
+          sleep 2
+        done
+        echo "registry did not answer on 127.0.0.1:{{.RIG_PORT}}" >&2
+        exit 1
+
+  seed:
+    desc: Build and push the fixture packages to the rig registry
+    dir: "{{.TASKFILE_DIR}}/.."
+    cmds:
+      - >-
+        python3 e2e/rbe/fixtures/seed.py --ocx "{{.OCX}}" --registry "127.0.0.1:{{.RIG_PORT}}"
+        --run-dir "{{.RIG_RUN_DIR}}"
+
+  test:
+    desc: Run the rig pytest suite (e2e/rbe/tests)
+    dir: "{{.TASKFILE_DIR}}/../e2e/rbe"
+    cmds:
+      - >-
+        uv run --project . pytest {{.CLI_ARGS}}
+    env:
+      RIG_OCX: "{{.OCX}}"
+      RIG_BAZEL: "{{.BAZEL}}"
+      RIG_OUTPUT_ROOT: "{{.RIG_OUTPUT_ROOT}}"
+
+  down:
+    desc: Stop the rig and delete its containers, networks and volumes
+    dir: "{{.TASKFILE_DIR}}/../e2e/rbe"
+    cmds:
+      - docker compose -p "{{.RIG_PROJECT}}" {{range (splitList "," .RIG_PROFILES)}}--profile {{.}} {{end}}--profile client down -v --remove-orphans

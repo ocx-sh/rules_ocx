@@ -1,13 +1,23 @@
 #!/usr/bin/env bash
-set -euo pipefail
+# --- begin runfiles.bash initialization v3 ---
+# Copy-pasted from the Bazel Bash runfiles library v3.
+set -uo pipefail; set +e; f=bazel_tools/tools/bash/runfiles/runfiles.bash
+# shellcheck disable=SC1090
+source "${RUNFILES_DIR:-/dev/null}/$f" 2>/dev/null || \
+  source "$(grep -sm1 "^$f " "${RUNFILES_MANIFEST_FILE:-/dev/null}" | cut -f2- -d' ')" 2>/dev/null || \
+  source "$0.runfiles/$f" 2>/dev/null || \
+  source "$(grep -sm1 "^$f " "$0.runfiles_manifest" | cut -f2- -d' ')" 2>/dev/null || \
+  source "$(grep -sm1 "^$f " "$0.exe.runfiles_manifest" | cut -f2- -d' ')" 2>/dev/null || \
+  { echo>&2 "ERROR: cannot find $f"; exit 1; }; f=; set -e
+# --- end runfiles.bash initialization v3 ---
 
-# Floating, frozen-index, digest-pinned, and lazy repos all provision a
-# working jq (the lazy launcher materializes on this first execution).
-test "$("$JQ_BIN" -r .greeting "$PRETTY_JSON")" = "hello"
-test "$("$JQ_FROZEN_BIN" -r .greeting "$PRETTY_JSON")" = "hello"
-test "$("$JQ_PINNED_BIN" -r .target "$PRETTY_JSON")" = "bazel"
-test "$("$JQ_LAZY_BIN" -r .greeting "$PRETTY_JSON")" = "hello"
+pretty="$(rlocation "$PRETTY_JSON")"
+
+# Tag, frozen-index and digest-pinned repos all provision a working jq.
+test "$("$(rlocation "$JQ_BIN")" -r .greeting "$pretty")" = "hello"
+test "$("$(rlocation "$JQ_FROZEN_BIN")" -r .greeting "$pretty")" = "hello"
+test "$("$(rlocation "$JQ_PINNED_BIN")" -r .target "$pretty")" = "bazel"
 
 # The genrule output was produced by the provisioned jq.
-grep -q '"greeting"' "$PRETTY_JSON"
+grep -q '"greeting"' "$pretty"
 echo "package example OK"

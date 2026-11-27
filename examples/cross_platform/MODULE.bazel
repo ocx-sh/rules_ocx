@@ -1,4 +1,4 @@
-"""Example: per-platform package repos + a hub select()ed by target platform."""
+"""Example: one package vendored for several platforms, behind one hub."""
 
 module(name = "rules_ocx_example_cross_platform")
 
@@ -21,9 +21,23 @@ ocx.package(
     index = "//:index",
     package = "ocx.sh/jqlang/jq:latest",
     platforms = [
+        "darwin/amd64",
+        "darwin/arm64",
         "linux/amd64",
         "linux/arm64",
         "windows/amd64",
     ],
 )
-use_repo(ocx, "jq")
+
+# The hub holds one toolchain per platform. A tool of the hub runs on the
+# platform an action executes on.
+register_toolchains("@jq//:all")
+
+# The set repositories of the platforms this example inspects without running:
+# a foreign platform's files are reachable as `@jq_<os>_<arch>//:set`.
+use_repo(
+    ocx,
+    "jq",
+    "jq_linux_arm64",
+    "jq_windows_amd64",
+)

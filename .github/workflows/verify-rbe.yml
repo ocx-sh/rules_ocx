@@ -1,0 +1,84 @@
+name: verify-rbe
+
+# The remote-execution rig (e2e/rbe): nginx in front of zot, plus one remote-execution backend per job. The
+# executors have no route to the registry, so a green job shows the set repositories need no network at action time.
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: verify-rbe-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # Outside the checkout: the rig writes gigabytes of storage and Bazel output here.
+  RIG_RUN_DIR: /tmp/rig-run
+
+jobs:
+  rig-buildbarn:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # uv (rig fixtures and pytest) sits in the lint group, bazelisk in the test group.
+      - uses: ocx-sh/conventions/.github/actions/setup@723b544119d0a57045bd9c796d570848f73cf3bb # v0
+        with:
+          groups: default,test,lint
+      - uses: ./.github/actions/ocx-under-test
+      - name: Rig up, seed and test
+        run: |
+          ocx exec -g default,test,lint -- task rig:up rig:seed rig:test \
+            BAZEL=bazelisk RIG_BACKEND=buildbarn RIG_RUN_DIR="$RIG_RUN_DIR"
+      - name: Upload rig logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: rig-buildbarn-logs
+          path: |
+            ${{ env.RIG_RUN_DIR }}/logs/
+            ${{ env.RIG_RUN_DIR }}/measures.json
+          if-no-files-found: ignore
+          retention-days: 14
+          overwrite: true # a job rerun uploads the same name again; without it the step 409s and fails the job
+      - name: Rig down
+        if: always()
+        run: ocx exec -g default,test,lint -- task rig:down RIG_RUN_DIR="$RIG_RUN_DIR"
+
+  rig-nativelink:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ocx-sh/conventions/.github/actions/setup@723b544119d0a57045bd9c796d570848f73cf3bb # v0
+        with:
+          groups: default,test,lint
+      - uses: ./.github/actions/ocx-under-test
+      - name: Rig up, seed and test
+        run: |
+          ocx exec -g default,test,lint -- task rig:up rig:seed rig:test \
+            BAZEL=bazelisk RIG_BACKEND=nativelink RIG_RUN_DIR="$RIG_RUN_DIR"
+      - name: Upload rig logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: rig-nativelink-logs
+          path: |
+            ${{ env.RIG_RUN_DIR }}/logs/
+            ${{ env.RIG_RUN_DIR }}/measures.json
+          if-no-files-found: ignore
+          retention-days: 14
+          overwrite: true # a job rerun uploads the same name again; without it the step 409s and fails the job
+      - name: Rig down
+        if: always()
+        run: ocx exec -g default,test,lint -- task rig:down RIG_RUN_DIR="$RIG_RUN_DIR"

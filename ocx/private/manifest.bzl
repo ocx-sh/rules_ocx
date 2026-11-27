@@ -17,7 +17,7 @@ def select_release(manifest, version, targets):
 
     Args:
         manifest: decoded dist.json object.
-        version: exact ocx version, e.g. "0.3.10".
+        version: exact ocx version, e.g. "0.7.1".
         targets: cargo-dist target triples in preference order, e.g.
             ["x86_64-pc-windows-gnullvm", "x86_64-pc-windows-msvc"]; the first
             with a row for `version` wins.
@@ -32,13 +32,13 @@ def select_release(manifest, version, targets):
             if row["version"] == version and row["target"] == target:
                 return row
     fail(("rules_ocx: ocx {} for {} not found in the dist manifest — " +
-          "run 'task dist:update' or point OCX_INSTALL_DIST_URL at a manifest " +
-          "that contains it").format(version, " or ".join(targets)))
+          "point OCX_INSTALL_DIST_URL at a manifest that lists it, " +
+          "or set OCX_INSTALL_BINARY to a local build").format(version, " or ".join(targets)))
 
 def archive_type(filename):
     """Maps a release filename to the explicit download_and_extract type.
 
-    ocx releases ship .zip (windows), .tar.gz (>= 0.4.3), and .tar.xz (older).
+    ocx releases ship .zip (windows) and .tar.gz; any other extension fails.
 
     Args:
         filename: release row filename, e.g. "ocx-x86_64-unknown-linux-musl.tar.gz".
@@ -50,7 +50,23 @@ def archive_type(filename):
         return "zip"
     if filename.endswith(".tar.gz"):
         return "tar.gz"
-    return "tar.xz"
+    fail("rules_ocx: unknown ocx archive format '{}' (known: .zip, .tar.gz)".format(filename))
+
+def is_sha256(value):
+    """Tells whether a string is a 64-character lowercase-hex sha256 digest.
+
+    Args:
+        value: candidate digest.
+
+    Returns:
+        True when `value` is exactly 64 lowercase hex characters.
+    """
+    if len(value) != 64:
+        return False
+    for char in value.elems():
+        if char not in _HEX_DIGITS:
+            return False
+    return True
 
 def manifest_sha256(url):
     """Extracts a self-verifying sha256 from a dist.json manifest URL.
@@ -75,10 +91,7 @@ def manifest_sha256(url):
     if len(segment) != 69 or not segment.endswith(".json"):
         return ""
     digest = segment[:64]
-    for char in digest.elems():
-        if char not in _HEX_DIGITS:
-            return ""
-    return digest
+    return digest if is_sha256(digest) else ""
 
 def artifact_url(row, mirror_url):
     """Resolves the download URL for a release row, honoring a mirror.

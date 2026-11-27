@@ -1,0 +1,15 @@
+"""Fixture: rules_ocx consumed with a local ocx binary (OCX_INSTALL_BINARY).
+
+Driven by run.sh, which supplies the binary, its sha256 and the Bazel roots.
+"""
+
+module(name = "rules_ocx_e2e_install_binary")
+
+bazel_dep(name = "rules_ocx", version = "0.0.0")
+local_path_override(
+    module_name = "rules_ocx",
+    path = "../..",
+)
+
+ocx = use_extension("@rules_ocx//ocx:extensions.bzl", "ocx")
+use_repo(ocx, "ocx_tool")

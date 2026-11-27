@@ -1,10 +1,10 @@
 """BCR presubmit test module — consumes rules_ocx as a downstream Bazel module.
 
-Build-only smoke test. Uses the lazy `ocx.package` launcher so the presubmit
-downloads only the sha256-pinned `ocx` CLI and renders the launcher script — it
-never pulls tool content from an OCI registry, keeping the BCR platform matrix
-reliable. `../..` resolves to the module under test: BCR checks out the whole
-release archive and runs this module in place at e2e/bzlmod.
+Build-only smoke test. It vendors one digest-pinned package for the host and
+builds its tool, which proves that a downstream consumer gets the pinned `ocx`
+CLI, the hub with its toolchains and one runnable set. `../..` resolves to the
+module under test: BCR checks out the whole release archive and runs this
+module in place at e2e/bzlmod.
 """
 
 module(name = "rules_ocx_e2e_bzlmod")
@@ -17,18 +17,18 @@ local_path_override(
 
 ocx = use_extension("@rules_ocx//ocx:extensions.bzl", "ocx")
 
-# Lazy + digest-pinned: nothing is installed at fetch time. The launcher
-# re-enters `ocx package exec`, materializing the package on first execution.
-# Build-only presubmit never executes it, so BCR CI touches no OCI registry.
+# Digest-pinned, so the extension records a fact and the result does not move.
 ocx.package(
-    name = "jq_lazy",
-    bins = ["jq"],
-    package = "ocx.sh/jqlang/jq:latest",
-    pins = {
-        "darwin/amd64": "sha256:f750c91d28769d12298ba9a4c10340152fcbdd48c48102bf275c21d736cc72a2",
-        "darwin/arm64": "sha256:c5cf10597aacad9b7925f937c966ec72145ea6a40f7f7ef4cac11f90c43130b1",
-        "linux/amd64": "sha256:913ff41f5e643a73c17a2e560e349d8eea255f50b293156e58da15b957baacae",
-        "windows/amd64": "sha256:bab93861d95a25d33163cc9499cb17bb109028d6537ca55b8427af21c1fdc989",
-    },
+    name = "jq",
+    package = "ocx.sh/jqlang/jq:latest@sha256:c295300441831e002c0ba54df8e6126cdd4064c63be2464bdc6b68d0012beec6",
+    platforms = [
+        "darwin/amd64",
+        "darwin/arm64",
+        "linux/amd64",
+        "linux/arm64",
+        "windows/amd64",
+    ],
 )
-use_repo(ocx, "jq_lazy")
+use_repo(ocx, "jq")
+
+register_toolchains("@jq//:all")

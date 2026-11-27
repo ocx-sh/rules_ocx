@@ -5,6 +5,10 @@ includes:
   baseline:
     taskfile: ./taskfiles/baseline.taskfile.yml
     flatten: true
+  rig:
+    taskfile: ./taskfiles/rig.taskfile.yml
+  guard:
+    taskfile: ./taskfiles/guard.taskfile.yml
 
 vars:
   # bazelisk lives in both the test and build groups (the verify-basic test and build jobs pull one each).
@@ -12,14 +16,10 @@ vars:
   BAZEL_BUILD: ocx exec -g build -- bazelisk
   EXAMPLES: examples/project examples/package examples/cross_platform
   # Bazel versions the deep tier covers; rolling is forward-compat early warning only (never blocks).
-  BAZEL_VERSIONS: 8.7.0 9.x
+  BAZEL_VERSIONS: 9.x
   # Remote-cache tuning (--config=ci) only on CI; a laptop keeps its own output base settings.
   CI_CFG:
     sh: if [ -n "${CI:-}" ]; then echo --config=ci; fi
-  # Docs freshness (//docs) only matches the pinned dev Bazel: stardoc emits an extra `repo_mapping`
-  # row per repository rule on Bazel 9 and not on 8, so it is excluded on any other USE_BAZEL_VERSION.
-  DOCS_EXCLUDE:
-    sh: case "${USE_BAZEL_VERSION:-9}" in 9*) ;; *) echo "-//docs/..." ;; esac
 
 tasks:
   default:
@@ -40,18 +40,31 @@ tasks:
     desc: Lint and format check (buildifier, license headers, links, dist snapshot, guards)
     cmds:
       - task: lint
-      - task: pins:check
+      - task: guard:check
+      - task: guard:test
+
+  # The template-owned workflows cannot carry a step for the ocx build under test, so the Bazel tasks start with
+  # this one. No e2e/rbe/ocx-under-test.txt: it does nothing.
+  ocx-under-test:
+    desc: Point the Bazel runs at the ocx build in e2e/rbe/ocx-under-test.txt (no file, no effect)
+    cmds:
+      - bash scripts/ocx_under_test.sh
 
   ci:test:
     desc: Basic-tier Bazel tests (--config=basic); JUnit copied to target/reports/junit/
     cmds:
+      - task: ocx-under-test
       - defer: { task: junit:collect, vars: { DIR: ".", PREFIX: basic } }
-      - "{{.BAZEL}} test --config=basic {{.CI_CFG}} --verbose_test_summary -- //... {{.DOCS_EXCLUDE}}"
+      - "{{.BAZEL}} test --config=basic {{.CI_CFG}} --verbose_test_summary -- //..."
+      - task: test:install-binary
+      - task: test:no-runfiles
+        if: '{{eq OS "linux"}}'
 
   ci:build:
     desc: Build every Bazel target
     cmds:
-      - "{{.BAZEL_BUILD}} build {{.CI_CFG}} -- //... {{.DOCS_EXCLUDE}}"
+      - task: ocx-under-test
+      - "{{.BAZEL_BUILD}} build {{.CI_CFG}} -- //..."
 
   ci:docs:
     desc: Site build and checks, budget unit test and the Lighthouse gate
@@ -61,7 +74,37 @@ tasks:
       - task: site:lighthouse
 
   ci:deep:
-    desc: Nightly tier — full tests per Bazel version, examples, BCR parity, pin completeness, offline determinism
+    desc: Nightly tier — full tests per Bazel version, examples, BCR parity, offline determinism
+    cmds:
+      - task: deep:all
+        if: '{{ne OS "windows"}}'
+      # Windows runs every row even after a red one, then fails with the list: a Windows run is too costly to
+      # learn one failure at a time. The rows are the ones deep:all runs, in the same order.
+      - cmd: |
+          set -u
+          failed=""
+          row() { # row NAME TASK-ARGS...: a red row is recorded, never stops the loop
+            name="$1"; shift
+            rc=0
+            "{{.TASK_EXE}}" "$@" || rc=$?
+            if [ "$rc" != 0 ]; then failed="$failed
+            $name (exit $rc)"; fi
+          }
+          {{range (splitList " " .BAZEL_VERSIONS)}}row "deep:test {{.}}" deep:test "BAZEL_VERSION={{.}}"
+          {{end}}"{{.TASK_EXE}}" deep:test BAZEL_VERSION=rolling || echo "deep:test rolling failed (exit $?, never blocks)"
+          # Before deep:examples: the copies below are taken while the examples hold no bazel-* links.
+          row deep:windows-runfiles deep:windows-runfiles
+          row deep:windows-update-target deep:windows-update-target
+          row deep:examples deep:examples
+          row deep:bcr-parity deep:bcr-parity
+          if [ -n "$failed" ]; then
+            printf 'ci:deep: these rows failed:%s\n' "$failed" >&2
+            exit 1
+          fi
+        if: '{{eq OS "windows"}}'
+
+  deep:all:
+    internal: true
     cmds:
       - for: { var: BAZEL_VERSIONS }
         task: deep:test
@@ -71,31 +114,22 @@ tasks:
         ignore_error: true
       - task: deep:examples
       - task: deep:bcr-parity
-      - task: pins:check
       - task: deep:offline
 
   deep:test:
-    internal: true
     env:
       USE_BAZEL_VERSION: "{{.BAZEL_VERSION}}"
-    vars:
-      DOCS_EXCLUDE:
-        sh: case "{{.BAZEL_VERSION}}" in 9*) ;; *) echo "-//docs/..." ;; esac
     cmds:
+      - task: ocx-under-test
       - defer: { task: junit:collect, vars: { DIR: ".", PREFIX: "deep-{{.BAZEL_VERSION}}" } }
-      - "{{.BAZEL}} test --config=deep {{.CI_CFG}} --verbose_test_summary -- //... {{.DOCS_EXCLUDE}}"
+      - "{{.BAZEL}} test --config=deep {{.CI_CFG}} --verbose_test_summary -- //..."
 
-  # Live ocx.sh registry; Bazel 9 examples run on Linux only (bounds the registry fan-out).
+  # Live ocx.sh registry.
   deep:examples:
-    internal: true
     cmds:
-      - for: { var: EXAMPLES }
-        task: deep:example
-        vars: { EXAMPLE: "{{.ITEM}}", BAZEL_VERSION: 8.7.0 }
       - for: { var: EXAMPLES }
         task: deep:example
         vars: { EXAMPLE: "{{.ITEM}}", BAZEL_VERSION: 9.x }
-        if: '{{eq OS "linux"}}'
 
   deep:example:
     internal: true
@@ -105,10 +139,117 @@ tasks:
       - defer: { task: junit:collect, vars: { DIR: "{{.EXAMPLE}}", PREFIX: "example-{{base .EXAMPLE}}-{{.BAZEL_VERSION}}" } }
       - cd {{.EXAMPLE}} && ocx --project ../../ocx.toml exec -g test -- bazelisk test //... --verbose_test_summary
 
+  # Windows without `--enable_runfiles`, the consumer default the examples now keep: deep:examples runs
+  # examples/cross_platform:manifest_runfiles_test as is (V-L46). The gating run below uses an ASCII workspace and an
+  # ASCII output root: it shows the launcher works through the runfiles manifest, the feature under test. Two probes
+  # then repeat it with a non-ASCII output root and a non-ASCII workspace (V-L47); they only print. The first CI run
+  # showed the Bazel client failing its own chdir into a non-ASCII workspace ("FATAL: changing directory into ...
+  # failed: (error: 3)") before any rule ran, so those limits are Bazel's, not this module's, and never gate.
+  deep:windows-runfiles:
+    env:
+      USE_BAZEL_VERSION: 9.x
+    cmds:
+      - cmd: |
+          set -u
+          tmp="${RUNNER_TEMP:-{{.ROOT_DIR}}/e2e/.copies}"
+          u="rules_ocx-ünïcødé"
+          rm -rf "${tmp:?}"/rules_ocx_rf_* "${tmp:?}/$u"*
+          mkdir -p "$tmp/rules_ocx_rf_gate" "$tmp/rules_ocx_rf_out" "$tmp/$u-ws"
+          for ws in "$tmp/rules_ocx_rf_gate" "$tmp/rules_ocx_rf_out" "$tmp/$u-ws"; do
+            cp -r examples/cross_platform "$ws/"
+            # The copy cannot reach the module through `../..`.
+            echo 'common --override_module=rules_ocx={{toSlash .ROOT_DIR}}' >> "$ws/cross_platform/.bazelrc.user"
+          done
+          # A GNU timeout bounds every Bazel call (the gate too: a hang would hold the whole job); the Windows
+          # timeout.exe is a different program and answers --version with an error, so it is not used.
+          bz() {
+            if timeout --version >/dev/null 2>&1; then t="timeout 1500"; else t=""; fi
+            $t ocx --project "{{.ROOT_DIR}}/ocx.toml" exec -g test -- bazelisk "$@"
+          }
+          run() { # run WORKSPACE_ROOT OUTPUT_ROOT
+            (cd "$1/cross_platform" && bz --output_user_root="$2" \
+              test --noenable_runfiles --verbose_test_summary //:manifest_runfiles_test //:host_test)
+          }
+          # probe LABEL WORKSPACE_ROOT OUTPUT_ROOT: prints one line, never fails, leaves no Bazel server behind.
+          probe() {
+            log="$tmp/rules_ocx_rf_probe.log"
+            if run "$2" "$3" >"$log" 2>&1; then echo "$1: PASS"
+            else echo "$1: FAIL (Bazel client limit, not gating)"; grep -m1 -F FATAL "$log" || tail -n 3 "$log"; fi || true
+            (cd "$2/cross_platform" && bz --output_user_root="$3" shutdown) >/dev/null 2>&1 || true
+          }
+          rc=0
+          run "$tmp/rules_ocx_rf_gate" "$tmp/rules_ocx_rf_gate/bazel" || rc=$?
+          (cd "$tmp/rules_ocx_rf_gate/cross_platform" && bz --output_user_root="$tmp/rules_ocx_rf_gate/bazel" shutdown) >/dev/null 2>&1 || true
+          probe "non-ASCII output root" "$tmp/rules_ocx_rf_out" "$tmp/$u-bazel"
+          probe "non-ASCII workspace" "$tmp/$u-ws" "$tmp/rules_ocx_rf_ws-bazel"
+          exit "$rc"
+
+  # ADR 0003 § Test plan `windows-update-target`: the pre-configured `ocx` update target, in workspace copies under a
+  # path with a space. examples/project holds a project hub with its ocx.lock, examples/package a tag and a pinned hub.
+  deep:windows-update-target:
+    env:
+      USE_BAZEL_VERSION: 9.x
+    cmds:
+      - cmd: |
+          set -eu
+          base="${RUNNER_TEMP:-{{.ROOT_DIR}}/e2e/.copies}/rules_ocx update copies"
+          rm -rf "$base"
+          mkdir -p "$base"
+          for example in package project; do
+            cp -r "examples/$example" "$base/"
+            # The copies cannot reach the module through `../..`.
+            echo 'common --override_module=rules_ocx={{toSlash .ROOT_DIR}}' >> "$base/$example/.bazelrc.user"
+          done
+          bz() { ocx --project "{{.ROOT_DIR}}/ocx.toml" exec -g test -- bazelisk "$@"; }
+          # expect CODE TEXT ARGS...: `bazel ARGS` exits CODE and prints TEXT.
+          expect() {
+            want="$1"; text="$2"; shift 2
+            set +e; out="$(bz "$@" 2>&1)"; got=$?; set -e
+            printf '%s\n' "$out" | tail -n 30
+            # A failed expectation is recorded and the next row still runs: a Windows run is too costly to read one at a time.
+            if [ "$got" != "$want" ]; then echo "expected exit $want, got $got: bazel $*" >&2; fails="$fails
+            exit $want: bazel $*"; fi
+            if ! printf '%s\n' "$out" | grep -qF -- "$text"; then echo "expected '$text' from: bazel $*" >&2; fails="$fails
+            text '$text': bazel $*"; fi
+          }
+          fails=""
+
+          cd "$base/package"
+          # A tag and a pinned hub have no update target; the tag's one command re-reads the tag and prints the W1 warning.
+          expect 7 "not declared in package" query @jq//:update
+          expect 7 "not declared in package" query @jq_pinned//:update
+          bz mod deps --lockfile_mode=update
+          expect 0 "RULES_OCX_UPDATE=jq is set" mod deps --lockfile_mode=update --repo_env=RULES_OCX_UPDATE=jq
+
+          cd "$base/project"
+          # ocx writes the lock without this comment, so its absence afterwards shows the file was replaced. The fact
+          # is recorded over the commented text, so the replacement makes it stale.
+          echo '# rules_ocx: replaced by the update' >> ocx.lock
+          bz mod deps --lockfile_mode=update
+          bz mod deps --lockfile_mode=error
+          cp MODULE.bazel.lock "$base/before.module.lock"
+          # The workspace path holds a space and, on Windows, backslashes: each reaches ocx as one argument.
+          expect 0 "" run @tools//:update
+          if grep -qF '# rules_ocx: replaced by the update' ocx.lock || [ -L ocx.lock ]; then
+            echo "bazel run @tools//:update did not replace ocx.lock with a file" >&2
+            fails="$fails
+            ocx.lock not replaced"
+          fi
+          # The update ran no Bazel: the fact is stale until the next plain command, which moves it.
+          cmp -s "$base/before.module.lock" MODULE.bazel.lock || fails="$fails
+          MODULE.bazel.lock moved before a Bazel command"
+          expect 0 "" mod deps --lockfile_mode=update
+          if cmp -s "$base/before.module.lock" MODULE.bazel.lock; then fails="$fails
+          MODULE.bazel.lock did not move on the next Bazel command"; fi
+          # Arguments after `--` follow the baked ones and reach ocx unchanged; ocx refuses a group it does not know.
+          expect 64 "a)b" run @tools//:update -- -g "a)b"
+          expect 64 "a b" run @tools//:update -- -g "a b"
+          if [ -n "$fails" ]; then printf 'windows update target: failed expectations:%s\n' "$fails" >&2; exit 1; fi
+          echo "windows update target OK"
+
   # Reproduces the BCR presubmit for e2e/bzlmod. Deliberately no remote cache: a hit would hide a break
   # BCR would then find in the submission PR (e2e/ is its own workspace and does not import the baseline rc).
   deep:bcr-parity:
-    internal: true
     cmds:
       - for: { var: BAZEL_VERSIONS }
         task: deep:bcr-build
@@ -139,28 +280,10 @@ tasks:
       - chmod +x "${RUNNER_TEMP:-/tmp}/bazelisk-x64"
       - arch -x86_64 "${RUNNER_TEMP:-/tmp}/bazelisk-x64" build //...
 
-  # Deterministic, arch-independent guard for the class of bug that broke the BCR macOS presubmit: every
-  # ocx.package `pins` map must list all four BCR platforms.
-  pins:check:
-    desc: Every ocx.package pins map in e2e/bzlmod and examples/package covers all four BCR platforms
-    cmds:
-      - |
-        rc=0
-        for f in e2e/bzlmod/MODULE.bazel examples/package/MODULE.bazel; do
-          blocks=$(grep -c 'pins = {' "$f")
-          for p in darwin/amd64 darwin/arm64 linux/amd64 windows/amd64; do
-            # `.` stands for the quote: an embedded " in a grep argument is lost on Windows (Git's grep).
-            n=$(grep -c "^ *.$p.:" "$f") || n=0
-            if [ "$n" -ne "$blocks" ]; then
-              echo "FAIL $f: platform '$p' appears $n time(s), expected $blocks (one per pins block)"
-              rc=1
-            fi
-          done
-          [ "$rc" -ne 0 ] || echo "OK $f ($blocks pins block(s), all four platforms present)"
-        done
-        exit "$rc"
-
-  # Hermetic offline behaviour; a network-backed cache would mask it. Linux only (one runner is enough).
+  # Offline failure mode; a network-backed cache would mask it. Linux only (one runner is enough). A set
+  # repository vendors into a scratch OCX_HOME of its own, so there is no warm store an offline refetch
+  # could reuse: it must fail naming ocx, never hang. That an offline build *succeeds* from `bazel vendor` or
+  # blob_dirs is proven with the network cut, in the rig (verify-rbe: test_offline.py).
   deep:offline:
     internal: true
     cmds:
@@ -169,17 +292,25 @@ tasks:
         vars: { BAZEL_VERSION: "{{.ITEM}}" }
         if: '{{eq OS "linux"}}'
 
+  # One target, not `@dev_tools//...`: a tool the lock serves on another platform only (uvw is Windows-only)
+  # has no toolchain on this one, and `//...` would analyse it.
   deep:offline-version:
     internal: true
     env:
       USE_BAZEL_VERSION: "{{.BAZEL_VERSION}}"
     cmds:
-      - "{{.BAZEL}} fetch @dev_tools//..."
-      - cmd: OCX_OFFLINE=1 {{.BAZEL}} fetch --force @dev_tools//...
+      - "{{.BAZEL}} fetch @dev_tools//:actionlint"
       - cmd: |
-          empty=$(mktemp -d)/empty-ocx-home
-          if OCX_HOME="$empty" OCX_OFFLINE=1 {{.BAZEL}} fetch --force @dev_tools//...; then
-            echo "expected the offline fetch against an empty store to fail" >&2
+          # Offline, the fact is recomputed (the recorded one is not read with --lockfile_mode=off) and ocx
+          # reports the package absent from the empty scratch home: `ocx vendor --manifest-only` exit 79.
+          out=$(mktemp)
+          if OCX_OFFLINE=1 {{.BAZEL}} fetch --force @dev_tools//:actionlint > "$out" 2>&1; then
+            echo "expected the offline refetch without a store to fail" >&2
+            exit 1
+          fi
+          if ! grep -q "ocx vendor --manifest-only for '.*' failed (exit 79)" "$out"; then
+            echo "the offline refetch failed, but not as ocx vendor exit 79:" >&2
+            tail -n 30 "$out" >&2
             exit 1
           fi
           echo "offline failure mode OK"
@@ -229,9 +360,13 @@ tasks:
       # bump_ocx.py's supply-chain guards: setup.ocx.sh must not be able to
       # choose our pin, move it backwards, or rewrite a committed sha256.
       - python3 scripts/bump_ocx_test.py
+      # A dev-ocx pin must not outlive its pull request: red on the default branch and in a merge group,
+      # silent on a pull request (e2e/rbe/ocx-under-test.txt).
+      - bash scripts/ocx_under_test.sh --guard
+      - bash scripts/ocx_under_test_test.sh
 
-  # make-location (buildifier >= 9) flags every `$(location)` in the examples and tests; the old
-  # buildifier_prebuilt 8.2 gate did not, so it stays off until those call sites are migrated on purpose.
+  # make-location (buildifier >= 9) flags every `$(location)` in the examples and tests, so it stays off
+  # until those call sites are migrated on purpose.
   buildifier:check:
     desc: buildifier format + lint check over every tracked Bazel file
     cmds:
@@ -252,6 +387,21 @@ tasks:
     desc: Unit tests + docs freshness (no network)
     cmds:
       - "{{.BAZEL}} test //..."
+
+  test:install-binary:
+    desc: Local-ocx install path — hash check, copy, immunity to later edits (Linux only)
+    cmds:
+      - BAZEL=bazelisk ocx exec -g test -- bash e2e/install_binary/run.sh
+
+  # A locally executed action gets no runfiles tree and no sandbox staging, so the launcher has only the runfiles
+  # manifest (V-L48); `bazel coverage` starts the same tools (V-L49). Linux leg of C-RO-27.
+  test:no-runfiles:
+    desc: Vendored tools start without a runfiles tree and under bazel coverage (examples/cross_platform, Linux)
+    dir: examples/cross_platform
+    cmds:
+      - defer: { task: junit:collect, vars: { DIR: examples/cross_platform, PREFIX: basic-no-runfiles } }
+      - ocx --project ../../ocx.toml exec -g test -- bazelisk test --noenable_runfiles --spawn_strategy=local --verbose_test_summary //:manifest_runfiles_test
+      - ocx --project ../../ocx.toml exec -g test -- bazelisk coverage --verbose_test_summary //:host_test //:manifest_runfiles_test
 
   test:examples:
     desc: Example workspaces — integration tests against live ocx.sh
@@ -312,7 +462,7 @@ tasks:
       - task: dist:check
 
   dist:check:
-    desc: Snapshot sanity — pin present for all 8 targets, per-row guards, no duplicate rows
+    desc: Snapshot sanity — only releases at or above the floor, pin present for all 8 targets (or the known empty state), per-row guards, no duplicate rows
     cmds:
       # The same code path the refresh validates with, so CI actually exercises
       # the per-row guards (stable channel, hex sha256, artifact host) and the

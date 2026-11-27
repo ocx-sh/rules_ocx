@@ -1,0 +1,29 @@
+// Copyright 2026 The OCX Authors
+// SPDX-License-Identifier: Apache-2.0
+// One instance name, `main`. Whether a `main/<suffix>` is admitted is rig question 1 (RESULTS.md).
+{
+  stores: [
+    { name: "AC", filesystem: { content_path: "/data/ac/content", temp_path: "/data/ac/tmp", eviction_policy: { max_bytes: 2000000000 } } },
+    { name: "CAS", filesystem: { content_path: "/data/cas/content", temp_path: "/data/cas/tmp", eviction_policy: { max_bytes: 20000000000 } } },
+  ],
+  schedulers: [
+    // `exact`: an action asking for another OSFamily is refused, not run anywhere (`priority` matches any value).
+    { name: "MAIN", simple: { supported_platform_properties: { OSFamily: "exact", "container-image": "ignore" } } },
+  ],
+  servers: [
+    {
+      listener: { http: { socket_address: "0.0.0.0:50051" } },
+      services: {
+        cas: [{ instance_name: "main", cas_store: "CAS" }],
+        ac: [{ instance_name: "main", ac_store: "AC" }],
+        execution: [{ instance_name: "main", cas_store: "CAS", scheduler: "MAIN" }],
+        capabilities: [{ instance_name: "main", remote_execution: { scheduler: "MAIN" } }],
+        bytestream: [{ instance_name: "main", cas_store: "CAS" }],
+      },
+    },
+    {
+      listener: { http: { socket_address: "0.0.0.0:50061" } },
+      services: { worker_api: { scheduler: "MAIN" } },
+    },
+  ],
+}

@@ -1,6 +1,6 @@
 ---
 name: update-dist
-description: Update rules_ocx to a newer ocx CLI release — refresh the dist/dist.json snapshot, bump DEFAULT_OCX_VERSION and the CI setup-ocx pins in lockstep, then prove the pinned binary really downloads, extracts and runs. Use when asked to update or bump ocx, pin a new ocx version, refresh the dist snapshot, adopt a just-published ocx release, or when a release changes archive format (e.g. tar.xz to tar.gz).
+description: Update rules_ocx to a newer ocx CLI release — refresh the dist/dist.json snapshot, bump DEFAULT_OCX_VERSION and the CI setup-ocx pins in lockstep, then prove the pinned binary really downloads, extracts and runs. Use when asked to update or bump ocx, pin a new ocx version, refresh the dist snapshot, adopt a just-published ocx release, or when a release changes archive format.
 ---
 
 # Update the pinned ocx release
@@ -16,7 +16,7 @@ and refuses to write a pin the snapshot cannot support.
 
    ```sh
    python3 scripts/bump_ocx.py                  # newest stable
-   python3 scripts/bump_ocx.py --version 0.5.2  # a version you chose
+   python3 scripts/bump_ocx.py --version 0.6.8  # a version you chose
    python3 scripts/bump_ocx.py --snapshot-only  # refresh only; pin stays put
    python3 scripts/bump_ocx.py --check          # offline; validate what is committed
    ```
@@ -49,6 +49,7 @@ override flag** — the fix is upstream, or a deliberate reviewed commit.
 | a new column on every row | A new field changes what an already-committed row means. |
 | a row is not channel `stable` / sha256 not 64 lowercase hex / url not on the ocx release host / `tag` or `filename` is not a single path segment / an archive extension `archive_type()` does not map | Per-row validation. It covers the pinned version **and every row a refresh adds** — the whole manifest is written, and `ocx.download(version = …)` lets a consumer select any row in it. `--check` re-runs it on every PR via `task lint`. |
 | fewer than 8 targets | The coarse floor: the release may still be publishing; retry. More than 8 is fine — upstream adding a target is a normal release. |
+| `--version` below `MIN_OCX_VERSION` | The floor refuses that version before any download. A refresh drops every row below it, so `dist/dist.json` lists releases at or above the floor only. While none carries `ocx vendor` the table is empty and the pin is below the floor; `--check` accepts exactly that pair. |
 | the bump drops a target the current pin covers | Measured against the target set in the *committed* snapshot, so upstream cannot shrink what it is judged against. A rename lands here: the host that lost its row would hit `select_release()`'s `fail()` in `ocx/private/manifest.bzl`. Check the releases page before pinning. |
 
 `--version` is the only bypass, and it bypasses exactly two things: the
@@ -89,9 +90,7 @@ row.
 
 2. **Act on an archive-format NOTE.** If the script reports the archive
    format changed, `archive_type()` in `ocx/private/manifest.bzl` must map
-   the new extension — it falls back to `tar.xz`, so an unmapped format
-   fails at extraction, not at download. Update its docstring to name the
-   real cutover version too.
+   the new extension — it fails on an unknown one. Update its docstring too.
 
 3. **Verify.** `task verify` is the gate (lint + unit tests + examples).
    `task lint` now runs `task dist:check`, so the lockstep invariant is
@@ -149,24 +148,18 @@ locally.
   They are bumped so CI runs the version the rules ship; leaving them stale
   means CI never exercises it.
 - The ocx CLI is version-unstable. If `task verify` fails after a bump, the
-  CLI's `--format json` surface likely changed — check the `install`,
-  `which`, `env` and `inspect --closure` shapes and the sysexit codes against
-  AGENTS.md's "Two-tier ocx CLI contract" before adapting the Starlark.
-- Four couplings to ocx fail *open*, so no test in this repo catches a drift —
+  `ocx vendor` manifest likely changed — check its `schema_version` and the
+  sysexit table against AGENTS.md's "ocx CLI contract" before adapting the
+  Starlark.
+- Three couplings to ocx fail *open*, so no test in this repo catches a drift —
   the unit tests pin what rules_ocx emits, not what ocx actually does.
-  Re-verify both by hand on every bump:
+  Re-verify them by hand on every bump:
   - Every path `ambient_config_paths()` hard-codes and watches:
-    `/etc/ocx/config.toml`, the platform user-config dir (`XDG_CONFIG_HOME`
+    `/etc/ocx/config.toml` and the platform user-config dir (`XDG_CONFIG_HOME`
     or `~/.config`, `~/Library/Application Support` on macOS, `%APPDATA%` on
-    Windows), and `$OCX_HOME/{config.toml, state/managed-config/snapshot.json,
-    state/managed-config/config.toml}`. ocx reports none of them through a
-    read-only command, so if a release relocates one the watch covers nothing
-    and nothing errors — a site config edit stops refetching.
-  - `sigstore_trust_root_path()` in `ocx/private/repo_utils.bzl`, which
-    hard-codes ocx's rung-4 trusted-root convention
-    `$OCX_HOME/sigstore/trusted-root.json`. Same failure mode: relocate the
-    directory upstream and the watch covers nothing, so editing or dropping in
-    a trusted root stops refetching the repos that verified against it.
+    Windows). ocx reports neither through a read-only command, so if a
+    release relocates one the watch covers nothing and nothing errors — a
+    site config edit stops refetching.
   - The self-verifying manifest convention `manifest_sha256()` parses —
     `dist/<sha256>.json`, a 64-lowercase-hex name published alongside
     `dist.json`. It mirrors www-setup's `dist_pin_digest` (`src/install.sh`);

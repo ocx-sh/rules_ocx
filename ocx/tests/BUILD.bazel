@@ -1,22 +1,57 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 The OCX Authors
 
+load("@bazel_skylib//rules:diff_test.bzl", "diff_test")
+load("@bazel_skylib//rules:write_file.bzl", "write_file")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
-load(":launcher_test.bzl", "launcher_test_suite")
+load(":download_test.bzl", "download_test_suite")
+load(":facts_test.bzl", "facts_test_suite")
+load(":hub_test.bzl", "hub_test_suite")
 load(":manifest_test.bzl", "manifest_test_suite")
-load(":package_test.bzl", "package_test_suite")
+load(":platforms_map_test.bzl", "platforms_map_test_suite")
 load(":platforms_test.bzl", "platforms_test_suite")
 load(":policy_test.bzl", "policy_test_suite")
+load(":repo_utils_test.bzl", "repo_utils_test_suite")
+load(":set_repo_test.bzl", "set_repo_test_suite")
+load(":testdata/vendor_manifest_example.bzl", "EXAMPLE")
+load(":update_repo_test.bzl", "update_repo_test_suite")
+load(":vendor_manifest_test.bzl", "vendor_manifest_test_suite")
 
 platforms_test_suite(name = "platforms_tests")
 
 manifest_test_suite(name = "manifest_tests")
 
-launcher_test_suite(name = "launcher_tests")
-
-package_test_suite(name = "package_tests")
+repo_utils_test_suite(name = "repo_utils_tests")
 
 policy_test_suite(name = "policy_tests")
+
+vendor_manifest_test_suite(name = "vendor_manifest_tests")
+
+set_repo_test_suite(name = "set_repo_tests")
+
+facts_test_suite(name = "facts_tests")
+
+hub_test_suite(name = "hub_tests")
+
+update_repo_test_suite(name = "update_repo_tests")
+
+platforms_map_test_suite(name = "platforms_map_tests")
+
+download_test_suite(name = "download_tests")
+
+# The .bzl copy of the manifest example is what the unit tests parse; the .json
+# is what other tooling reads. They must stay byte-identical.
+write_file(
+    name = "vendor_manifest_example_bzl_copy",
+    out = "vendor_manifest_example_from_bzl.json",
+    content = [EXAMPLE],
+)
+
+diff_test(
+    name = "vendor_manifest_example_parity_test",
+    file1 = "testdata/vendor_manifest_example.json",
+    file2 = ":vendor_manifest_example_from_bzl.json",
+)
 
 # Dogfooding smoke tests: the bootstrapped ocx binary and the project-tier
 # repo generated from this repo's own ocx.toml.

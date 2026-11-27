@@ -24,16 +24,19 @@ export default defineConfig({
           items: [
             { label: 'Share one toolchain', link: '/guides/pin-toolchain/' },
             { label: 'Fail CI on a stale lock', link: '/guides/ci-reproducible/' },
+            { label: 'Update locked tools', link: '/guides/update-locks/' },
             { label: 'Build behind a mirror', link: '/guides/offline-mirror/' },
-            { label: 'Use per-platform tools', link: '/guides/cross-platform/' },
-            { label: 'Keep tool bytes out of the cache', link: '/guides/remote-cache/' },
+            { label: 'Use tools for several platforms', link: '/guides/cross-platform/' },
+            { label: 'Windows: path length', link: '/guides/windows-path-length/' },
+            { label: 'Remote execution and caching', link: '/guides/remote-cache/' },
           ],
         },
         {
           label: 'Concepts',
           items: [
+            { label: 'The vendor model', link: '/concepts/design/' },
             { label: 'How rules_ocx works', link: '/concepts/how-it-works/' },
-            { label: 'Trust, config and patches', link: '/concepts/trust-and-config/' },
+            { label: 'Trust and config', link: '/concepts/trust-and-config/' },
           ],
         },
         {
@@ -45,7 +48,7 @@ export default defineConfig({
               collapsed: true,
               items: [
                 { label: 'Overview', link: '/defs/' },
-                ...['ocx_platform_constraints', 'ocx_download', 'ocx_package_hub', 'ocx_package_repo', 'ocx_project_repo'].map((n) => ({ label: n, link: `/defs/${n}/` })),
+                ...['ocx_set', 'ocx_set_toolchain', 'OcxSetInfo', 'make_ocx_tool_rule', 'ocx_download', 'ocx_hub_repo', 'ocx_set_repo'].map((n) => ({ label: n, link: `/defs/${n.toLowerCase()}/` })),
               ],
             },
             { label: 'Module extension', link: '/extensions/' },

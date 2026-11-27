@@ -14,6 +14,12 @@
   stable. The ocx CLI is version-unstable — that PR is
   a proposal, not a rubber stamp: read the ocx changelog for the versions
   being crossed before merging it.
+- **The file lists only releases at or above `MIN_OCX_VERSION`.** The floor
+  refuses a lower version before any download, so a refresh drops such rows
+  and `--check` refuses them. While no release carries `ocx vendor` the table
+  is empty and `DEFAULT_OCX_VERSION` is below the floor; `--check` accepts
+  exactly that pair, and the first bump after the release replaces it with a
+  normal table.
 - **A refresh may only add rows**, and **every added row clears the same
   per-row bar as the pinned one** — stable channel, 64-lowercase-hex sha256,
   a url that *parses* to the ocx release host, a `tag` and a `filename` that
