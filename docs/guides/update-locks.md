@@ -42,6 +42,16 @@ An `ocx.package` hub takes no arguments.
 
 The target then runs `bazel mod deps --lockfile_mode=update` once, so that `MODULE.bazel.lock` follows.
 It finds `bazel` on `PATH`, or in the variable `RULES_OCX_BAZEL`.
+Both choose the program the target runs inside your workspace, so they are trusted like `PATH`: an untrusted `PATH` entry or `RULES_OCX_BAZEL` value runs its program with your rights.
+
+## Know what the update needs from the network
+
+An update moves a pin, so it asks the registry what a tag points to now.
+
+- A `tag` declaration resolves again in the nested Bazel call, and rules_ocx passes `--remote` to `ocx` for it: ocx reads the tag from the registry, not from a local index.
+- A `project` update (`ocx update --no-pull`) and an `index` update (`ocx index update`) also read the registry to resolve tags. `--no-pull` only skips downloading the packages.
+- A `pinned` declaration needs no network, because its digest is in `MODULE.bazel`.
+- `OCX_OFFLINE=1` is forwarded to every `ocx` run of the update, and `ocx` then makes no network access. A tag it cannot answer from its local index exits 81 (blocked by policy). Run the update online.
 
 ## Update every declaration
 
@@ -103,6 +113,8 @@ MODULE.bazel.lock merge=bazel-lockfile-merge
 - When the nested `bazel mod deps` fails, no fact moved. Fix the cause and run `bazel mod deps --lockfile_mode=update`.
 - A held output base (another Bazel command, or a `bazel --batch` run) exits 75. Run the update again without `--batch`.
 - A workspace `ocx.lock` that is a symlink, or a path that leaves the workspace, is refused. The error names the path.
+- On Windows the update cannot see where a link leads. It refuses a symlink or junction anywhere on the path of the write target below the workspace root, even one that points back into the workspace, and names the link. Links above the workspace root are not checked.
+- On Windows `@rules_ocx//:update` accepts names made of letters, digits and `. _ : / @ + -`; a tab, `,`, `;` or `=` cannot be passed through `cmd.exe` and exits 64.
 - A preflight `bazel info output_base` that fails for another reason exits with Bazel's exit code. Nothing is written.
 - A failed replace of `ocx.lock` exits 74 after the other declarations ran. The error names the path.
 - A truncated plan, or on Windows an argument line that cannot be read, exits 70. Both are internal errors of the generated update program.

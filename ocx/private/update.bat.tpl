@@ -10,7 +10,11 @@ rem Exit: 0 done or nothing to move; 64 usage (E1 E2 E3 E9 E13); 70 plan unreada
 rem output base locked (E11); 78 no bazel (E8) or a refused write target (E12 E14); else the exit code of the first
 rem failing ocx run, else of the nested bazel call.
 rem
-rem Delayed expansion is never enabled: a path or a value may hold "!". Every value is used inside quotes only.
+rem Delayed expansion is never enabled: a path or a value may hold "!". A plan value is used inside quotes, except in
+rem a few `if defined` lookups of declaration names, whose safe set holds no character cmd acts on. An argument is
+rem read only after E13 has accepted the whole line: for @rules_ocx//:update every character is in the declaration-name
+rem set and the name lookup compares through findstr; for a hub target the arguments are not looked at again and
+rem reach the command line of ocx unquoted, where E13 has refused every character cmd would act on.
 setlocal DisableDelayedExpansion
 
 set "PLAN=@PLAN@"
@@ -32,7 +36,14 @@ set "prompt=@"
   @for %%a in (1) do rem #%*#
   @echo off
 ) >"%ARGF%"
+if "%TARGET%"=="0" goto :pat_names
 >"%PATF%" echo #.*[^&^|^<^>^^%%"]
+goto :pat_done
+:pat_names
+rem Declaration names only: the line may hold nothing but the name set and the spaces between names. A tab, a comma, a
+rem semicolon, an equals sign and every cmd metacharacter fall outside it, and the hash signs of the capture bound the line.
+>"%PATF%" echo #.*[^^A-Za-z0-9._:/@+ #-].*#
+:pat_done
 findstr /r /g:"%PATF%" "%ARGF%" >nul
 set "UNSAFE=%ERRORLEVEL%"
 findstr /r "#.*#" "%ARGF%" >nul
@@ -43,7 +54,7 @@ if not "%CAPTURED%"=="0" goto :e70args
 if "%UNSAFE%"=="0" goto :e13
 if not "%UNSAFE%"=="1" goto :e70args
 
-rem The arguments hold none of those characters, so a shift loop over the first argument and the whole line are safe to read.
+rem The line passed E13, so a shift loop over the arguments and the whole line are safe to read.
 set "NARGS=0"
 set "UARGS=%*"
 set "COUNT=0"
@@ -65,8 +76,13 @@ if "%~1"=="" goto :args_done
 set /a NARGS+=1
 set "ARG=%~1"
 if "%ARG:~0,1%"=="-" set "HAS_DASH=1"
-if not defined KN_%ARG% if not defined BAD_ARG set "BAD_ARG=%ARG%"
+if not "%TARGET%"=="0" goto :arg_next
+rem A known name is one whole line of the variable listing, KN_ then the name then =1; findstr reads ARG as a literal, never as program text.
+set "ARG_HIT="
+set KN_ 2>nul | findstr /x /c:"KN_%ARG%=1" >nul && set "ARG_HIT=1"
+if not defined ARG_HIT if not defined BAD_ARG set "BAD_ARG=%ARG%"
 set "ARGSET_%ARG%=1"
+:arg_next
 shift
 goto :args_loop
 :args_done
@@ -163,7 +179,7 @@ exit /b 64
 >&2 echo rules_ocx: the Bazel output base is locked ^(another command, or bazel --batch run^); run the update again without --batch
 exit /b 75
 :e13
->&2 echo rules_ocx: an update argument holds one of ^& ^| ^< ^> ^^ %% "; rename the group or binding, or run the update on a POSIX host
+>&2 echo rules_ocx: an update argument holds one of ^& ^| ^< ^> ^^ %% "; for @rules_ocx//:update any character outside A-Z a-z 0-9 . _ : / @ + - counts too; rename the group or binding, or run the update on a POSIX host
 exit /b 64
 :e70args
 >&2 echo rules_ocx: internal error: the argument line could not be read
@@ -313,13 +329,30 @@ rem The write target of project and index, workspace-relative with the plan's "/
 :target_path
 set "WRITE=%D_WRITE:/=\%"
 set "DEST=%BUILD_WORKSPACE_DIRECTORY%\%WRITE%"
-set "ATTR="
-for %%I in ("%DEST%") do set "ATTR=%%~aI"
 set "LOCKDIR="
 for %%I in ("%DEST%") do set "LOCKDIR=%%~dpI"
 exit /b 0
 
-rem A write target that is itself a link (symlink or junction) is refused; a link in a parent directory is not seen here.
+rem batch cannot resolve a link, so the write target's real path is never compared with the workspace. Instead each
+rem component below the workspace root, the target file included, is tested for a link (symlink or junction), and the
+rem first one is refused even if it points back into the workspace: LINK_AT names it, or stays empty. No component below
+rem the root is a link exactly when the real path lies below the real root. The loop stops: every pass cuts one segment.
+:link_walk
+set "LINK_AT="
+set "WALK=%BUILD_WORKSPACE_DIRECTORY%"
+set "REST=%WRITE%"
+:link_walk_next
+if not defined REST exit /b 0
+for /f "eol=| tokens=1* delims=\" %%A in ("%REST%") do set "SEG=%%A" & set "REST=%%B"
+set "WALK=%WALK%\%SEG%"
+set "ATTR="
+for %%I in ("%WALK%") do set "ATTR=%%~aI"
+call :is_link
+if errorlevel 1 goto :link_walk_next
+set "LINK_AT=%WALK%"
+exit /b 0
+
+rem Whether ATTR (the attributes of one path) holds the reparse-point flag `l`.
 :is_link
 if "%ATTR%"=="" exit /b 1
 if "%ATTR:l=%"=="%ATTR%" exit /b 1
@@ -327,9 +360,14 @@ exit /b 0
 
 :project_step
 call :target_path
-call :is_link
-if errorlevel 1 goto :project_copy
+call :link_walk
+if not defined LINK_AT goto :project_copy
+if not "%LINK_AT%"=="%DEST%" goto :link_refused
 for /f "delims=" %%P in ("%DEST%") do >&2 echo(rules_ocx: %D_NAME%: %%P is a symlink; replace it with the file it points to before updating
+if not defined FIRST_REF set "FIRST_REF=78"
+exit /b 0
+:link_refused
+for /f "delims=" %%P in ("%LINK_AT%") do >&2 echo(rules_ocx: %D_NAME%: %%P is a link on the path of the write target; refusing to write through it
 if not defined FIRST_REF set "FIRST_REF=78"
 exit /b 0
 :project_copy
@@ -373,9 +411,9 @@ exit /b 0
 
 :index_step
 call :target_path
-call :is_link
-if errorlevel 1 goto :index_run
-for /f "delims=" %%P in ("%DEST%") do >&2 echo(rules_ocx: %D_NAME%: %%P resolves outside the workspace; refusing to write it
+call :link_walk
+if not defined LINK_AT goto :index_run
+for /f "delims=" %%P in ("%LINK_AT%") do >&2 echo(rules_ocx: %D_NAME%: %%P is a link on the path of the write target; refusing to write through it
 if not defined FIRST_REF set "FIRST_REF=78"
 exit /b 0
 :index_run

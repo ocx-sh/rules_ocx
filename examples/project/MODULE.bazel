@@ -49,7 +49,11 @@ host_tool_version = use_repo_rule("//:host_tool_version.bzl", "host_tool_version
 
 # Runs a tool of a set repository while Bazel fetches this repository. The
 # label is the tool's `launcher_path` in the set's manifest.json: a default
-# selection keeps its launchers in `l/`.
+# selection keeps its launchers in `l/`. That path comes from the generated
+# set repository and is not a stable layout: a build rule or test references a
+# tool by its hub target (`@tools//:shellcheck`, see BUILD.bazel), the supported
+# way. A repository rule cannot, because a target is not a file at fetch time,
+# so this example reads the launcher file and must follow the manifest if it changes.
 host_tool_version(
     name = "shellcheck_version",
     tools = {
