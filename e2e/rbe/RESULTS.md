@@ -73,9 +73,9 @@ files and the extension's fact runs); the bound still includes Bazel's own per-f
 at 0.1 s. The 100000-file batch takes 58.0 s and 104.5 s against 0.8 s and 1.0 s for the one-file set; each test
 starts on an empty instance name, so the batch includes the upload of every file.
 
-## Package locking on dev build D1
+## Package locking on dev build D2
 
-Measured 2026-11-27 against `ocx 0.6.8-pr784+20261127010502` (the pin in `ocx-under-test.txt`), Linux only.
+Measured 2026-11-27 against `ocx 0.6.8-pr784+20261127084913` (the pin in `ocx-under-test.txt`), Linux only.
 `tests/test_package_lock.py`: 30 passed. `tests/test_caches_facts.py`: 9 passed. `tests/test_remote_exec.py`:
 15 passed on Buildbarn, 14 passed and 1 skipped on NativeLink (the no-shell runner is a Buildbarn worker).
 Each row was also run against a scratch copy of the tree with one guard removed and failed there; two rows
