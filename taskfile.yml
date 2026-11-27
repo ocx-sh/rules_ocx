@@ -208,9 +208,13 @@ tasks:
             want="$1"; text="$2"; shift 2
             set +e; out="$(bz "$@" 2>&1)"; got=$?; set -e
             printf '%s\n' "$out" | tail -n 30
-            if [ "$got" != "$want" ]; then echo "expected exit $want, got $got: bazel $*" >&2; exit 1; fi
-            if ! printf '%s\n' "$out" | grep -qF -- "$text"; then echo "expected '$text' from: bazel $*" >&2; exit 1; fi
+            # A failed expectation is recorded and the next row still runs: a Windows run is too costly to read one at a time.
+            if [ "$got" != "$want" ]; then echo "expected exit $want, got $got: bazel $*" >&2; fails="$fails
+            exit $want: bazel $*"; fi
+            if ! printf '%s\n' "$out" | grep -qF -- "$text"; then echo "expected '$text' from: bazel $*" >&2; fails="$fails
+            text '$text': bazel $*"; fi
           }
+          fails=""
 
           cd "$base/package"
           # The first evaluation records the tag's fact; the update then finds it unchanged.
@@ -225,7 +229,8 @@ tasks:
           expect 0 "rules_ocx: tools: " run @tools//:update
           if grep -qF '# rules_ocx: replaced by the update' ocx.lock || [ -L ocx.lock ]; then
             echo "bazel run @tools//:update did not replace ocx.lock with a file" >&2
-            exit 1
+            fails="$fails
+            ocx.lock not replaced"
           fi
           expect 64 "rules_ocx: an update argument holds one of" run @tools//:update -- -g "a&b"
           # `)` is not in E13's set: it must pass the argument capture and reach ocx, which refuses the group with 64.
@@ -262,7 +267,9 @@ tasks:
           MSYS2_ARG_CONV_EXCL='*' cmd /c dir /al "$(cygpath -w "$base/project_sub")" || true
           cp "$base/outside_sub/ocx.lock" "$base/before.lock"
           expect 78 "is a link on the path of the write target" run @tools//:update
-          cmp "$base/before.lock" "$base/outside_sub/ocx.lock"
+          cmp "$base/before.lock" "$base/outside_sub/ocx.lock" || fails="$fails
+          the file behind the junction changed"
+          if [ -n "$fails" ]; then printf 'windows update target: failed expectations:%s\n' "$fails" >&2; exit 1; fi
           echo "windows update target OK"
 
   # Reproduces the BCR presubmit for e2e/bzlmod. Deliberately no remote cache: a hit would hide a break
