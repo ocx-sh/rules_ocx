@@ -196,6 +196,21 @@ ocx_update_program = rule(
 )
 """
 
+def in_main_repo(label):
+    """Whether a declared lock or index file belongs to the main repository (pure).
+
+    Only such a file may be written by the update program. The label's repository
+    decides, not the module that declared it: a root module can name a file of a
+    dependency, and `@@//:file` from any module names the main repository.
+
+    Args:
+        label: the `ocx_lock` or `index` label, or None for a kind without a file.
+
+    Returns:
+        True when `label` is None or its canonical repository name is empty.
+    """
+    return label == None or label.repo_name == ""
+
 def _write_path(label):
     return label.name if not label.package else label.package + "/" + label.name
 

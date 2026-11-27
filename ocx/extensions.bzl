@@ -25,7 +25,7 @@ load("//ocx/private:hub.bzl", "hub_platform_error", "ocx_hub_repo")
 load("//ocx/private:platforms.bzl", "host_info", "platform_constraints", "slug")
 load("//ocx/private:repo_utils.bzl", "POLICY_ATTRS", "policy_kwargs", "resolve_policy", "run_ocx")
 load("//ocx/private:set_repo.bzl", "ocx_set_repo", "vendor_args")
-load("//ocx/private:update_repo.bzl", "ocx_update_repo")
+load("//ocx/private:update_repo.bzl", "in_main_repo", "ocx_update_repo")
 load("//ocx/private:vendor_manifest.bzl", "parse_manifest", "tag_name_error")
 load("//ocx/private:versions.bzl", "DEFAULT_OCX_VERSION", "MIN_OCX_VERSION")
 
@@ -467,7 +467,7 @@ def _ocx_impl(module_ctx):
                     "groups": list(tag.groups) if tier == "project" else [],
                     "identifier": tag.package if tier == "package" else "",
                     "kind": kind,
-                    "main_repo": mod.is_root,
+                    "main_repo": in_main_repo(tag.ocx_lock if tier == "project" else tag.index),
                     "name": tag.name,
                     "no_config": tag.no_config,
                 }))

@@ -4,7 +4,7 @@
 """Unit tests for ocx/private/update_repo.bzl (plan file, value rules, selection)."""
 
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
-load("//ocx/private:update_repo.bzl", "check_value", "plan_content", "select_declarations")
+load("//ocx/private:update_repo.bzl", "check_value", "in_main_repo", "plan_content", "select_declarations")
 
 def _declaration(**kwargs):
     base = dict(
@@ -136,9 +136,17 @@ def _selection_test_impl(ctx):
     asserts.equals(env, [], empty.selected)
     return unittest.end(env)
 
+def _main_repo_test_impl(ctx):
+    env = unittest.begin(ctx)
+    asserts.true(env, in_main_repo(struct(repo_name = "")), "a main-repository file, from any module")
+    asserts.false(env, in_main_repo(struct(repo_name = "dep+")), "a root module naming a file of a dependency")
+    asserts.true(env, in_main_repo(None), "a kind without a file")
+    return unittest.end(env)
+
 plan_golden_test = unittest.make(_plan_golden_test_impl)
 value_rules_test = unittest.make(_value_rules_test_impl)
 selection_test = unittest.make(_selection_test_impl)
+main_repo_test = unittest.make(_main_repo_test_impl)
 
 def update_repo_test_suite(name):
     """Instantiates the update_repo.bzl test suite.
@@ -146,4 +154,4 @@ def update_repo_test_suite(name):
     Args:
         name: name of the test suite target.
     """
-    unittest.suite(name, plan_golden_test, value_rules_test, selection_test)
+    unittest.suite(name, plan_golden_test, value_rules_test, selection_test, main_repo_test)
