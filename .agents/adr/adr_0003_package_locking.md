@@ -142,7 +142,7 @@ K3 lets a merge combine platforms from two different resolves, which breaks "a p
 - A tag or digest declaration is locked by platform manifest digests, its sets vendor a digest, and they become reproducible (`set_repo.bzl:384-388` already returns `reproducible = True` for a pinned package).
 - The extension is `reproducible = True` for every kind. It no longer writes its whole result into `MODULE.bazel.lock`, only facts.
 - rules_ocx reads `manifest.json` and derives no other file name.
-- A Windows build needs neither `--enable_runfiles` nor `--windows_enable_symlinks` for vendored tools. This is a claim until the job named in § Test plan runs.
+- A Windows build needs neither `--enable_runfiles` nor `--windows_enable_symlinks` for vendored tools. This is a claim until the `deep:windows-runfiles` task of § Test plan runs.
 
 **Negative:**
 
@@ -421,7 +421,7 @@ Steps, in this order:
    - The call is skipped when that list is empty.
    - It reads the workspace rc files like any `bazel` call. `--lockfile_mode=update` on the command line overrides an rc `--lockfile_mode=error`.
    - Exit 9 prints E11. Any other failure prints E7.
-4. Exit with the first failing `ocx` exit code in name order, else the first refusal of a declaration (E12 or E14, exit 78) in name order, else the nested call's exit code, else 0. E4 and E5 are notices and exit 0: nothing is wrong with the declaration, it is only not this workspace's to move. E12 and E14 are refusals: the declaration should move and cannot.
+4. Exit with the first failing `ocx` exit code in name order, else the first refusal of a declaration (E12 or E14, exit 78; E16, exit 74) in name order, else the nested call's exit code, else 0. E4 and E5 are notices and exit 0: nothing is wrong with the declaration, it is only not this workspace's to move. E12 and E14 are refusals: the declaration should move and cannot.
 
 What the nested call writes: it evaluates the extension under `update` mode, so it also writes any fact that misses for another reason, such as a new or edited declaration or a v1 fact. Any build in update mode does the same. "Moves only that declaration" holds for declarations whose facts hit.
 
@@ -434,7 +434,7 @@ When the nested call fails, no fact moved, because a failed evaluation writes no
 - The program writes a temporary file with a unique name in the directory of the workspace `ocx.lock`, copies the original's file mode to it, and renames it over `ocx.lock`.
 - A workspace `ocx.lock` that is a symlink is refused with E14 before anything is written.
 - On any failure the temporary file is removed and the program exits non-zero.
-- On Windows the rename is `move /y`. Whether it replaces the file atomically is `not established`; the `windows-update-target` job (§ Test plan) runs it.
+- On Windows the rename is `move /y`. Whether it replaces the file atomically is `not established`; the `deep:windows-update-target` task (§ Test plan) runs it.
 
 ### Output lines
 
@@ -470,6 +470,10 @@ Update program (stderr):
 | E12 | `rules_ocx: <name>: <path> resolves outside the workspace; refusing to write it` | 78 |
 | E13 | `rules_ocx: an update argument holds one of & \| < > ^ % "; rename the group or binding, or run the update on a POSIX host` | 64 |
 | E14 | `rules_ocx: <name>: <path> is a symlink; replace it with the file it points to before updating` | 78 |
+| E15 | `rules_ocx: bazel info output_base failed (exit <n>)`; the preflight failed for a reason other than a held output base; nothing is written | n |
+| E16 | `rules_ocx: <name>: replacing <path> failed`; the temporary file is removed and the loop goes on | 74 |
+| E17 | `rules_ocx: internal error: plan.txt ends inside a declaration` | 70 |
+| E18 | `rules_ocx: internal error: the argument line could not be read` (`update.bat` only: the capture of the arguments failed) | 70 |
 
 Extension and repository rules (`fail()` text, or a hint appended to it):
 
@@ -629,9 +633,9 @@ Remote-execution rig: `test_remote_exec.py` gains `test_tag_locked_tool_runs_rem
 
 Platforms (claims until these run):
 
-- `examples/cross_platform:no_runfiles_test` becomes `manifest_runfiles_test`: without a runfiles tree the launcher starts jq and prints its version. Red today on the Windows leg of `verify-deep.yml` (it asserts exit 78 now). Green after MR-13.
-- A Linux twin in `verify-basic.yml`: `bazel test --noenable_runfiles --spawn_strategy=local` of the same target. Red today: exit 78, `no vendored root found` (`observed`, research `research_launcher-atomic-publish-and-runfiles.md` § 5). Green after MR-13.
-- `windows-update-target` in `verify-deep.yml`, in a copy of `e2e/bzlmod` under a path with a space: `bazel run @jq//:update` through `update.bat` exits 0 and prints the `unchanged` line, and a project update replaces `ocx.lock`. Red: mutation of the generated `update.bat` that drops the quotes around one expansion; the same run fails. The same job runs `bazel run @dev_tools//:update -- -g "a&b"` and expects E13 with exit 64 (red: mutation that drops the E13 check, after which cmd splits the argument), and `RULES_OCX_BAZEL` set to a missing file, expecting E8 (red: mutation that drops the probe, after which cmd prints its own error and exits 9009).
+- `examples/cross_platform:no_runfiles_test` becomes `manifest_runfiles_test`: without a runfiles tree the launcher starts jq and prints its version. Red today on the `deep (windows-latest)` job of `verify-deep.yml`, through the task `deep:windows-runfiles` (it asserts exit 78 now). Green after MR-13.
+- A Linux twin, the task `test:no-runfiles`, run by the `test` job of `verify-basic.yml`: `bazel test --noenable_runfiles --spawn_strategy=local` of the same target. Red today: exit 78, `no vendored root found` (`observed`, research `research_launcher-atomic-publish-and-runfiles.md` § 5). Green after MR-13.
+- The task `deep:windows-update-target`, run by the `deep (windows-latest)` job of `verify-deep.yml`, in a copy of `e2e/bzlmod` under a path with a space: `bazel run @jq//:update` through `update.bat` exits 0 and prints the `unchanged` line, and a project update replaces `ocx.lock`. Red: mutation of the generated `update.bat` that drops the quotes around one expansion; the same run fails. The same job runs `bazel run @dev_tools//:update -- -g "a&b"` and expects E13 with exit 64 (red: mutation that drops the E13 check, after which cmd splits the argument), and `RULES_OCX_BAZEL` set to a missing file, expecting E8 (red: mutation that drops the probe, after which cmd prints its own error and exits 9009).
 
 ### Decided points
 
