@@ -23,6 +23,12 @@ set "TARGET=@TARGET@"
 
 if not defined BUILD_WORKSPACE_DIRECTORY goto :e9
 
+rem Bazel hands these paths over with "/"; findstr reads a "/" in a file name as a switch ("Cannot open C:plan.txt"), and
+rem copy, move and fc take it as one too. Every path below is built from these three, so they are turned into "" once.
+set "PLAN=%PLAN:/=\%"
+set "OCX=%OCX:/=\%"
+set "BUILD_WORKSPACE_DIRECTORY=%BUILD_WORKSPACE_DIRECTORY:/=\%"
+
 rem E13 comes before any other look at the arguments: only an argument line free of the characters the message
 rem names is safe to parse. The REM technique (jeb, https://stackoverflow.com/a/4095133) copies the argument line as
 rem text into a file without executing it; findstr then looks for those characters after the first hash sign. A capture
