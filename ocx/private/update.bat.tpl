@@ -343,7 +343,12 @@ set "WALK=%BUILD_WORKSPACE_DIRECTORY%"
 set "REST=%WRITE%"
 :link_walk_next
 if not defined REST exit /b 0
-for /f "eol=| tokens=1* delims=\" %%A in ("%REST%") do set "SEG=%%A" & set "REST=%%B"
+rem The first segment through for /f; the rest through a substitution, which returns the text unchanged when it holds no
+rem backslash. A `tokens=1*` remainder is not used: with one token left, %%B is never assigned.
+for /f "eol=| delims=\" %%A in ("%REST%") do set "SEG=%%A"
+set "TAIL=%REST:*\=%"
+if "%TAIL%"=="%REST%" set "TAIL="
+set "REST=%TAIL%"
 set "WALK=%WALK%\%SEG%"
 set "ATTR="
 for %%I in ("%WALK%") do set "ATTR=%%~aI"
