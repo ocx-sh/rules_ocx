@@ -142,7 +142,7 @@ K3 lets a merge combine platforms from two different resolves, which breaks "a p
 - A tag or digest declaration is locked by platform manifest digests, its sets vendor a digest, and they become reproducible (`set_repo.bzl:384-388` already returns `reproducible = True` for a pinned package).
 - The extension is `reproducible = True` for every kind. It no longer writes its whole result into `MODULE.bazel.lock`, only facts.
 - rules_ocx reads `manifest.json` and derives no other file name.
-- A Windows build needs neither `--enable_runfiles` nor `--windows_enable_symlinks` for vendored tools. This is a claim until the `deep:windows-runfiles` task of § Test plan runs.
+- A Windows build needs neither `--enable_runfiles` nor `--windows_enable_symlinks` for vendored tools. This is a claim until the `deep:windows-runfiles` task of § Test plan runs. The task gates on an ASCII workspace and output root; a non-ASCII output root and a non-ASCII workspace are printed probes that never gate, because the Bazel client itself failed to change into a non-ASCII workspace.
 
 **Negative:**
 
