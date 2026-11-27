@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 
 import pytest
-from conftest import BACKEND, Workspace, assert_ok, fixtures, output
+from conftest import BACKEND, LOCK_HUB, LOCK_P, Workspace, assert_ok, fixtures, output, pkg_decl, platform_slug, tool_report
 
 CONFIG = BACKEND  # buildbarn | nativelink
 
@@ -162,3 +162,29 @@ def test_reserved_names_at_their_places(workspace: Workspace) -> None:
     names = {Path(p).name: p for p in lines[1:]}
     assert {"BUILD.bazel", "build", "BUILD"} <= set(names), lines
     assert names["BUILD"].endswith("sub/BUILD") and Path(names["BUILD.bazel"]).parent == Path(names["build"]).parent
+
+
+def test_tag_locked_tool_runs_remotely(lockrig) -> None:
+    """A tag declaration's set vendors the locked digest: after the tag moved, a second client gives the same set inputs."""
+    hub = LOCK_HUB
+    lockrig.push("1.0", "tool v1")
+    ws = lockrig.workspace(pkg_decl(hub, lockrig.ident("1.0")), {hub: [LOCK_P]})
+    targets = (f"//:inputs_{hub}", f"//:run_{hub}")
+    marker = f"{hub}_{platform_slug(LOCK_P)}/"
+
+    def set_digests(res) -> dict[str, str]:
+        spawn = next(s for s in res.spawns() if f"inputs_{hub}" in json.dumps(s.get("listedOutputs", [])))
+        return {i["path"].split(marker, 1)[1]: json.dumps(i.get("digest"), sort_keys=True) for i in spawn["inputs"] if marker in i["path"]}
+
+    ra = ws.client("a").run("build", *targets, config=CONFIG, lockfile="update")
+    assert_ok(ra, "client a")
+    assert ra.processes().get("remote", 0) >= 1, ra.processes()
+    lockrig.push("1.0", "tool v2")
+    b = ws.client("b")
+    rb = b.run("build", *targets, config=CONFIG, lockfile="error")
+    assert_ok(rb, "client b, tag moved")
+    assert rb.processes().get("remote", 0) >= 1, rb.processes()
+    assert tool_report(b, hub) == "tool v1"
+    da = set_digests(ra)
+    assert da, "no set input in the execution log"
+    assert da == set_digests(rb)

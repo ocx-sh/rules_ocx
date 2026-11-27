@@ -93,7 +93,7 @@ def test_non_root_package_facts_need_no_registry(log) -> None:
     ws = W(ws_dir, test_id, counter, _counting_wrapper(ws_dir.parent / f"{test_id}-ocx", counter))
     try:
         assert_ok(_hub_query(ws.client("a"), "dep_tool", "update"), "client a writes the facts")
-        assert '"package|dep_tool|' in (ws_dir / "MODULE.bazel.lock").read_text()
+        assert '"package|dep_tool"' in (ws_dir / "MODULE.bazel.lock").read_text()
         b = ws.client("b")
         n = len(ws.ocx_calls())
         log.mark()
@@ -170,17 +170,20 @@ def _contents_entries(client) -> int:
     return sum(1 for _ in root.iterdir()) if root.exists() else 0
 
 
-@pytest.mark.parametrize("form", ["pinned", "tagged"])
+@pytest.mark.parametrize("form", ["pinned", "tagged", "tag"])
 def test_only_a_digest_pinned_package_is_reproducible(workspace: Workspace, form: str) -> None:
+    """`pinned` and `tag` sets vendor `<repo>@<pin>` (reproducible); an `index` set vendors the identifier through its snapshot."""
     index = _index(workspace)
     module = workspace.path / "MODULE.bazel"
     module.write_text(module.read_text() + (
         f'\nocx.package(name = "tagged", package = "{REGISTRY}/rig/tool:1.0.0", index = "{index}", '
         'platforms = ["linux/amd64+libc.glibc"])\nuse_repo(ocx, "tagged_linux_amd64_libc_glibc")\n'
+        f'ocx.package(name = "tag", package = "{REGISTRY}/rig/tool:1.0.0", platforms = ["linux/amd64+libc.glibc"])\n'
+        'use_repo(ocx, "tag_linux_amd64_libc_glibc")\n'
     ))  # fmt: skip
     c = workspace.client(form)
     assert_ok(c.run("fetch", "--repo=@ocx_tool", lockfile="update"), "fetch @ocx_tool")  # its own entry, if any, comes first
     before = _contents_entries(c)
     assert_ok(c.run("fetch", f"--repo=@{form}_linux_amd64_libc_glibc", lockfile="update"), f"fetch {form}")
     entries = _contents_entries(c) - before
-    assert (entries > 0) == (form == "pinned"), f"{form}: {entries} repo contents cache entries"
+    assert (entries > 0) == (form in ("pinned", "tag")), f"{form}: {entries} repo contents cache entries"

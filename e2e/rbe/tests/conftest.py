@@ -22,6 +22,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import time
 import urllib.request
 import uuid
@@ -233,18 +234,18 @@ class Client:
         self.output_base = self.dir / "ob"
         self.repo_cache = self.dir / "repocache"
         self.runs = 0
+        self.extra_env: dict[str, str] = {}  # reaches the client process, so also a `bazel run` program
 
     def env(self) -> dict[str, str]:
         env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": str(self.home), "OCX_NO_CONFIG": "1"}
         if self.tz:
             env["TZ"] = self.tz
-        return env
+        return env | self.extra_env
 
     def startup(self, *extra: str) -> list[str]:
         return [BAZEL, "--ignore_all_rc_files", f"--output_user_root={OUTPUT_ROOT}", f"--output_base={self.output_base}", *extra]
 
-    def run(self, cmd: str, *args: str, config: str = "", startup: tuple[str, ...] = (), lockfile: str = "off",
-            timeout: int = BAZEL_TIMEOUT) -> Result:  # fmt: skip
+    def _argv(self, cmd: str, args: tuple[str, ...], config: str, startup: tuple[str, ...], lockfile: str) -> tuple[list[str], Path]:
         self.runs += 1
         exec_log = self.dir / f"exec-{self.runs}.json"
         flags = [
@@ -261,7 +262,11 @@ class Client:
                 a.startswith("--extra_execution_platforms") for a in args) else []  # fmt: skip
         elif cmd in ("fetch", "query", "mod", "vendor"):
             flags += [f for f in rc_flags("") if f.startswith(("--color", "--curses", "--noshow_progress"))]
-        argv = [*self.startup(*startup), cmd, *flags, *args]
+        return [*self.startup(*startup), cmd, *flags, *args], exec_log
+
+    def run(self, cmd: str, *args: str, config: str = "", startup: tuple[str, ...] = (), lockfile: str = "off",
+            timeout: int = BAZEL_TIMEOUT) -> Result:  # fmt: skip
+        argv, exec_log = self._argv(cmd, args, config, startup, lockfile)
         t0 = time.monotonic()
         preexec = (lambda: os.umask(self.umask)) if self.umask is not None else None
         try:
@@ -271,6 +276,11 @@ class Client:
         except subprocess.TimeoutExpired as exc:
             rc, out = 124, f"timeout after {timeout}s\n" + str(exc.stderr or "")
         return Result(rc, out, time.monotonic() - t0, exec_log if exec_log.exists() else None)
+
+    def start(self, cmd: str, *args: str, config: str = "", startup: tuple[str, ...] = (), lockfile: str = "off") -> subprocess.Popen:
+        """The same call as `run`, left running: the caller terminates it."""
+        argv, _ = self._argv(cmd, args, config, startup, lockfile)
+        return subprocess.Popen(argv, cwd=self.ws.path, env=self.env(), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     def external(self, repo: str) -> Path:
         """The fetched directory of an extension repository (`rules_ocx++ocx+<name>`)."""
@@ -283,17 +293,43 @@ class Client:
             pass
 
 
-def _counting_wrapper(dest: Path, counter: Path) -> Path:
+# After a successful `--manifest-only` resolve, rewrites its manifest.json: the planted faults of `lock_workspace`.
+_FAULT_PY = """\
+import hashlib, json, sys
+fault, args = sys.argv[1], sys.argv[2:]
+if "--manifest-only" in args:
+    out, platform = args[args.index("-o") + 1], args[args.index("-p") + 1]
+    path = out + "/manifest.json"
+    m = json.load(open(path))
+    if fault == "two_roots":
+        m["selections"][0]["roots"].append("sha256:" + "b" * 64)
+    elif fault == "index_digest":  # one image index per platform: the tag "moved" between two platforms
+        root = m["selections"][0]["roots"][0]
+        for p in m["packages"]:
+            if p["digest"] == root:
+                p["index_digest"] = "sha256:" + hashlib.sha256(platform.encode()).hexdigest()
+    json.dump(m, open(path, "w"))
+"""
+
+
+def _counting_wrapper(dest: Path, counter: Path, fault: str | None = None) -> Path:
     """An `ocx` that logs each call (start/end time and argv) and runs the ocx under test.
+
+    `fault` (`two_roots`, `index_digest`) makes it rewrite the manifest of every successful `--manifest-only` run.
 
     The harness's witness of "rule runs", never rules_ocx's: rules_ocx copies this file as @ocx_tool.
     The argv holds paths and flags only; credentials reach ocx through its environment and HOME.
     """
     real = shutil.which(OCX) or OCX
+    hook = ""
+    if fault:
+        script = dest.parent / f"{dest.name}-fault.py"
+        script.write_text(_FAULT_PY, encoding="utf-8")
+        hook = f'if [ "$rc" -eq 0 ]; then "{sys.executable}" "{script}" {fault} "$@"; fi\n'
     dest.write_text(
         "#!/bin/sh\n"
         f'printf "start %s %s\\n" "$(date +%s.%N)" "$*" >> "{counter}"\n'
-        f'"{real}" "$@"\nrc=$?\n'
+        f'"{real}" "$@"\nrc=$?\n' + hook +
         f'printf "end %s %s\\n" "$(date +%s.%N)" "$rc" >> "{counter}"\n'
         "exit $rc\n",
         encoding="utf-8",
@@ -352,3 +388,284 @@ def assert_ok(res: Result, what: str) -> None:
 
 def output(client: Client, target_file: str) -> str:
     return (client.output_base / "execroot" / "_main" / "bazel-out" / "k8-fastbuild" / "bin" / target_file).read_text()
+
+
+# ---- Package locking (ADR 0003): a registry repository and a minimal workspace of its own per test.
+
+LOCK_P = "linux/amd64+libc.glibc"
+LOCK_MUSL = "linux/amd64+libc.musl"
+LOCK_HUB = "lk"
+_PATH_ENV = {"key": "PATH", "type": "path", "value": "${installPath}/bin", "visibility": "public"}
+
+
+def platform_slug(platform: str) -> str:
+    """`linux/amd64+libc.glibc` -> `linux_amd64_libc_glibc`, as the set repository names carry it."""
+    return "_".join(p for p in re.sub(r"[^a-z0-9]+", "_", platform.lower()).split("_") if p)
+
+
+def pkg_decl(name: str, package: str, platforms=(LOCK_P,), **extra: str) -> str:
+    """One `ocx.package(...)` line; `extra` values are Starlark source (`index = '"//:index"'`)."""
+    plats = ", ".join(json.dumps(p) for p in platforms)
+    more = "".join(f", {k} = {v}" for k, v in extra.items())
+    return f'ocx.package(name = "{name}", package = "{package}", platforms = [{plats}]{more})\n'
+
+
+def lock_facts(ws: Workspace) -> dict[str, dict]:
+    """The facts of `MODULE.bazel.lock`, decoded: `{"package|<name>": {...}}`."""
+    found: dict = {}
+
+    def walk(node) -> None:
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if key == "facts" and isinstance(value, dict):
+                    found.update(value)
+                else:
+                    walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(json.loads((ws.path / "MODULE.bazel.lock").read_text(encoding="utf-8")).get("moduleExtensions", {}))
+    return {k: json.loads(v) if isinstance(v, str) else v for k, v in found.items()}
+
+
+def _fact_tables(lock_json: dict, key: str) -> list[dict]:
+    hits = []
+
+    def walk(node) -> None:
+        if isinstance(node, dict):
+            if isinstance(node.get("facts"), dict) and key in node["facts"]:
+                hits.append(node["facts"])
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(lock_json.get("moduleExtensions", {}))
+    return hits
+
+
+def plant_fact(ws: Workspace, key: str, change) -> None:
+    """Replaces the stored fact `key` by `json.dumps(change(decoded))`: a planted older or damaged value."""
+    path = ws.path / "MODULE.bazel.lock"
+    lock_json = json.loads(path.read_text(encoding="utf-8"))
+    hits = _fact_tables(lock_json, key)
+    assert hits, f"no fact {key!r} in {path}"
+    for facts in hits:
+        facts[key] = json.dumps(change(json.loads(facts[key])))
+    path.write_text(json.dumps(lock_json, indent=2), encoding="utf-8")
+
+
+def drop_fact(ws: Workspace, key: str) -> None:
+    """Removes the stored fact `key`: a declaration whose fact is missing."""
+    path = ws.path / "MODULE.bazel.lock"
+    lock_json = json.loads(path.read_text(encoding="utf-8"))
+    hits = _fact_tables(lock_json, key)
+    assert hits, f"no fact {key!r} in {path}"
+    for facts in hits:
+        del facts[key]
+    path.write_text(json.dumps(lock_json, indent=2), encoding="utf-8")
+
+
+def resolve_calls(ws: Workspace, since: int = 0) -> list[str]:
+    """The extension's `ocx ... vendor ... --manifest-only` calls (argv text) after the first `since` log lines."""
+    return [ln for ln in ws.ocx_calls()[since:] if ln.startswith("start ") and " vendor" in ln and "--manifest-only" in ln]
+
+
+def set_calls(ws: Workspace, since: int = 0) -> list[str]:
+    """The set repositories' full `ocx ... vendor` calls."""
+    return [ln for ln in ws.ocx_calls()[since:] if ln.startswith("start ") and " vendor" in ln and "--manifest-only" not in ln]
+
+
+def hub_query(client: Client, hub: str, *args: str, lockfile: str = "update") -> Result:
+    """Evaluates the extension (and nothing else) by querying one hub."""
+    return client.run("query", f"@@rules_ocx++ocx+{hub}//:all", *args, lockfile=lockfile)
+
+
+def run_hub(client: Client, hub: str, *args: str, lockfile: str = "update") -> Result:
+    """Builds `//:run_<hub>` (the hub's `tool` run through its launcher) on this host."""
+    return client.run("build", f"//:run_{hub}", "--spawn_strategy=local", *args, lockfile=lockfile)
+
+
+def tool_report(client: Client, hub: str) -> str:
+    return output(client, f"run_{hub}.txt").strip()
+
+
+def tree_bytes(root: Path) -> dict[str, str]:
+    """Relative path -> SHA-256 of every file under `root`."""
+    return {p.relative_to(root).as_posix(): sha256(p) for p in sorted(root.rglob("*")) if p.is_file()}
+
+
+def ocx_work(ws: Workspace, since: int = 0) -> list[str]:
+    """Every `ocx` call after the first `since` log lines that resolves or updates something (a vendor or an update)."""
+    return [ln for ln in ws.ocx_calls()[since:] if ln.startswith("start ") and (" vendor" in ln or " update" in ln)]
+
+
+def ws_bytes(ws: Workspace) -> dict[str, str]:
+    """Relative path -> SHA-256 of every workspace file, but Bazel's `bazel-*` links and the harness's call log."""
+    return {k: v for k, v in tree_bytes(ws.path).items() if k != ".ocx-calls.log" and not k.startswith("bazel-")}
+
+
+_BAZEL_PY = """\
+import os, sys
+args = sys.argv[1:]
+i = 0
+while i < len(args) and args[i].startswith("-"):
+    i += 1
+startup, cmd, rest = args[:i], args[i : i + 1], args[i + 1 :]
+if cmd == ["mod"] and {fail!r} is not None:
+    sys.exit({fail!r})
+extra = {extra!r} if cmd == ["mod"] else []
+os.execv({bazel!r}, [{bazel!r}, *{base!r}, *startup, *cmd, *rest, *extra])
+"""
+
+
+def update_client(ws: Workspace, name: str, *, nested: Client | None = None, fail_mod: int | None = None,
+                  bazel: str | None = None) -> Client:  # fmt: skip
+    """A client that runs the `update` targets (ADR 0003 § The `update` targets).
+
+    The program reads `RULES_OCX_BAZEL`, adds no startup option of its own and inherits the client's environment, so
+    this sets: `RULES_OCX_BAZEL` to a wrapper that puts this harness's startup options (no rc file, the shared
+    output user root, the output base of `nested`, default: this client's) before the program's and this client's
+    repository flags after its `mod` command; and `OCX_INSECURE_REGISTRIES`, which ocx reads from the environment.
+    `fail_mod` makes the wrapper exit with that code for `mod`; `bazel` sets `RULES_OCX_BAZEL` to that value instead.
+    """
+    client = ws.client(name)
+    client.extra_env["OCX_INSECURE_REGISTRIES"] = REGISTRY
+    if bazel is not None:
+        client.extra_env["RULES_OCX_BAZEL"] = bazel
+        return client
+    target = nested or client
+    extra = [f"--repository_cache={target.repo_cache}", f"--repo_env=OCX_INSTALL_BINARY={target.ws.ocx_binary}",
+             f"--repo_env=OCX_INSTALL_BINARY_SHA256={sha256(target.ws.ocx_binary)}",
+             f"--repo_env=OCX_INSECURE_REGISTRIES={REGISTRY}", "--repo_env=OCX_NO_CONFIG=1"]  # fmt: skip
+    real = shutil.which(BAZEL) or BAZEL
+    script = _BAZEL_PY.format(fail=fail_mod, extra=extra, bazel=real, base=target.startup()[1:])
+    (client.dir / "bazel.py").write_text(script, encoding="utf-8")
+    wrapper = client.dir / "bazel-wrapper"
+    wrapper.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{client.dir / "bazel.py"}" "$@"\n', encoding="utf-8")
+    wrapper.chmod(0o755)
+    client.extra_env["RULES_OCX_BAZEL"] = str(wrapper)
+    return client
+
+
+def run_update(client: Client, target: str, *args: str, lockfile: str = "update", timeout: int = 600) -> Result:
+    """`bazel run <target> -- ARGS`; `target` is `@<hub>//:update` or `@rules_ocx//:update`."""
+    tail = ["--", *args] if args else []
+    return client.run("run", target, "--spawn_strategy=local", *tail, lockfile=lockfile, timeout=timeout)
+
+
+class LockRig:
+    """One registry repository (`rig/<test id>`), a publisher for it and minimal workspaces over it."""
+
+    def __init__(self, request) -> None:
+        self.id = (re.sub(r"[^a-z0-9]+", "-", request.node.name.lower()).strip("-")[:50] + "-" + uuid.uuid4().hex[:6])
+        self.repo = "rig/" + self.id
+        self.workspaces: list[Workspace] = []
+        self._seeder = None
+
+    def ident(self, tag: str = "1.0", repo: str | None = None) -> str:
+        return f"{REGISTRY}/{repo or self.repo}:{tag}"
+
+    def push(self, tag: str, report: str, platforms=(LOCK_P,), *, repo: str | None = None, exe: str = "tool",
+             meta: dict | None = None) -> dict[str, str]:  # fmt: skip
+        """Publishes `bin/<exe>` (a static program that prints `report`) for each platform under `tag`.
+
+        A second push to the same tag with another `report` moves the tag. Returns platform -> platform manifest digest.
+        """
+        sys.path.insert(0, str(RBE / "fixtures"))
+        from seed import Seeder
+
+        repo = repo or self.repo
+        if self._seeder is None:
+            self._seeder = Seeder(OCX, REGISTRY, RUN)
+            self._seeder.home = RUN / "lock-seed" / self.id  # not the rig seed's home
+            self._seeder.env["OCX_HOME"] = str(self._seeder.home)
+        seeder = self._seeder
+        try:
+            for platform in platforms:
+                seeder.publish(repo, tag, platform, lambda p: seeder.exe(p / "bin" / exe, report),
+                               {"env": [_PATH_ENV], **(meta or {})})  # fmt: skip
+        except SystemExit as exc:
+            raise AssertionError(f"publishing {repo}:{tag} failed: {exc}") from exc
+        got = seeder.digests[repo][tag]
+        return {p: got[p] if got[p].startswith("sha256:") else "sha256:" + got[p] for p in platforms}
+
+    def index_digest(self, tag: str = "1.0", repo: str | None = None) -> str:
+        req = urllib.request.Request(f"http://{REGISTRY}/v2/{repo or self.repo}/manifests/{tag}", method="HEAD",
+                                     headers={"Accept": "application/vnd.oci.image.index.v1+json"})  # fmt: skip
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            return resp.headers["Docker-Content-Digest"]
+
+    def delete(self, *digests: str, repo: str | None = None) -> None:
+        """Deletes manifests by digest through the registry API with the rig credentials, in the order given."""
+        creds = credentials()
+        token = base64.b64encode(f"{creds['user']}:{creds['password']}".encode()).decode()
+        for digest in digests:
+            req = urllib.request.Request(f"http://{REGISTRY}/v2/{repo or self.repo}/manifests/{digest}", method="DELETE",
+                                         headers={"Authorization": f"Basic {token}"})  # fmt: skip
+            urllib.request.urlopen(req, timeout=20).close()
+
+    def uris(self, log: Log, repo: str | None = None) -> list[str]:
+        """Registry request paths of this repository since the log's mark."""
+        return [r["uri"] for r in log.registry() if f"/v2/{repo or self.repo}/" in r["uri"]]
+
+    def refresh_index(self, ws: Workspace, repo: str | None = None) -> None:
+        """`ocx index update` of the workspace's `index/` snapshot for this repository."""
+        ocx(ws.path.parent / f"{ws.test_id}-indexhome", "--index", str(ws.path / "index"), "index", "update",
+            f"{REGISTRY}/{repo or self.repo}")  # fmt: skip
+
+    def workspace(self, decls: str, hubs: dict[str, list[str]], *, name: str = "", fault: str | None = None,
+                  toml: str | None = None, index: bool = False, dir_name: str | None = None) -> Workspace:  # fmt: skip
+        """A minimal workspace: rules_ocx, `decls` (the `ocx.package`/`ocx.project` lines), and per hub
+        `//:run_<hub>` (its `tool` through the launcher) and `//:inputs_<hub>` (a count of the first set's files).
+
+        `hubs` maps hub name -> platforms. `toml` is an `ocx.toml` text (`@REGISTRY@` filled) locked with `ocx lock`.
+        `index` snapshots this repository into `index/` and exports it as `//:index`. `fault` plants a manifest fault.
+        `dir_name` is the workspace directory's own name (default: the test id), e.g. one holding a space.
+        """
+        test_id = self.id + name
+        ws_dir = RUN / "ws" / test_id / dir_name if dir_name else RUN / "ws" / test_id
+        shutil.rmtree(ws_dir, ignore_errors=True)
+        ws_dir.mkdir(parents=True)
+        shutil.copytree(RBE / "workspace" / "platforms", ws_dir / "platforms")
+        (ws_dir / ".bazelversion").write_text((ROOT / ".bazelversion").read_text())
+        repos = ["ocx_tool", *hubs, *[f"{h}_{platform_slug(p)}" for h, ps in hubs.items() for p in ps]]
+        (ws_dir / "MODULE.bazel").write_text(
+            'module(name = "lock_ws")\nbazel_dep(name = "rules_ocx", version = "0.0.0")\n'
+            'bazel_dep(name = "platforms", version = "1.0.0")\n'
+            f'local_path_override(module_name = "rules_ocx", path = "{ROOT}")\n'
+            'ocx = use_extension("@rules_ocx//ocx:extensions.bzl", "ocx")\n' + decls
+            + f"use_repo(ocx, {', '.join(json.dumps(r) for r in repos)})\n"
+            + f"register_toolchains({', '.join(json.dumps(f'@{h}//:all') for h in hubs)})\n"
+        )  # fmt: skip
+        build = "".join(
+            f'genrule(name = "run_{h}", outs = ["run_{h}.txt"], cmd = "$(execpath @{h}//:tool) > $@", tools = ["@{h}//:tool"])\n'
+            f'genrule(name = "inputs_{h}", srcs = ["@{h}_{platform_slug(ps[0])}//:set"], outs = ["inputs_{h}.txt"], '
+            'cmd = "echo $(SRCS) | wc -w > $@")\n'
+            for h, ps in hubs.items()
+        )
+        if index:
+            build += 'exports_files(["index"])\n'
+        (ws_dir / "BUILD.bazel").write_text(build)
+        if toml is not None:
+            (ws_dir / "ocx.toml").write_text(toml.replace("@REGISTRY@", REGISTRY), encoding="utf-8")
+            lock(ws_dir)
+        counter = ws_dir / ".ocx-calls.log"
+        ws = Workspace(ws_dir, test_id, counter, _counting_wrapper(ws_dir.parent / f"{test_id}-ocx", counter, fault))
+        if index:
+            self.refresh_index(ws)
+        self.workspaces.append(ws)
+        return ws
+
+
+@pytest.fixture
+def lockrig(request):
+    rig = LockRig(request)
+    yield rig
+    for ws in rig.workspaces:
+        for c in ws.clients:
+            c.shutdown()
+    if rig._seeder is not None:
+        rig._seeder.close()
