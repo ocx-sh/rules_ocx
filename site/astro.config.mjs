@@ -24,6 +24,7 @@ export default defineConfig({
           items: [
             { label: 'Share one toolchain', link: '/guides/pin-toolchain/' },
             { label: 'Fail CI on a stale lock', link: '/guides/ci-reproducible/' },
+            { label: 'Update locked tools', link: '/guides/update-locks/' },
             { label: 'Build behind a mirror', link: '/guides/offline-mirror/' },
             { label: 'Use tools for several platforms', link: '/guides/cross-platform/' },
             { label: 'Windows: path length', link: '/guides/windows-path-length/' },
