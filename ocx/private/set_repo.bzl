@@ -15,16 +15,8 @@ _DEFS = str(Label("//ocx:defs.bzl"))
 
 _STASH = "_ocx_reserved"
 
-# The three top-level entries of an `ocx vendor` output directory.
-_TOP_LEVEL = ["manifest.json", "packages", "selections"]
-
 def _is_reserved(path):
     return path.split("/")[-1].lower() in RESERVED_NAMES
-
-def _sidecar(launcher):
-    """The `.direct` sidecar beside a launcher; `<self>.exe` pairs with `<self>.direct`."""
-    stem = launcher[:-len(".exe")] if launcher.endswith(".exe") else launcher
-    return stem + ".direct"
 
 def _label(path):
     # `:` first, so a path starting with `@` or `//` stays a name in this package.
@@ -47,7 +39,8 @@ def _all_paths(manifest):
     paths = []
     for package in manifest.packages:
         paths += [package.package_dir, package.content_dir]
-        paths += [e.launcher_path for e in package.entrypoints]
+        for entry in package.entrypoints:
+            paths += [entry.launcher_path, entry.record_path]
         if package.tree:
             paths += [f.path for f in package.tree.files]
             paths += [link.path for link in package.tree.links]
@@ -56,7 +49,7 @@ def _all_paths(manifest):
     for tool in manifest.tools:
         paths.append(tool.target_path)
         if tool.launcher_path:
-            paths.append(tool.launcher_path)
+            paths += [tool.launcher_path, tool.record_path]
     return paths
 
 def build_file_content(manifest, moves):
@@ -64,7 +57,8 @@ def build_file_content(manifest, moves):
 
     One directory label per link-free directory that holds no moved file, a
     file label for every other regular file, the declared links, the moved
-    reserved files, and every launcher and sidecar. The targets are `:set` (an
+    reserved files, and every launcher with its record, at the paths the manifest
+    names. The targets are `:set` (an
     `ocx_set`) and `:toolchain_impl` (its `ocx_set_toolchain`); the hub
     declares the `toolchain()`.
 
@@ -98,15 +92,14 @@ def build_file_content(manifest, moves):
         links += [(repr(link.path), repr(link.target)) for link in tree.links]
         for entry in package.entrypoints:
             srcs[entry.launcher_path] = True
-            srcs[_sidecar(entry.launcher_path)] = True
+            srcs[entry.record_path] = True
     tools = {}
     for tool in manifest.tools:
         if not tool.launcher_path or tool.name in tools:
             continue
-        sidecar = _sidecar(tool.launcher_path)
         srcs[tool.launcher_path] = True
-        srcs[sidecar] = True
-        tools[tool.name] = [repr(tool.launcher_path), repr(sidecar)]
+        srcs[tool.record_path] = True
+        tools[tool.name] = [repr(tool.launcher_path), repr(tool.record_path)]
     for move in moves:
         srcs[move.dst] = True
     return "\n".join([
@@ -153,36 +146,52 @@ def reserved_moves(manifest):
                 moves.append(struct(src = file.path, dst = "{}/{}".format(_STASH, len(moves))))
     return struct(moves = moves, error = "")
 
+_TAILS = {
+    "tag": "run bazel run @{hub}//:update",
+    "pinned": "run bazel run @{hub}//:update",
+    "index": "the snapshot changed outside the update: run bazel run @{hub}//:update or restore the snapshot",
+}
+
 def cross_check(manifest, expected):
     """Compares the manifest with the fact recorded at module resolution.
+
+    A clause whose expected value is empty is skipped, except the tools row.
 
     Args:
         manifest: the parse_manifest() manifest.
         expected: struct(platform, tools = [[name, kind], ...], available_platforms = [...])
             for this set's platform, taken from the fact; `platform` is the
-            one the repository was asked to vendor.
+            one the repository was asked to vendor. Optional fields, read with
+            defaults: `digest` (the recorded root platform manifest digest),
+            `kind` and `hub`, which pick the fix the message ends with.
 
     Returns:
-        error string, "" when they agree. The text names
-        `bazel mod deps --lockfile_mode=update`.
+        error string, "" when they agree.
     """
+    digest = getattr(expected, "digest", "")
+    kind = getattr(expected, "kind", "")
+    hub = getattr(expected, "hub", "")
     actual_tools = sorted(["{}:{}".format(t.name, t.kind) for t in manifest.tools])
     wanted_tools = sorted(["{}:{}".format(t[0], t[1]) for t in expected.tools])
     actual_platforms = sorted(manifest.available_platforms)
     wanted_platforms = sorted(expected.available_platforms)
+    roots = [root for selection in manifest.selections for root in selection.roots]
     problems = []
     if manifest.platform != expected.platform:
         problems.append("the manifest is for platform {} where {} was requested".format(manifest.platform, expected.platform))
     if actual_tools != wanted_tools:
         problems.append("tools are {} where the fact recorded {}".format(actual_tools, wanted_tools))
-    if actual_platforms != wanted_platforms:
+    if wanted_platforms and actual_platforms != wanted_platforms:
         problems.append("available platforms are {} where the fact recorded {}".format(actual_platforms, wanted_platforms))
+    if digest and roots != [digest]:
+        problems.append("the root package is {} where the fact recorded {}".format(", ".join(roots), digest))
     if not problems:
         return ""
-    return ("the vendored set for {} disagrees with the fact in MODULE.bazel.lock: {}; " +
-            "the lock entry is stale for this ocx — run `bazel mod deps --lockfile_mode=update`").format(
+    tail = _TAILS.get(kind, "run bazel mod deps --lockfile_mode=update").format(hub = hub)
+    return "the vendored set for {} disagrees with the fact in MODULE.bazel.lock: {}; {}".format(
         manifest.platform,
         "; ".join(problems),
+        tail,
     )
 
 def tool_conflict_error(manifest):
@@ -232,6 +241,12 @@ def windows_link_error(manifest):
             )
     return ""
 
+def _digest_pinned(identifier, digest):
+    """`<registry/repo>@<digest>`: drops any `@...` suffix and a `:tag` after the last `/`."""
+    head = identifier.split("@")[0]
+    base, slash, last = head.rpartition("/")
+    return base + slash + last.split(":")[0] + "@" + digest
+
 def vendor_args(attr_values):
     """The ocx argv after the binary for one vendor call.
 
@@ -242,14 +257,25 @@ def vendor_args(attr_values):
     per blob dir) come before `vendor`; they are read from the optional
     fields `project`, `index` and `blob_dirs` of `attr_values`.
 
+    The optional fields `kind`, `expected_digest` and `hub` select the per-kind
+    form. Kind `index` adds `--frozen` before `--index`. Kinds `tag` and
+    `pinned` with a recorded digest vendor `<declared repo>@<digest>`: the
+    platform manifest the lock pins, with no `--remote`.
+
     Args:
         attr_values: struct(tier, out, platform, groups, bindings, package),
-            plus optionally project, index and blob_dirs.
+            plus optionally project, index, blob_dirs, kind, expected_digest
+            and hub.
 
     Returns:
-        struct(args, error).
+        struct(args, error, identifier). `identifier` is the package passed to
+        ocx, "" for the project tier.
     """
+    kind = getattr(attr_values, "kind", "")
+    digest = getattr(attr_values, "expected_digest", "")
     root = ["--format", "json"]
+    if kind == "index":
+        root.append("--frozen")
     project = getattr(attr_values, "project", "")
     if project:
         root += ["--project", project]
@@ -263,12 +289,21 @@ def vendor_args(attr_values):
         args = root + ["vendor"] + common
         for group in attr_values.groups:
             args += ["-g", group]
-        return struct(args = args + list(attr_values.bindings), error = "")
+        return struct(args = args + list(attr_values.bindings), error = "", identifier = "")
     if attr_values.tier == "package":
-        if not attr_values.package:
-            return struct(args = [], error = "the package tier needs a package identifier")
-        return struct(args = root + ["package", "vendor"] + common + [attr_values.package], error = "")
-    return struct(args = [], error = "unknown tier '{}'".format(attr_values.tier))
+        identifier = attr_values.package
+        if not identifier:
+            return struct(args = [], error = "the package tier needs a package identifier", identifier = "")
+        if not identifier[0].isalnum():
+            return struct(
+                args = [],
+                error = "rules_ocx: '{}': the identifier '{}' must start with a letter or digit".format(getattr(attr_values, "hub", ""), identifier),
+                identifier = "",
+            )
+        if kind in ["tag", "pinned"] and digest:
+            identifier = _digest_pinned(identifier, digest)
+        return struct(args = root + ["package", "vendor"] + common + [identifier], error = "", identifier = identifier)
+    return struct(args = [], error = "unknown tier '{}'".format(attr_values.tier), identifier = "")
 
 def package_pinned(package):
     """Whether a package identifier ends in `@sha256:` plus a full digest.
@@ -281,13 +316,18 @@ def package_pinned(package):
     """
     return "@sha256:" in package and is_sha256(package.split("@sha256:")[-1])
 
-def vendor_failure(args, code, stderr):
+def vendor_failure(args, code, stderr, kind = "", hub = ""):
     """The failure text of one ocx run, "" on exit 0 (pure).
+
+    A failed fetch of a `tag` or `pinned` set adds the X6 hint, except on exit
+    65: that text names the package and its cause, which the hint would hide.
 
     Args:
         args: the argv after the binary.
         code: exit code.
         stderr: captured stderr.
+        kind: the declaration kind, "" when unknown.
+        hub: the hub name, for the hint.
 
     Returns:
         message with the sysexits hint, or "".
@@ -295,7 +335,10 @@ def vendor_failure(args, code, stderr):
     if code == 0:
         return ""
     hint = SYSEXIT_HINTS.get(code)
-    return "ocx {} failed (exit {}): {}{}".format(" ".join(args), code, stderr.strip(), "\nhint: " + hint if hint else "")
+    text = "ocx {} failed (exit {}): {}{}".format(" ".join(args), code, stderr.strip(), "\nhint: " + hint if hint else "")
+    if kind in ["tag", "pinned"] and code != 65:
+        text += "\nhint: the platform manifest MODULE.bazel.lock pins for '{}' may be gone from the registry; run bazel run @{}//:update".format(hub, hub)
+    return text
 
 def _path_flag(rctx, label):
     """Absolute path of a label attr, watched so an edit refetches."""
@@ -327,6 +370,9 @@ def _ocx_set_repo_impl(rctx):
     scratch_home = rctx.path(".ocx_scratch_home")
     planned = vendor_args(struct(
         tier = attrs.tier,
+        kind = attrs.kind,
+        expected_digest = attrs.expected_digest,
+        hub = attrs.hub,
         out = str(out),
         platform = attrs.platform,
         groups = attrs.groups,
@@ -337,27 +383,33 @@ def _ocx_set_repo_impl(rctx):
         blob_dirs = [_path_flag(rctx, d) for d in attrs.blob_dirs],
     ))
     if planned.error:
-        fail("rules_ocx: " + planned.error)
+        fail(planned.error if planned.error.startswith("rules_ocx:") else "rules_ocx: " + planned.error)
 
     ocx_env = make_isolated_ocx_env(rctx, str(scratch_home))
     result = execute_ocx(rctx, binary, planned.args, ocx_env.env, is_windows)
 
     # Before any fail(): the scratch home and the output directory never outlive the call.
     rctx.delete(scratch_home)
-    problem = vendor_failure(planned.args, result.return_code, result.stderr)
+    problem = vendor_failure(planned.args, result.return_code, result.stderr, attrs.kind, attrs.hub)
     if not problem and not out.get_child("manifest.json").exists:
         problem = "`ocx vendor` exited 0 but wrote no manifest.json into its output directory"
     if not problem and out.get_child(_STASH).exists:
         problem = "the vendored tree already holds a top-level '{}'".format(_STASH)
+    entries = out.readdir() if not problem else []
+    for entry in entries:
+        if _is_reserved(entry.basename):
+            problem = "the vendored top level holds '{}', a name Bazel reserves".format(entry.basename)
+            break
     if problem:
         rctx.delete(out)
         fail("rules_ocx: vendoring {} for {}: {}".format(attrs.package or attrs.ocx_toml, attrs.platform, problem))
-    for name in _TOP_LEVEL:
-        if out.get_child(name).exists:
-            rctx.rename(out.get_child(name), rctx.path(name))
+
+    # Every top-level entry moves: the manifest is the only file read by name.
+    for entry in entries:
+        rctx.rename(entry, rctx.path(entry.basename))
     rctx.delete(out)
 
-    manifest = read_manifest(rctx, rctx.path("manifest.json"))
+    manifest = read_manifest(rctx, rctx.path("manifest.json"), index_name = attrs.hub if attrs.kind == "index" else "")
     if manifest.content != "present":
         fail("rules_ocx: `ocx vendor` wrote a manifest with content '{}'; a set needs its files".format(manifest.content))
     err = windows_link_error(manifest)
@@ -367,6 +419,9 @@ def _ocx_set_repo_impl(rctx):
         platform = attrs.platform,
         tools = [row.split(":", 1) for row in attrs.expected_tools],
         available_platforms = attrs.expected_available_platforms,
+        digest = attrs.expected_digest,
+        kind = attrs.kind,
+        hub = attrs.hub,
     ))
     if err:
         fail("rules_ocx: " + err)
@@ -382,7 +437,7 @@ def _ocx_set_repo_impl(rctx):
     rctx.file("BUILD.bazel", build_file_content(manifest, stashed.moves))
 
     # Only a digest-pinned root is a function of the lockfile.
-    pinned = attrs.tier == "project" or package_pinned(attrs.package)
+    pinned = attrs.tier == "project" or package_pinned(planned.identifier)
     if pinned:
         return rctx.repo_metadata(reproducible = True)
     return None

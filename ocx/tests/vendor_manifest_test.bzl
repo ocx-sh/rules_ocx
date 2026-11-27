@@ -7,7 +7,7 @@ load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 load("//ocx/private:vendor_manifest.bzl", "parse_manifest", "tag_name_error")
 load(":testdata/vendor_manifest_example.bzl", "EXAMPLE")
 
-_PKG = "packages/ocx.sh/sha256/1f/2e3d4c5b6a79881f2e3d4c5b6a7988"
+_PKG2 = "p/1f2e3d4c5b6a7988"
 
 def _with_target(target):
     return EXAMPLE.replace('"target": "cmake"', '"target": "{}"'.format(target))
@@ -17,30 +17,34 @@ def _example_test_impl(ctx):
     result = parse_manifest(EXAMPLE)
     asserts.equals(env, "", result.error)
     m = result.manifest
-    asserts.equals(env, 1, m.schema_version)
+    asserts.equals(env, 2, m.schema_version)
     asserts.equals(env, "present", m.content)
     asserts.equals(env, "linux/amd64+libc.glibc", m.platform)
     asserts.equals(env, ["darwin/arm64", "linux/amd64+libc.glibc", "windows/amd64"], m.available_platforms)
-    asserts.equals(env, 1, len(m.packages))
+    asserts.equals(env, 2, len(m.packages))
     pkg = m.packages[0]
-    asserts.equals(env, _PKG + "/content", pkg.content_dir)
+    asserts.equals(env, _PKG2 + "/c", pkg.content_dir)
     asserts.true(env, pkg.names_declared)
-    asserts.equals(env, [struct(path = _PKG + "/content/bin/cmake", executable = True)], pkg.tree.files)
-    asserts.equals(env, [struct(path = _PKG + "/content/bin/cmake3", target = "cmake")], pkg.tree.links)
-    asserts.equals(env, [_PKG + "/content/share"], pkg.tree.link_free_dirs)
+    asserts.equals(env, [struct(path = _PKG2 + "/c/bin/cmake", executable = True)], pkg.tree.files)
+    asserts.equals(env, [struct(path = _PKG2 + "/c/bin/cmake3", target = "cmake")], pkg.tree.links)
+    asserts.equals(env, [_PKG2 + "/c/share"], pkg.tree.link_free_dirs)
     asserts.equals(env, 1, len(m.selections))
-    asserts.equals(env, "selections/default/shells/default/bin", m.selections[0].launcher_dir)
+    asserts.equals(env, "l", m.selections[0].launcher_dir)
     tool = m.tools[0]
     asserts.equals(env, "cmake", tool.name)
     asserts.equals(env, "binary", tool.kind)
-    asserts.equals(env, "selections/default/shells/default/bin/cmake", tool.launcher_path)
+    asserts.equals(env, "l/cmake", tool.launcher_path)
     return unittest.end(env)
 
 def _schema_version_test_impl(ctx):
     env = unittest.begin(ctx)
-    result = parse_manifest(EXAMPLE.replace('"schema_version": 1', '"schema_version": 2'))
-    asserts.true(env, result.error != "", "schema_version 2 must be refused")
-    asserts.equals(env, None, result.manifest)
+    asserts.equals(env, "", parse_manifest(EXAMPLE).error, "control: schema_version 2 parses")
+    for bad in ["3", "0", "1"]:
+        result = parse_manifest(EXAMPLE.replace('"schema_version": 2', '"schema_version": ' + bad))
+        asserts.true(env, "unsupported vendor manifest schema_version " + bad in result.error, "schema_version {} is refused: {}".format(bad, result.error))
+        asserts.equals(env, None, result.manifest)
+    text = parse_manifest(EXAMPLE.replace('"schema_version": 2', '"schema_version": "2"'))
+    asserts.true(env, "no integer schema_version" in text.error, "a non-integer is refused: " + text.error)
     return unittest.end(env)
 
 def _link_target_test_impl(ctx):
@@ -59,7 +63,7 @@ def _mutated(mutate):
 
 def _set_file_path(sub):
     def mutate(raw):
-        raw["packages"][0]["tree"]["files"][0]["path"] = _PKG + "/content/" + sub
+        raw["packages"][0]["tree"]["files"][0]["path"] = _PKG2 + "/c/" + sub
 
     return _mutated(mutate)
 
@@ -91,11 +95,13 @@ def _optional_test_impl(ctx):
 
     def mutate(raw):
         raw["tools"][0].pop("launcher_path")
+        raw["tools"][0].pop("record_path")
         raw["selections"][0].pop("groups")
 
     result = parse_manifest(_mutated(mutate))
     asserts.equals(env, "", result.error)
     asserts.equals(env, None, result.manifest.tools[0].launcher_path)
+    asserts.equals(env, "", result.manifest.tools[0].record_path)
     asserts.equals(env, [], result.manifest.selections[0].groups)
     return unittest.end(env)
 
@@ -106,7 +112,7 @@ def _path_rules_test_impl(ctx):
     # not by JSON, which carries both.
     for bad in ["../x", "a//x", "a/./x", "a/b:c", "a\\b", "a/\n/b", 'a/"b', "a/\303\251", "a/\t"]:
         asserts.true(env, parse_manifest(_set_file_path(bad)).error != "", "refused: " + repr(bad))
-    asserts.true(env, parse_manifest(_set_file_path("x").replace(_PKG + "/content/x", "/abs/x")).error != "", "leading slash")
+    asserts.true(env, parse_manifest(_set_file_path("x").replace(_PKG2 + "/c/x", "/abs/x")).error != "", "leading slash")
     asserts.equals(env, "", parse_manifest(_set_file_path("packages/a b/c")).error, "a space is a legal character")
 
     # Windows-only rules: device names and trailing dots or spaces.
@@ -114,7 +120,7 @@ def _path_rules_test_impl(ctx):
         def mutate(raw):
             raw["platform"] = "windows/amd64"
             raw["packages"][0]["tree"]["links"] = []
-            raw["packages"][0]["tree"]["files"][0]["path"] = _PKG + "/content/" + path
+            raw["packages"][0]["tree"]["files"][0]["path"] = _PKG2 + "/c/" + path
 
         return parse_manifest(_mutated(mutate)).error
 
@@ -144,13 +150,13 @@ def _target_forms_test_impl(ctx):
     asserts.true(env, windows_target("a/CON") != "", "device name in a target")
     asserts.true(env, windows_target("a/b.") != "", "trailing dot in a target")
     asserts.equals(env, "", windows_target("a/b"), "control")
-    outside = _mutated(lambda raw: raw["packages"][0]["tree"]["links"][0].update({"path": "selections/x"}))
+    outside = _mutated(lambda raw: raw["packages"][0]["tree"]["links"][0].update({"path": "p/x"}))
     asserts.true(env, parse_manifest(outside).error != "", "a link outside content_dir")
     return unittest.end(env)
 
 def _conflicts_test_impl(ctx):
     env = unittest.begin(ctx)
-    content = _PKG + "/content/"
+    content = _PKG2 + "/c/"
 
     def check(mutate):
         return parse_manifest(_mutated(mutate)).error
@@ -194,14 +200,28 @@ def _containment_test_impl(ctx):
     def check(mutate):
         return parse_manifest(_mutated(mutate)).error
 
-    asserts.true(env, check(lambda raw: _tree(raw)["files"][0].update({"path": "selections/x"})) != "", "file outside content_dir")
-    asserts.true(env, check(lambda raw: _tree(raw).update({"link_free_dirs": ["packages/other"]})) != "", "dir outside content_dir")
-    asserts.equals(env, "", check(lambda raw: _tree(raw).update({"links": [], "link_free_dirs": [_PKG + "/content"]})), "the content_dir itself may be link-free")
-    asserts.true(env, check(lambda raw: raw["selections"][0].update({"launcher_dir": "packages/x"})) != "", "launcher_dir outside selections/")
-    asserts.true(env, check(lambda raw: raw["tools"][0].update({"target_path": "selections/x"})) != "", "target_path outside packages/")
-    asserts.true(env, check(lambda raw: raw["tools"][0].update({"launcher_path": "packages/x"})) != "", "launcher_path outside selections/")
-    asserts.true(env, check(lambda raw: raw["packages"][0].update({"package_dir": "selections/x"})) != "", "package_dir outside packages/")
-    asserts.true(env, check(lambda raw: raw["packages"][0].update({"content_dir": "packages/else"})) != "", "content_dir outside package_dir")
+    asserts.true(env, check(lambda raw: _tree(raw)["files"][0].update({"path": "p/other/x"})) != "", "file outside content_dir")
+    asserts.true(env, check(lambda raw: _tree(raw).update({"link_free_dirs": ["p/other"]})) != "", "dir outside content_dir")
+    asserts.equals(env, "", check(lambda raw: _tree(raw).update({"links": [], "link_free_dirs": [_PKG2 + "/c"]})), "the content_dir itself may be link-free")
+
+    # Field relations: content_dir under package_dir; the error names content_dir.
+    moved = parse_manifest(_mutated(lambda raw: raw["packages"][0].update({"package_dir": "p/else"})))
+    asserts.true(env, "content_dir" in moved.error, "content_dir outside package_dir: " + moved.error)
+    asserts.true(env, check(lambda raw: raw["packages"][0].update({"content_dir": "p/else/c"})) != "", "content_dir outside package_dir, the other way")
+
+    def entry_paths(launcher, record):
+        row = '{{"name": "serve", "launcher_path": "{}", "record_path": "{}", "environment": "entrypoint:x:serve"}}'.format(launcher, record)
+        return parse_manifest(EXAMPLE.replace('"entrypoints": []', '"entrypoints": [' + row + "]")).error
+
+    asserts.equals(env, "", entry_paths(_PKG2 + "/e/serve", _PKG2 + "/e/serve.launch"), "control: an entry point inside package_dir")
+    asserts.true(env, entry_paths("p/x/serve", "p/x/serve.launch") != "", "entry-point launcher outside package_dir")
+    asserts.true(env, entry_paths(_PKG2 + "/e/serve", "p/x/serve.launch") != "", "entry-point record outside package_dir")
+
+    # Fields without a relation to another field accept any top-level name.
+    asserts.equals(env, "", check(lambda raw: raw["selections"][0].update({"launcher_dir": "other/dir"})), "launcher_dir under another top-level name")
+    asserts.equals(env, "", check(lambda raw: raw["tools"][0].update({"target_path": "other/x"})), "target_path under another top-level name")
+    asserts.equals(env, "", check(lambda raw: raw["tools"][0].update({"launcher_path": "other/cmake", "record_path": "other/cmake.launch"})), "launcher and record under another top-level name")
+    asserts.true(env, check(lambda raw: raw["tools"][0].update({"target_path": "../x"})) != "", "target_path keeps the per-path rules")
     return unittest.end(env)
 
 def _tool_name_test_impl(ctx):
@@ -220,7 +240,7 @@ def _tool_name_test_impl(ctx):
 
     def entry(name):
         # Text, not a key access: the interface guard keeps `entrypoints` keys in vendor_manifest.bzl alone.
-        row = '{{"name": "{0}", "launcher_path": "{1}/entrypoints/{0}", "environment": "entrypoint:x:{0}"}}'.format(name, _PKG)
+        row = '{{"name": "{0}", "launcher_path": "{1}/entrypoints/{0}", "record_path": "{1}/entrypoints/{0}.launch", "environment": "entrypoint:x:{0}"}}'.format(name, _PKG2)
         return parse_manifest(EXAMPLE.replace('"entrypoints": []', '"entrypoints": [' + row + "]")).error
 
     asserts.equals(env, "", entry("serve"), "control: an ordinary entry point")
@@ -242,7 +262,7 @@ def _tag_name_test_impl(ctx):
 
 def _link_chain_test_impl(ctx):
     env = unittest.begin(ctx)
-    content = _PKG + "/content/"
+    content = _PKG2 + "/c/"
 
     def check(links):
         def mutate(raw):
@@ -262,6 +282,7 @@ def _link_chain_test_impl(ctx):
 
 def _shape_test_impl(ctx):
     env = unittest.begin(ctx)
+    asserts.equals(env, "", parse_manifest(EXAMPLE).error, "control: the schema 2 fixture parses")
     asserts.true(env, parse_manifest("").error != "", "empty")
     asserts.true(env, parse_manifest("[]").error != "", "not an object")
     asserts.true(env, parse_manifest("{}").error != "", "no schema_version")
@@ -287,8 +308,6 @@ tag_name_test = unittest.make(_tag_name_test_impl)
 link_chain_test = unittest.make(_link_chain_test_impl)
 
 # ---- Run 2 contract (C-RO-23): schema 2, record beside launcher, no fixed prefixes, index inputs. ----
-
-_PKG2 = "p/1f2e3d4c5b6a7988"
 
 def _v2_test_impl(ctx):
     env = unittest.begin(ctx)

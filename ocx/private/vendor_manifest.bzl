@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 The OCX Authors
 
-"""Reader of the `ocx vendor` manifest (`manifest.json`, schema_version 1).
+"""Reader of the `ocx vendor` manifest (`manifest.json`, schema_version 2).
 
 Only what rules_ocx consumes is exposed; `environments[]` is deliberately left
 out because the launchers apply it.
@@ -9,6 +9,10 @@ out because the launchers apply it.
 The manifest is untrusted input: ocx wrote it, but the directory it sits in is
 a build input a person can edit. Every path becomes a label or a symlink in a
 generated BUILD file, so each one is checked before it reaches a caller.
+
+No path has a fixed prefix: ocx chooses its layout, so only the relations
+between fields are checked (a content directory inside its package directory,
+a record beside its launcher, tree paths inside the content directory).
 """
 
 visibility(["//ocx", "//ocx/tests"])
@@ -48,8 +52,7 @@ def _path_error(path, what, windows, under = "", allow_equal = False):
     """Checks the rules of a manifest path field, "" when it holds.
 
     `under` demands the path lie below that directory (or equal it, with
-    `allow_equal`): every path becomes a label of the set repository, so one
-    that wanders out of the places ocx writes is refused.
+    `allow_equal`): a path related to another manifest field must stay inside it.
     """
     if type(path) != "string" or not path:
         return "{}: not a non-empty string".format(what)
@@ -131,11 +134,13 @@ _TOP = {
     "packages": "list",
     "selections": "list",
     "tools": "list",
+    "index_lookups?": "list",
 }
 
 _PACKAGE = {
     "identifier": "string",
     "digest": "string",
+    "index_digest?": "string",
     "package_dir": "string",
     "content_dir": "string",
     "dependencies?": "strings",
@@ -144,7 +149,7 @@ _PACKAGE = {
     "tree?": "dict",
 }
 
-_ENTRYPOINT = {"name": "string", "launcher_path": "string", "environment": "string"}
+_ENTRYPOINT = {"name": "string", "launcher_path": "string", "record_path": "string", "environment": "string"}
 
 _SELECTION = {
     "id": "string",
@@ -163,6 +168,7 @@ _TOOL = {
     "environment": "string",
     "target_path": "string",
     "launcher_path?": "string",
+    "record_path?": "string",
 }
 
 # Bounds of one link walk; Linux itself stops at 40 symlink expansions.
@@ -188,6 +194,26 @@ def _tool_name_error(name, windows):
     if not why and name.lower() in RESERVED_NAMES:
         why = "reserved name (Bazel reads it as a package or workspace marker)"
     return "tool name '{}': {}".format(name, why) if why else ""
+
+def _dirname(path):
+    return path.rpartition("/")[0]
+
+def _record_error(what, launcher, record):
+    """A record sits in the same directory as its launcher; its name is read verbatim."""
+    if _dirname(record) != _dirname(launcher):
+        return "{}: record '{}' is not in the directory of its launcher '{}'".format(what, record, launcher)
+    return ""
+
+def _lookup_path_error(path, index_name):
+    """X8: a snapshot path must be a plain relative path."""
+    plain = path != "" and path[0] != "/" and "\\" not in path and not (len(path) > 1 and path[1] == ":")
+    if plain:
+        for segment in path.split("/"):
+            if segment in ("", ".", ".."):
+                plain = False
+    if plain:
+        return ""
+    return "rules_ocx: '{}': the manifest names the snapshot path '{}', which is not a plain relative path".format(index_name, path)
 
 def _tree_conflicts(packages):
     """Duplicate paths, a link on a file, a link inside a link-free directory.
@@ -287,7 +313,7 @@ def _parse_package(raw, content, windows):
     err = _fields_error(raw, _PACKAGE, "package")
     if err:
         return struct(package = None, error = err)
-    err = _path_error(raw["package_dir"], "package package_dir", windows, "packages")
+    err = _path_error(raw["package_dir"], "package package_dir", windows)
     err = err or _path_error(raw["content_dir"], "package content_dir", windows, raw["package_dir"])
     if err:
         return struct(package = None, error = err)
@@ -296,12 +322,15 @@ def _parse_package(raw, content, windows):
         err = _fields_error(entry, _ENTRYPOINT, "entrypoint of " + raw["identifier"])
         err = err or _tool_name_error(entry.get("name"), windows)
         err = err or _path_error(entry.get("launcher_path"), "entrypoint launcher_path", windows, raw["package_dir"])
+        err = err or _path_error(entry.get("record_path"), "entrypoint record_path", windows, raw["package_dir"])
+        err = err or _record_error("entrypoint " + entry["name"], entry["launcher_path"], entry["record_path"])
         if err:
             return struct(package = None, error = err)
-        entrypoints.append(struct(name = entry["name"], launcher_path = entry["launcher_path"], environment = entry["environment"]))
+        entrypoints.append(struct(name = entry["name"], launcher_path = entry["launcher_path"], record_path = entry["record_path"], environment = entry["environment"]))
     package = struct(
         identifier = raw["identifier"],
         digest = raw["digest"],
+        index_digest = raw.get("index_digest"),
         package_dir = raw["package_dir"],
         content_dir = raw["content_dir"],
         dependencies = raw.get("dependencies", []),
@@ -319,6 +348,7 @@ def _parse_package(raw, content, windows):
     return struct(package = struct(
         identifier = package.identifier,
         digest = package.digest,
+        index_digest = package.index_digest,
         package_dir = package.package_dir,
         content_dir = package.content_dir,
         dependencies = package.dependencies,
@@ -327,35 +357,44 @@ def _parse_package(raw, content, windows):
         tree = parsed.tree,
     ), error = "")
 
-def parse_manifest(text):
+def parse_manifest(text, index_name = ""):
     """Parses and validates the text of a vendor manifest (pure).
 
-    Errors the real body raises (returned, not raised): `schema_version != 1`;
+    Errors the real body raises (returned, not raised): `schema_version != 2`;
     a link target that is absolute or resolves outside its package's
     `content_dir`; a missing or mistyped field; a path field with an
     empty, `.` or `..` segment, a leading `/`, or a character outside label-safe
     ASCII (on a `windows/*` platform also a device-name segment or one ending
     in `.` or a space); a file, link or `link_free_dirs` entry outside its
-    `content_dir`, or another path outside `packages/` or `selections/`; a
-    duplicate file or link path (also case-insensitively), a link on a file's
-    path or inside a link-free directory; an unsafe or duplicated tool name. Unknown extra fields and unknown enum values are
-    ignored (open enums).
+    `content_dir`, a `content_dir` or an entry-point launcher or record outside
+    its `package_dir`; a record outside its launcher's directory, or a tool with
+    only one of `launcher_path` and `record_path`; a duplicate file or link path,
+    a link on a file's path or inside a link-free directory; an unsafe or
+    duplicated tool name; an `index_lookups[].path` that is not a plain relative
+    path; no `index_lookups` while `index_name` is given. No path has a fixed
+    prefix. Unknown extra fields and unknown enum values are ignored (open enums).
 
     Args:
         text: the JSON text of the manifest.
+        index_name: the set's name when it was vendored with `--index`, else "";
+            it names the set in the index-input errors and makes `index_lookups`
+            mandatory.
 
     Returns:
         struct(manifest, error). `error` is "" on success; otherwise `manifest`
         is None. `manifest` is struct(schema_version, content, platform,
-        available_platforms, vendor_id, packages, selections, tools) where a
-        package is struct(identifier, digest, package_dir, content_dir,
-        dependencies, names_declared, entrypoints, tree), an entrypoint is
-        struct(name, launcher_path, environment), `tree` is None when
+        available_platforms, vendor_id, packages, selections, tools,
+        index_lookups) where a package is struct(identifier, digest,
+        index_digest, package_dir, content_dir, dependencies, names_declared,
+        entrypoints, tree), `index_digest` is None when absent, an entrypoint is
+        struct(name, launcher_path, record_path, environment), `tree` is None when
         `content == "absent"` else struct(files = [struct(path, executable)],
         links = [struct(path, target)], link_free_dirs = [str]), a selection is
-        struct(id, groups, bindings, roots, environment, launcher_dir) and a
+        struct(id, groups, bindings, roots, environment, launcher_dir), a
         tool is struct(name, selection, kind, package, environment,
-        target_path, launcher_path) with `launcher_path` None when absent.
+        target_path, launcher_path, record_path) with `launcher_path` None and
+        `record_path` "" when absent, and `index_lookups` is None when absent
+        else [struct(path, found)].
     """
     raw = json.decode(text, default = None)
     if type(raw) != "dict":
@@ -364,8 +403,8 @@ def parse_manifest(text):
         return struct(manifest = None, error = "manifest has no integer schema_version")
 
     # First, so a later schema's different shape reads as a version error.
-    if raw["schema_version"] != 1:
-        return struct(manifest = None, error = "unsupported vendor manifest schema_version {}: this rules_ocx reads 1 — pin an ocx and rules_ocx pair that agree".format(raw["schema_version"]))
+    if raw["schema_version"] != 2:
+        return struct(manifest = None, error = "unsupported vendor manifest schema_version {}: this rules_ocx reads 2 — pin an ocx and rules_ocx pair that agree".format(raw["schema_version"]))
     err = _fields_error(raw, _TOP, "manifest")
     if err:
         return struct(manifest = None, error = err)
@@ -382,7 +421,7 @@ def parse_manifest(text):
     selections = []
     for item in raw["selections"]:
         err = _fields_error(item, _SELECTION, "selection")
-        err = err or _path_error(item.get("launcher_dir"), "selection launcher_dir", windows, "selections")
+        err = err or _path_error(item.get("launcher_dir"), "selection launcher_dir", windows)
         if err:
             return struct(manifest = None, error = err)
         selections.append(struct(
@@ -398,10 +437,14 @@ def parse_manifest(text):
     seen = {}
     for item in raw["tools"]:
         err = _fields_error(item, _TOOL, "tool")
-        err = err or _path_error(item.get("target_path"), "tool target_path", windows, "packages")
+        err = err or _path_error(item.get("target_path"), "tool target_path", windows)
         err = err or _tool_name_error(item["name"], windows)
+        if not err and ("launcher_path" in item) != ("record_path" in item):
+            err = "tool '{}': launcher_path and record_path come together or not at all".format(item["name"])
         if not err and "launcher_path" in item:
-            err = _path_error(item["launcher_path"], "tool launcher_path", windows, "selections")
+            err = _path_error(item["launcher_path"], "tool launcher_path", windows)
+            err = err or _path_error(item["record_path"], "tool record_path", windows)
+            err = err or _record_error("tool " + item["name"], item["launcher_path"], item["record_path"])
         if not err and (item["selection"], item["name"]) in seen:
             err = "tool '{}' of selection '{}' is listed twice".format(item["name"], item["selection"])
         seen[(item["selection"], item["name"])] = True
@@ -415,7 +458,20 @@ def parse_manifest(text):
             environment = item["environment"],
             target_path = item["target_path"],
             launcher_path = item.get("launcher_path"),
+            record_path = item.get("record_path", ""),
         ))
+
+    lookups = None
+    if "index_lookups" in raw:
+        lookups = []
+        for item in raw["index_lookups"]:
+            err = _fields_error(item, {"path": "string", "found": "bool"}, "index_lookups entry")
+            err = err or _lookup_path_error(item["path"], index_name)
+            if err:
+                return struct(manifest = None, error = err)
+            lookups.append(struct(path = item["path"], found = item["found"]))
+    elif index_name:
+        return struct(manifest = None, error = "rules_ocx: '{}': the manifest lists no index inputs; rules_ocx needs an ocx that reports them (MR-9)".format(index_name))
 
     err = _tree_conflicts(packages)
     for package in packages:
@@ -431,19 +487,21 @@ def parse_manifest(text):
         packages = packages,
         selections = selections,
         tools = tools,
+        index_lookups = lookups,
     ), error = "")
 
-def read_manifest(rctx, path):
+def read_manifest(rctx, path, index_name = ""):
     """Reads a vendor manifest in a repository rule and fail()s on any error.
 
     Args:
         rctx: repository_ctx.
         path: path of the manifest file.
+        index_name: see parse_manifest().
 
     Returns:
         the `manifest` struct of parse_manifest().
     """
-    result = parse_manifest(rctx.read(path))
+    result = parse_manifest(rctx.read(path), index_name)
     if result.error:
         fail("rules_ocx: {}: {}".format(path, result.error))
     return result.manifest

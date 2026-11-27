@@ -168,7 +168,7 @@ ignored, and the binary's `ocx version` must still meet the floor below
 is not part of the lockfile).
 
 `version` must be {} or newer: that is the first ocx release with `ocx vendor`
-and manifest schema version 1, the manifest this ruleset reads.""".format(MIN_OCX_VERSION),
+and manifest schema version 2, the manifest this ruleset reads.""".format(MIN_OCX_VERSION),
     attrs = {
         "dist_manifest": attr.label(
             default = "//dist:dist.json",

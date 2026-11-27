@@ -5,14 +5,14 @@
 
 visibility(["//ocx", "//ocx/tests"])
 
-# A plain FilesToRunProvider would not do: the sidecar File is needed to link
-# `<name>.direct`.
+# A plain FilesToRunProvider would not do: the record File is needed to link it
+# beside the launcher.
 OcxSetInfo = provider(
     doc = "The files and tools of one platform's vendored set.",
     fields = {
         "files": "depset of every file of the set",
         "runfiles": "runfiles of the whole set",
-        "tools": "dict: tool name -> struct(launcher = File, sidecar = File)",
+        "tools": "dict: tool name -> struct(launcher = File, record = File)",
     },
 )
 
@@ -46,8 +46,8 @@ def _ocx_set_impl(ctx):
     tools = {}
     for name, pair in ctx.attr.tools.items():
         if len(pair) != 2 or pair[0] not in by_path or pair[1] not in by_path:
-            fail("{}: tool '{}' needs a launcher and a sidecar in srcs, got {}".format(ctx.label, name, pair))
-        tools[name] = struct(launcher = by_path[pair[0]], sidecar = by_path[pair[1]])
+            fail("{}: tool '{}' needs a launcher and a record in srcs, got {}".format(ctx.label, name, pair))
+        tools[name] = struct(launcher = by_path[pair[0]], record = by_path[pair[1]])
 
     files = depset(ctx.files.srcs + outputs)
     runfiles = ctx.runfiles(files = ctx.files.srcs + outputs)
@@ -63,7 +63,7 @@ ocx_set = rule(
         "links": attr.string_dict(doc = "Declared link path -> target."),
         "reserved": attr.string_dict(doc = "Stash path `_ocx_reserved/<n>` -> original path."),
         "srcs": attr.label_list(allow_files = True, doc = "File and directory labels of the vendored tree."),
-        "tools": attr.string_list_dict(doc = "Tool name -> [launcher path, sidecar path]."),
+        "tools": attr.string_list_dict(doc = "Tool name -> [launcher path, record path]."),
     },
     provides = [OcxSetInfo],
 )
@@ -87,7 +87,8 @@ def make_ocx_tool_rule(toolchain_type):
     `Label("//:toolchain_type")`.
 
     The rule is executable; attr `tool` (mandatory) names the tool. It outputs
-    symlinks `<name>` and `<name>.direct`.
+    symlinks to the launcher and the record under the basenames the manifest
+    gives them.
 
     Args:
         toolchain_type: a Label of the hub's `toolchain_type`, created in the
@@ -103,23 +104,21 @@ def make_ocx_tool_rule(toolchain_type):
         if not tool:
             fail("{}: the selected set holds no tool '{}' (it has: {})".format(ctx.label, ctx.attr.tool, ", ".join(sorted(info.tools))))
 
-        # Beside each other in this package: the launcher finds `<name>.direct`
-        # next to the path it was started by. A Windows launcher keeps
-        # its `.exe`; its sidecar does not.
-        suffix = ".exe" if tool.launcher.basename.endswith(".exe") else ""
-        exe = ctx.actions.declare_file(ctx.attr.tool + suffix)
+        # Beside each other in this package: the launcher finds its record from
+        # the name it was started by, so both keep their manifest basenames.
+        exe = ctx.actions.declare_file(tool.launcher.basename)
         ctx.actions.symlink(output = exe, target_file = tool.launcher, is_executable = True)
-        sidecar = ctx.actions.declare_file(ctx.attr.tool + ".direct")
-        ctx.actions.symlink(output = sidecar, target_file = tool.sidecar)
+        record = ctx.actions.declare_file(tool.record.basename)
+        ctx.actions.symlink(output = record, target_file = tool.record)
         return [DefaultInfo(
             executable = exe,
-            files = depset([exe, sidecar]),
-            runfiles = info.runfiles.merge(ctx.runfiles(files = [exe, sidecar])),
+            files = depset([exe, record]),
+            runfiles = info.runfiles.merge(ctx.runfiles(files = [exe, record])),
         )]
 
     return rule(
         implementation = _ocx_tool_impl,
-        doc = "One tool of the toolchain-selected set: symlinks `<name>` and `<name>.direct`.",
+        doc = "One tool of the toolchain-selected set: symlinks the launcher and its record.",
         attrs = {"tool": attr.string(mandatory = True, doc = "Tool name.")},
         executable = True,
         toolchains = [config_common.toolchain_type(toolchain_type, mandatory = True)],

@@ -16,7 +16,7 @@ visibility(["//ocx", "//ocx/tests"])
 DEFAULT_OCX_VERSION = "0.6.6"
 
 # The floor: the lowest ocx version that can carry `ocx vendor`, the command whose
-# manifest (schema version 1) this ruleset reads. The one constant every message and
+# manifest (schema version 2) this ruleset reads. The one constant every message and
 # docstring derives from. Checked by min_version_error() before any download and
 # on a locally supplied binary.
 MIN_OCX_VERSION = "0.6.8"
@@ -24,7 +24,7 @@ MIN_OCX_VERSION = "0.6.8"
 MIN_OCX_VERSION_MSG = (
     "rules_ocx: ocx.download(version = \"{version}\") " +
     "requires ocx {min} or newer" +
-    " — rules_ocx reads the manifest that `ocx vendor` writes (schema version 1), " +
+    " — rules_ocx reads the manifest that `ocx vendor` writes (schema version 2), " +
     "and {version} has no such command. Fix: version = \"{min}\" or newer."
 )
 
@@ -37,13 +37,13 @@ NO_SUPPORTED_RELEASE_NOTE = (
 
 LOCAL_BINARY_UNREADABLE_MSG = (
     "rules_ocx: OCX_INSTALL_BINARY did not report a version (`ocx version` exited {code}, " +
-    "printed {out}); rules_ocx reads the manifest that `ocx vendor` writes (schema version 1), " +
+    "printed {out}); rules_ocx reads the manifest that `ocx vendor` writes (schema version 2), " +
     "which needs ocx {min} or newer."
 )
 
 LOCAL_BINARY_BELOW_FLOOR_MSG = (
     "rules_ocx: OCX_INSTALL_BINARY is ocx {version}, which has no `ocx vendor`; " +
-    "rules_ocx reads the manifest that command writes (schema version 1) and needs ocx {min} or newer."
+    "rules_ocx reads the manifest that command writes (schema version 2) and needs ocx {min} or newer."
 )
 
 # A version that is not dotted numerals never reaches the floor comparison:
