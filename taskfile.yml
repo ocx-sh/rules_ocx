@@ -76,23 +76,47 @@ tasks:
   ci:deep:
     desc: Nightly tier — full tests per Bazel version, examples, BCR parity, offline determinism
     cmds:
+      - task: deep:all
+        if: '{{ne OS "windows"}}'
+      # Windows runs every row even after a red one, then fails with the list: a Windows run is too costly to
+      # learn one failure at a time. The rows are the ones deep:all runs, in the same order.
+      - cmd: |
+          set -u
+          failed=""
+          row() { # row NAME TASK-ARGS...: a red row is recorded, never stops the loop
+            name="$1"; shift
+            rc=0
+            "{{.TASK_EXE}}" "$@" || rc=$?
+            if [ "$rc" != 0 ]; then failed="$failed
+            $name (exit $rc)"; fi
+          }
+          {{range (splitList " " .BAZEL_VERSIONS)}}row "deep:test {{.}}" deep:test "BAZEL_VERSION={{.}}"
+          {{end}}"{{.TASK_EXE}}" deep:test BAZEL_VERSION=rolling || echo "deep:test rolling failed (exit $?, never blocks)"
+          # Before deep:examples: the copies below are taken while the examples hold no bazel-* links.
+          row deep:windows-runfiles deep:windows-runfiles
+          row deep:windows-update-target deep:windows-update-target
+          row deep:examples deep:examples
+          row deep:bcr-parity deep:bcr-parity
+          if [ -n "$failed" ]; then
+            printf 'ci:deep: these rows failed:%s\n' "$failed" >&2
+            exit 1
+          fi
+        if: '{{eq OS "windows"}}'
+
+  deep:all:
+    internal: true
+    cmds:
       - for: { var: BAZEL_VERSIONS }
         task: deep:test
         vars: { BAZEL_VERSION: "{{.ITEM}}" }
       - task: deep:test
         vars: { BAZEL_VERSION: rolling }
         ignore_error: true
-      # Before deep:examples: the copies below are taken while the examples hold no bazel-* links.
-      - task: deep:windows-runfiles
-        if: '{{eq OS "windows"}}'
-      - task: deep:windows-update-target
-        if: '{{eq OS "windows"}}'
       - task: deep:examples
       - task: deep:bcr-parity
       - task: deep:offline
 
   deep:test:
-    internal: true
     env:
       USE_BAZEL_VERSION: "{{.BAZEL_VERSION}}"
     cmds:
@@ -102,7 +126,6 @@ tasks:
 
   # Live ocx.sh registry.
   deep:examples:
-    internal: true
     cmds:
       - for: { var: EXAMPLES }
         task: deep:example
@@ -117,29 +140,53 @@ tasks:
       - cd {{.EXAMPLE}} && ocx --project ../../ocx.toml exec -g test -- bazelisk test //... --verbose_test_summary
 
   # Windows without `--enable_runfiles`, the consumer default the examples now keep: deep:examples runs
-  # examples/cross_platform:manifest_runfiles_test as is (V-L46). This runs it again in a workspace copy and an
-  # output root whose paths hold non-ASCII characters (V-L47).
+  # examples/cross_platform:manifest_runfiles_test as is (V-L46). The gating run below uses an ASCII workspace and an
+  # ASCII output root: it shows the launcher works through the runfiles manifest, the feature under test. Two probes
+  # then repeat it with a non-ASCII output root and a non-ASCII workspace (V-L47); they only print. The first CI run
+  # showed the Bazel client failing its own chdir into a non-ASCII workspace ("FATAL: changing directory into ...
+  # failed: (error: 3)") before any rule ran, so those limits are Bazel's, not this module's, and never gate.
   deep:windows-runfiles:
-    internal: true
     env:
       USE_BAZEL_VERSION: 9.x
     cmds:
       - cmd: |
-          set -eu
-          base="${RUNNER_TEMP:-{{.ROOT_DIR}}/e2e/.copies}/rules_ocx-ünïcødé"
-          rm -rf "$base"
-          mkdir -p "$base"
-          cp -r examples/cross_platform "$base/"
-          # The copy cannot reach the module through `../..`.
-          echo 'common --override_module=rules_ocx={{toSlash .ROOT_DIR}}' >> "$base/cross_platform/.bazelrc.user"
-          cd "$base/cross_platform"
-          ocx --project "{{.ROOT_DIR}}/ocx.toml" exec -g test -- bazelisk --output_user_root="$base/bazel" \
-            test --noenable_runfiles --verbose_test_summary //:manifest_runfiles_test //:host_test
+          set -u
+          tmp="${RUNNER_TEMP:-{{.ROOT_DIR}}/e2e/.copies}"
+          u="rules_ocx-ünïcødé"
+          rm -rf "${tmp:?}"/rules_ocx_rf_* "${tmp:?}/$u"*
+          mkdir -p "$tmp/rules_ocx_rf_gate" "$tmp/rules_ocx_rf_out" "$tmp/$u-ws"
+          for ws in "$tmp/rules_ocx_rf_gate" "$tmp/rules_ocx_rf_out" "$tmp/$u-ws"; do
+            cp -r examples/cross_platform "$ws/"
+            # The copy cannot reach the module through `../..`.
+            echo 'common --override_module=rules_ocx={{toSlash .ROOT_DIR}}' >> "$ws/cross_platform/.bazelrc.user"
+          done
+          # A GNU timeout bounds every Bazel call (the gate too: a hang would hold the whole job); the Windows
+          # timeout.exe is a different program and answers --version with an error, so it is not used.
+          bz() {
+            if timeout --version >/dev/null 2>&1; then t="timeout 1500"; else t=""; fi
+            $t ocx --project "{{.ROOT_DIR}}/ocx.toml" exec -g test -- bazelisk "$@"
+          }
+          run() { # run WORKSPACE_ROOT OUTPUT_ROOT
+            (cd "$1/cross_platform" && bz --output_user_root="$2" \
+              test --noenable_runfiles --verbose_test_summary //:manifest_runfiles_test //:host_test)
+          }
+          # probe LABEL WORKSPACE_ROOT OUTPUT_ROOT: prints one line, never fails, leaves no Bazel server behind.
+          probe() {
+            log="$tmp/rules_ocx_rf_probe.log"
+            if run "$2" "$3" >"$log" 2>&1; then echo "$1: PASS"
+            else echo "$1: FAIL (Bazel client limit, not gating)"; grep -m1 -F FATAL "$log" || tail -n 3 "$log"; fi || true
+            (cd "$2/cross_platform" && bz --output_user_root="$3" shutdown) >/dev/null 2>&1 || true
+          }
+          rc=0
+          run "$tmp/rules_ocx_rf_gate" "$tmp/rules_ocx_rf_gate/bazel" || rc=$?
+          (cd "$tmp/rules_ocx_rf_gate/cross_platform" && bz --output_user_root="$tmp/rules_ocx_rf_gate/bazel" shutdown) >/dev/null 2>&1 || true
+          probe "non-ASCII output root" "$tmp/rules_ocx_rf_out" "$tmp/$u-bazel"
+          probe "non-ASCII workspace" "$tmp/$u-ws" "$tmp/rules_ocx_rf_ws-bazel"
+          exit "$rc"
 
   # ADR 0003 § Test plan `windows-update-target`: the generated update.bat, in workspace copies under a path with
   # a space. examples/package holds a tag and a pinned hub, examples/project a project hub with its ocx.lock.
   deep:windows-update-target:
-    internal: true
     env:
       USE_BAZEL_VERSION: 9.x
       # The nested bazel call of the update program; the `bazel` it defaults to is not on PATH here.
@@ -210,6 +257,9 @@ tasks:
           bz mod deps --lockfile_mode=update
           mv sub "$base/outside_sub"
           MSYS2_ARG_CONV_EXCL='*' cmd /c mklink /J "$(cygpath -w "$base/project_sub/sub")" "$(cygpath -w "$base/outside_sub")"
+          # Diagnostic for the link walk, which reads the `l` of the attribute string `%~a` gives: the listing shows
+          # whether Windows reports the junction as one, so a red row below can be told from a wrong attribute reading.
+          MSYS2_ARG_CONV_EXCL='*' cmd /c dir /al "$(cygpath -w "$base/project_sub")" || true
           cp "$base/outside_sub/ocx.lock" "$base/before.lock"
           expect 78 "is a link on the path of the write target" run @tools//:update
           cmp "$base/before.lock" "$base/outside_sub/ocx.lock"
@@ -218,7 +268,6 @@ tasks:
   # Reproduces the BCR presubmit for e2e/bzlmod. Deliberately no remote cache: a hit would hide a break
   # BCR would then find in the submission PR (e2e/ is its own workspace and does not import the baseline rc).
   deep:bcr-parity:
-    internal: true
     cmds:
       - for: { var: BAZEL_VERSIONS }
         task: deep:bcr-build
