@@ -6,14 +6,16 @@ Bootstraps the pinned ocx CLI (`@ocx_tool`) and declares, per `project` or
 `package` tag, one hub repository and one set repository per platform.
 
 What the hub needs to know before any set repository is fetched (which tools,
-which platforms the lock serves) is recorded as a fact in `MODULE.bazel.lock`:
-on a hit the extension runs no `ocx` and makes no request; on a
+which platforms the lock serves, the platform manifest digest each package
+resolved to) is recorded as a fact in `MODULE.bazel.lock`, one per declaration
+of every kind: on a hit the extension runs no `ocx` and makes no request; on a
 miss it runs `ocx vendor --manifest-only` once per listed platform. Besides
 that, the implementation reads `module_ctx.os`, the tag's `ocx.lock` (and its
-`ocx.toml`, on a miss only) and the `OCX_INSTALL_*` pair, and nothing else:
-no other getenv, no watch of ambient config. The `ocx` runs get
-their environment from `manifest_env()` plus whatever `module_ctx.execute`
-inherits from the process.
+`ocx.toml`, on a miss only), the files of an index snapshot, the
+`OCX_INSTALL_*` pair and `RULES_OCX_UPDATE` (a recorded `getenv`), and nothing
+else: no other getenv, no watch of ambient config. The `ocx` runs get their
+environment from `manifest_env()` plus whatever `module_ctx.execute` inherits
+from the process.
 
 <a id="ocx"></a>
 
@@ -51,7 +53,7 @@ Overrides the ocx CLI bootstrap. Root module only; at most one.
 | :------------- | :------------- | :------------- | :------------- | :------------- |
 | <a id="ocx.download-dist_manifest"></a>dist_manifest |  dist.json release manifest snapshot to resolve the download from.   | <a href="https://bazel.build/concepts/labels">Label</a> | optional |  `"@rules_ocx//dist:dist.json"`  |
 | <a id="ocx.download-triple"></a>triple |  Exact release target triple, overriding host detection.   | String | optional |  `""`  |
-| <a id="ocx.download-version"></a>version |  Exact ocx version (default: the version pinned with this rules_ocx release; until a release with `ocx vendor` is listed, the default is below the floor and the download fails with a message saying so). Must be 0.6.8 or newer, the first ocx release with `ocx vendor` and manifest schema version 1. The floor is checked before any download.   | String | optional |  `""`  |
+| <a id="ocx.download-version"></a>version |  Exact ocx version (default: the version pinned with this rules_ocx release; until a release with `ocx vendor` is listed, the default is below the floor and the download fails with a message saying so). Must be 0.6.8 or newer, the first ocx release with `ocx vendor` and manifest schema version 2. The floor is checked before any download.   | String | optional |  `""`  |
 
 <a id="ocx.package"></a>
 
@@ -68,7 +70,7 @@ Vendors a single OCX package from an OCI registry, one set per platform, behind 
 | <a id="ocx.package-config"></a>config |  An ocx site config.toml (mirrors, registries) layered over the host's discovered config — not the project ocx.toml; sets OCX_CONFIG for every invocation, overriding an ambient one, and is watched. Combine with no_config for a hermetic configuration.   | <a href="https://bazel.build/concepts/labels">Label</a> | optional |  `None`  |
 | <a id="ocx.package-index"></a>index |  Committed ocx index snapshot directory (created with `ocx --index <dir> index update <package>`). When set, tag resolution is frozen to the snapshot.   | <a href="https://bazel.build/concepts/labels">Label</a> | optional |  `None`  |
 | <a id="ocx.package-no_config"></a>no_config |  Reach for it when a corporate managed config must not reach the build: ignores the host's discovered tiers (/etc, the user config, $OCX_HOME/config.toml) and the managed-config snapshot, and opts out of the exit-78 gate a required-but-unsynced managed config raises.   | Boolean | optional |  `False`  |
-| <a id="ocx.package-package"></a>package |  Fully-qualified identifier: 'registry/repo[:tag][@sha256:…]'. Only a digest-pinned identifier is recorded as a fact and keeps the extension reproducible.   | String | required |  |
+| <a id="ocx.package-package"></a>package |  Fully-qualified identifier: 'registry/repo[:tag][@sha256:…]'. Every declaration is locked: `MODULE.bazel.lock` records the platform manifest digest each listed platform resolved to, and a tag resolves again only on a fact miss.   | String | required |  |
 | <a id="ocx.package-platforms"></a>platforms |  Full ocx platform strings to provision ('linux/amd64+libc.glibc', ...), exactly as the lock keys them. Every one must be a platform the lock serves: a platform it cannot serve fails resolution naming it, and none is dropped silently.   | List of strings | required |  |
 
 <a id="ocx.policy"></a>

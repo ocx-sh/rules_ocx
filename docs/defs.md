@@ -28,7 +28,7 @@ Every file of one vendored set, with its declared links and restored reserved fi
 | <a id="ocx_set-srcs"></a>srcs |  File and directory labels of the vendored tree.   | <a href="https://bazel.build/concepts/labels">List of labels</a> | optional |  `[]`  |
 | <a id="ocx_set-links"></a>links |  Declared link path -> target.   | <a href="https://bazel.build/rules/lib/dict">Dictionary: String -> String</a> | optional |  `{}`  |
 | <a id="ocx_set-reserved"></a>reserved |  Stash path `_ocx_reserved/<n>` -> original path.   | <a href="https://bazel.build/rules/lib/dict">Dictionary: String -> String</a> | optional |  `{}`  |
-| <a id="ocx_set-tools"></a>tools |  Tool name -> [launcher path, sidecar path].   | <a href="https://bazel.build/rules/lib/dict">Dictionary: String -> List of strings</a> | optional |  `{}`  |
+| <a id="ocx_set-tools"></a>tools |  Tool name -> [launcher path, record path].   | <a href="https://bazel.build/rules/lib/dict">Dictionary: String -> List of strings</a> | optional |  `{}`  |
 
 
 <a id="ocx_set_toolchain"></a>
@@ -70,7 +70,7 @@ The files and tools of one platform's vendored set.
 | :------------- | :------------- |
 | <a id="OcxSetInfo-files"></a>files |  depset of every file of the set    |
 | <a id="OcxSetInfo-runfiles"></a>runfiles |  runfiles of the whole set    |
-| <a id="OcxSetInfo-tools"></a>tools |  dict: tool name -> struct(launcher = File, sidecar = File)    |
+| <a id="OcxSetInfo-tools"></a>tools |  dict: tool name -> struct(launcher = File, record = File)    |
 
 
 <a id="make_ocx_tool_rule"></a>
@@ -92,7 +92,8 @@ single `ocx_tool` in rules_ocx cannot serve many hubs (proved on Bazel
 `Label("//:toolchain_type")`.
 
 The rule is executable; attr `tool` (mandatory) names the tool. It outputs
-symlinks `<name>` and `<name>.direct`.
+symlinks to the launcher and the record under the basenames the manifest
+gives them.
 
 
 **PARAMETERS**
@@ -142,7 +143,7 @@ ignored, and the binary's `ocx version` must still meet the floor below
 is not part of the lockfile).
 
 `version` must be 0.6.8 or newer: that is the first ocx release with `ocx vendor`
-and manifest schema version 1, the manifest this ruleset reads.
+and manifest schema version 2, the manifest this ruleset reads.
 
 **ATTRIBUTES**
 
@@ -162,13 +163,14 @@ and manifest schema version 1, the manifest this ruleset reads.
 <pre>
 load("@rules_ocx//ocx:defs.bzl", "ocx_hub_repo")
 
-ocx_hub_repo(<a href="#ocx_hub_repo-name">name</a>, <a href="#ocx_hub_repo-sets">sets</a>, <a href="#ocx_hub_repo-tools">tools</a>)
+ocx_hub_repo(<a href="#ocx_hub_repo-name">name</a>, <a href="#ocx_hub_repo-hub">hub</a>, <a href="#ocx_hub_repo-sets">sets</a>, <a href="#ocx_hub_repo-tools">tools</a>)
 </pre>
 
 The hub of a vendored tool collection.
 
 Holds one toolchain per platform (each naming that platform's set repository
-only inside `toolchain()`), and one `ocx_tool` per tool name. Register it with
+only inside `toolchain()`), one `ocx_tool` per tool name, and `update`, an alias
+of the hub's update program in `@ocx_update`. Register it with
 `register_toolchains("@<hub>//:all")`.
 
 **ATTRIBUTES**
@@ -177,6 +179,7 @@ only inside `toolchain()`), and one `ocx_tool` per tool name. Register it with
 | Name  | Description | Type | Mandatory | Default |
 | :------------- | :------------- | :------------- | :------------- | :------------- |
 | <a id="ocx_hub_repo-name"></a>name |  A unique name for this repository.   | <a href="https://bazel.build/concepts/labels#target-names">Name</a> | required |  |
+| <a id="ocx_hub_repo-hub"></a>hub |  The hub's own name; `update` aliases `@ocx_update//:hub_<hub>`.   | String | optional |  `""`  |
 | <a id="ocx_hub_repo-sets"></a>sets |  platform -> label of that platform's `ocx_set_toolchain`.   | <a href="https://bazel.build/rules/lib/dict">Dictionary: String -> String</a> | optional |  `{}`  |
 | <a id="ocx_hub_repo-tools"></a>tools |  Tool names.   | List of strings | optional |  `[]`  |
 
@@ -189,8 +192,8 @@ only inside `toolchain()`), and one `ocx_tool` per tool name. Register it with
 load("@rules_ocx//ocx:defs.bzl", "ocx_set_repo")
 
 ocx_set_repo(<a href="#ocx_set_repo-name">name</a>, <a href="#ocx_set_repo-allow_unverified">allow_unverified</a>, <a href="#ocx_set_repo-allow_yanked">allow_yanked</a>, <a href="#ocx_set_repo-bindings">bindings</a>, <a href="#ocx_set_repo-blob_dirs">blob_dirs</a>, <a href="#ocx_set_repo-config">config</a>,
-             <a href="#ocx_set_repo-expected_available_platforms">expected_available_platforms</a>, <a href="#ocx_set_repo-expected_tools">expected_tools</a>, <a href="#ocx_set_repo-groups">groups</a>, <a href="#ocx_set_repo-index">index</a>, <a href="#ocx_set_repo-no_config">no_config</a>, <a href="#ocx_set_repo-ocx">ocx</a>, <a href="#ocx_set_repo-ocx_lock">ocx_lock</a>,
-             <a href="#ocx_set_repo-ocx_toml">ocx_toml</a>, <a href="#ocx_set_repo-package">package</a>, <a href="#ocx_set_repo-platform">platform</a>, <a href="#ocx_set_repo-sigstore_trusted_root">sigstore_trusted_root</a>, <a href="#ocx_set_repo-tier">tier</a>)
+             <a href="#ocx_set_repo-expected_available_platforms">expected_available_platforms</a>, <a href="#ocx_set_repo-expected_digest">expected_digest</a>, <a href="#ocx_set_repo-expected_tools">expected_tools</a>, <a href="#ocx_set_repo-groups">groups</a>, <a href="#ocx_set_repo-hub">hub</a>, <a href="#ocx_set_repo-index">index</a>, <a href="#ocx_set_repo-kind">kind</a>,
+             <a href="#ocx_set_repo-no_config">no_config</a>, <a href="#ocx_set_repo-ocx">ocx</a>, <a href="#ocx_set_repo-ocx_lock">ocx_lock</a>, <a href="#ocx_set_repo-ocx_toml">ocx_toml</a>, <a href="#ocx_set_repo-package">package</a>, <a href="#ocx_set_repo-platform">platform</a>, <a href="#ocx_set_repo-sigstore_trusted_root">sigstore_trusted_root</a>, <a href="#ocx_set_repo-tier">tier</a>)
 </pre>
 
 One platform's vendored tool set, produced by `ocx vendor`.
@@ -210,9 +213,12 @@ The repository holds the vendored tree, the generated `BUILD.bazel` and the
 | <a id="ocx_set_repo-blob_dirs"></a>blob_dirs |  Directories passed as `--blob-dir`.   | <a href="https://bazel.build/concepts/labels">List of labels</a> | optional |  `[]`  |
 | <a id="ocx_set_repo-config"></a>config |  An ocx site config.toml (mirrors, registries) layered over the host's discovered config — not the project ocx.toml. Sets OCX_CONFIG for every invocation, overriding an ambient one, and the file is watched. Combine with no_config for a hermetic configuration.   | <a href="https://bazel.build/concepts/labels">Label</a> | optional |  `None`  |
 | <a id="ocx_set_repo-expected_available_platforms"></a>expected_available_platforms |  available_platforms recorded in the fact; cross-checked against the manifest.   | List of strings | optional |  `[]`  |
+| <a id="ocx_set_repo-expected_digest"></a>expected_digest |  Root platform manifest digest recorded in the fact; empty skips the check.   | String | optional |  `""`  |
 | <a id="ocx_set_repo-expected_tools"></a>expected_tools |  `name:kind` rows recorded in the fact for this platform; cross-checked against the manifest.   | List of strings | optional |  `[]`  |
 | <a id="ocx_set_repo-groups"></a>groups |  ocx.toml groups to vendor (project tier).   | List of strings | optional |  `[]`  |
+| <a id="ocx_set_repo-hub"></a>hub |  Name of the hub this set belongs to, for the update hint.   | String | optional |  `""`  |
 | <a id="ocx_set_repo-index"></a>index |  Optional index passed as `--index`.   | <a href="https://bazel.build/concepts/labels">Label</a> | optional |  `None`  |
+| <a id="ocx_set_repo-kind"></a>kind |  The declaration kind, which decides the check tail and the vendor flags.   | String | optional |  `""`  |
 | <a id="ocx_set_repo-no_config"></a>no_config |  Ignore the host's discovered config tiers (/etc, the user config, $OCX_HOME/config.toml) and the managed-config snapshot — sets OCX_NO_CONFIG=1, and blanks an ambient OCX_CONFIG, which OCX_NO_CONFIG alone does not prune. The `config` attr still applies. Use this when a corporate managed config must not reach the build; it also opts out of the exit-78 gate a required-but-unsynced managed config raises.   | Boolean | optional |  `False`  |
 | <a id="ocx_set_repo-ocx"></a>ocx |  The pinned ocx CLI binary.   | <a href="https://bazel.build/concepts/labels">Label</a> | optional |  `"@ocx_tool//:ocx"`  |
 | <a id="ocx_set_repo-ocx_lock"></a>ocx_lock |  The ocx.lock next to ocx_toml (project tier).   | <a href="https://bazel.build/concepts/labels">Label</a> | optional |  `None`  |
