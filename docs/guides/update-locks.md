@@ -103,3 +103,6 @@ MODULE.bazel.lock merge=bazel-lockfile-merge
 - When the nested `bazel mod deps` fails, no fact moved. Fix the cause and run `bazel mod deps --lockfile_mode=update`.
 - A held output base (another Bazel command, or a `bazel --batch` run) exits 75. Run the update again without `--batch`.
 - A workspace `ocx.lock` that is a symlink, or a path that leaves the workspace, is refused. The error names the path.
+- A preflight `bazel info output_base` that fails for another reason exits with Bazel's exit code. Nothing is written.
+- A failed replace of `ocx.lock` exits 74 after the other declarations ran. The error names the path.
+- A truncated plan, or on Windows an argument line that cannot be read, exits 70. Both are internal errors of the generated update program.
